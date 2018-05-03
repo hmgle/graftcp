@@ -1,16 +1,49 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"io"
 	"log"
 	"net"
+	"os"
+	"syscall"
 
 	"golang.org/x/net/proxy"
 )
 
+var (
+	fifoPath = flag.String("fifo", "/tmp/tcptrace.fifo", "fifo path")
+)
+
+var (
+	fifoFd *os.File
+	bio    *bufio.Reader
+	fifoCh = make(chan string)
+)
+
 type Local struct {
 	faddr, baddr *net.TCPAddr
+}
+
+func initFifo() {
+	os.Remove(*fifoPath)
+	err := syscall.Mkfifo(*fifoPath, 0666)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fifoFd, err = os.Open(*fifoPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	bio = bufio.NewReader(fifoFd)
+	for {
+		line, _, err := bio.ReadLine()
+		if err != nil {
+			log.Fatal(err)
+		}
+		fifoCh <- string(line)
+	}
 }
 
 func newLocal(faddr, baddr string) *Local {
@@ -46,13 +79,15 @@ func (s *Local) start() {
 }
 
 func (s *Local) handleConn(conn net.Conn) error {
-	dialer, err := proxy.SOCKS5("tcp", "127.0.0.1:1080", nil, proxy.Direct)
+	dialer, err := proxy.SOCKS5("tcp", s.baddr.String(), nil, proxy.Direct)
 	if err != nil {
+		log.Printf("proxy.SOCKS5(\"tcp\", %s,...) err: %v\n", s.baddr, err)
 		return err
 	}
 
-	// TODO: dial dest addr
-	socks5Conn, err := dialer.Dial("tcp", "127.0.0.1:2333")
+	destAddr := <-fifoCh
+	log.Printf("destAddr: %s\n", destAddr)
+	socks5Conn, err := dialer.Dial("tcp", destAddr)
 	go pipe(conn, socks5Conn)
 	go pipe(socks5Conn, conn)
 	return nil
@@ -79,6 +114,7 @@ func main() {
 	flag.StringVar(&baddr, "backend", "127.0.0.1:1080", "host:port of backend")
 	flag.Parse()
 
+	go initFifo()
 	l := newLocal(faddr, baddr)
 	l.start()
 }
