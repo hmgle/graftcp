@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <unistd.h>
-#include <stdlib.h>
 #include <errno.h>
 #include <sys/ptrace.h>
 #include <sys/types.h>
@@ -14,6 +13,8 @@
 #include <sys/user.h>
 #include <sys/reg.h>
 #include <sys/syscall.h>
+
+#include "tcptrace.h"
 
 char *SOCKS_ADDR = "127.0.0.1";
 uint16_t SOCKS_PORT = 2080;
@@ -56,13 +57,62 @@ int client_connect(const char *addr, uint16_t port)
 	return s;
 }
 
+void getdata(pid_t child, long addr, char *str, int len)
+{
+	char *laddr;
+	int i, j;
+	union u {
+		long val;
+		char chars[sizeof(long)];
+	} data;
+	i = 0;
+	j = len / sizeof(long);
+	laddr = str;
+	while (i < j) {
+		data.val = ptrace(PTRACE_PEEKDATA, child, addr + i * 8, NULL);
+		memcpy(laddr, data.chars, sizeof(long));
+		++i;
+		laddr += sizeof(long);
+	}
+	j = len % sizeof(long);
+	if (j != 0) {
+		data.val = ptrace(PTRACE_PEEKDATA, child, addr + i * 8, NULL);
+		memcpy(laddr, data.chars, j);
+	}
+	str[len] = '\0';
+}
+
+void putdata(pid_t child, long addr, char *str, int len)
+{
+	char *laddr;
+	int i, j;
+	union u {
+		long val;
+		char chars[sizeof(long)];
+	} data;
+	i = 0;
+	j = len / sizeof(long);
+	laddr = str;
+	while (i < j) {
+		memcpy(data.chars, laddr, sizeof(long));
+		ptrace(PTRACE_POKEDATA, child, addr + i * 8, data.val);
+		++i;
+		laddr += sizeof(long);
+	}
+	j = len % sizeof(long);
+	if (j != 0) {
+		memcpy(data.chars, laddr, j);
+		ptrace(PTRACE_POKEDATA, child, addr + i * 8, data.val);
+	}
+}
+
 int main(int argc, char **argv)
 {
 	int proxy_fd;
 	long sys;
 	pid_t child;
 	int status;
-	struct user* user_space = (struct user*)0;
+	struct user *user_space = (struct user *)0;
 	struct user_regs_struct regs;
 
 	if (argc < 2) {
@@ -83,10 +133,12 @@ int main(int argc, char **argv)
 	} else {
 		for (;;) {
 			wait(&status);
-			if(WIFEXITED(status))
+			if (WIFEXITED(status))
 				break;
 
-			 sys = ptrace(PTRACE_PEEKUSER, child, &user_space->regs.orig_rax, NULL);
+			sys =
+			    ptrace(PTRACE_PEEKUSER, child,
+				   &user_space->regs.orig_rax, NULL);
 			if (sys == SYS_write) {
 				// 获取 write 系统调用参数值
 				ptrace(PTRACE_GETREGS, child, 0, &regs);
