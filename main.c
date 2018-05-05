@@ -13,51 +13,18 @@
 #include <sys/user.h>
 #include <sys/reg.h>
 #include <sys/syscall.h>
+#include <fcntl.h>
 
 #include "tcptrace.h"
 
-char *SOCKS_ADDR = "127.0.0.1";
-uint16_t SOCKS_PORT = 2080;
+#define     satosin(x)      ((struct sockaddr_in *) &(x))
+#define     SOCKADDR(x)     (satosin(x)->sin_addr.s_addr)
+#define     SOCKPORT(x)     (satosin(x)->sin_port)
 
-int client_connect(const char *addr, uint16_t port)
-{
-  int s;
-  struct sockaddr_in sa;
-  int sock_opt = 1;
+char *LOCAL_ADDR = "127.0.0.1";
+uint16_t LOCAL_PORT = 2080;
 
-  s = socket(AF_INET, SOCK_STREAM, 0);
-  if (s < 0)
-    return -1;
-
-  /* disable Nagle */
-  if ((setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (char *) &sock_opt,
-                  sizeof(int))) == -1) {
-    fprintf(stderr, "setsockopt failed!\n");
-    exit(-1);
-  }
-
-  sa.sin_family = AF_INET;
-  sa.sin_port = htons(port);
-  if (inet_aton(addr, &sa.sin_addr) == 0) {
-    struct hostent *he;
-
-    he = gethostbyname(addr);
-    if (he == NULL) {
-      fprintf(stderr, "can't resolve: %s\n", addr);
-      close(s);
-      return -1;
-    }
-    memcpy(&sa.sin_addr, he->h_addr, sizeof(struct in_addr));
-  }
-  if (connect(s, (struct sockaddr *) &sa, sizeof(sa)) < 0) {
-    fprintf(stderr, "connect failed!\n");
-    close(s);
-    return -1;
-  }
-  return s;
-}
-
-void getdata(pid_t child, long addr, char *str, int len)
+void getdata(pid_t child, long addr, char *dst, int len)
 {
   char *laddr;
   int i, j;
@@ -67,7 +34,7 @@ void getdata(pid_t child, long addr, char *str, int len)
   } data;
   i = 0;
   j = len / sizeof(long);
-  laddr = str;
+  laddr = dst;
   while (i < j) {
     data.val = ptrace(PTRACE_PEEKDATA, child, addr + i * 8, NULL);
     memcpy(laddr, data.chars, sizeof(long));
@@ -79,10 +46,10 @@ void getdata(pid_t child, long addr, char *str, int len)
     data.val = ptrace(PTRACE_PEEKDATA, child, addr + i * 8, NULL);
     memcpy(laddr, data.chars, j);
   }
-  str[len] = '\0';
+  dst[len] = '\0';
 }
 
-void putdata(pid_t child, long addr, char *str, int len)
+void putdata(pid_t child, long addr, char *src, int len)
 {
   char *laddr;
   int i, j;
@@ -92,7 +59,7 @@ void putdata(pid_t child, long addr, char *str, int len)
   } data;
   i = 0;
   j = len / sizeof(long);
-  laddr = str;
+  laddr = src;
   while (i < j) {
     memcpy(data.chars, laddr, sizeof(long));
     ptrace(PTRACE_POKEDATA, child, addr + i * 8, data.val);
@@ -106,24 +73,56 @@ void putdata(pid_t child, long addr, char *str, int len)
   }
 }
 
+struct socket_info *SOCKET_TAB = NULL;
+
+void add_socket_info(struct socket_info *s)
+{
+  HASH_ADD_INT(SOCKET_TAB, fd, s);
+}
+
+struct socket_info *find_socket_info(int fd)
+{
+  struct socket_info *s;
+
+  HASH_FIND_INT(SOCKET_TAB, &fd, s);
+  return s;
+}
+
 int main(int argc, char **argv)
 {
-  int proxy_fd;
   long sys;
   pid_t child;
   int status;
   struct user *user_space = (struct user *) 0;
   struct user_regs_struct regs;
+  int fifo_fd;
+  long tmp_addr;
 
   if (argc < 2) {
     printf("Usage: %s program_name [arguments]\n", argv[0]);
     return 0;
   }
 
-  proxy_fd = client_connect(SOCKS_ADDR, SOCKS_PORT);
-  if (proxy_fd < 0) {
-    perror("connect");
+  fifo_fd = open("/tmp/tcptrace.fifo", O_WRONLY);
+  if (fifo_fd < 0) {
+    perror("open");
     exit(errno);
+  }
+
+  struct sockaddr_in proxy_sa;
+  struct sockaddr_in tmp_sa;
+  socklen_t proxy_addrlen = sizeof(proxy_sa);
+  proxy_sa.sin_family = AF_INET;
+  proxy_sa.sin_port = htons(LOCAL_PORT);
+  if (inet_aton(LOCAL_ADDR, &proxy_sa.sin_addr) == 0) {
+    struct hostent *he;
+
+    he = gethostbyname(LOCAL_ADDR);
+    if (he == NULL) {
+      fprintf(stderr, "can't resolve: %s\n", LOCAL_ADDR);
+      return -1;
+    }
+    memcpy(&proxy_sa.sin_addr, he->h_addr, sizeof(struct in_addr));
   }
 
   child = fork();
@@ -137,19 +136,68 @@ int main(int argc, char **argv)
         break;
 
       sys = ptrace(PTRACE_PEEKUSER, child, &user_space->regs.orig_rax, NULL);
-      if (sys == SYS_write) {
-        // 获取 write 系统调用参数值
-        ptrace(PTRACE_GETREGS, child, 0, &regs);
-        // 更改 write 第一个参数值为 tcp 套接字值
-        long ret;
-        regs.rdi = proxy_fd;
-        ret = ptrace(PTRACE_SETREGS, child, 0, &regs);
-        if (ret) {
+      switch (sys) {
+      case SYS_socket:
+        ptrace(PTRACE_GETREGS, child, NULL, &regs);
+        struct socket_info *si = malloc(sizeof(*si));
+        si->domain = regs.rdi;
+        si->type = regs.rsi;
+        long ret = ptrace(PTRACE_SYSCALL, child, NULL, &regs);
+        fprintf(stderr, "%d: ret = %d\n", __LINE__, (int)ret);
+        user_space = (struct user*)0;
+        ret = ptrace(PTRACE_GETREGS, child, NULL, &regs);
+        if (ret < 0) {
           perror("ptrace");
           exit(errno);
         }
+        si->fd = (int)regs.rax;
+        fprintf(stderr, "%d: domain: %d, type: %d, fd: %d\n", __LINE__, si->domain, si->type, si->fd);
+        si->is_connected = false;
+        add_socket_info(si);
+        break;
+      case SYS_connect:
+        ptrace(PTRACE_GETREGS, child, NULL, &regs);
+        int socket_fd = regs.rdi;
+        fprintf(stderr, "%d: socket_fd: %d\n", __LINE__, socket_fd);
+        struct socket_info *so_info = find_socket_info(socket_fd);
+        if (so_info == NULL) {
+          fprintf(stderr, "%d: find_socket_info(%d) return NULL\n", __LINE__, socket_fd);
+          exit(-1);
+        }
+        if (so_info->type != SOCK_STREAM || so_info->domain != AF_INET) {
+          fprintf(stderr, "%d: so_info->type: %d, so_info->domain: %d, fd: %d\n", __LINE__, so_info->type, so_info->domain, so_info->fd);
+          ptrace(PTRACE_SYSCALL, child, NULL, NULL);
+        } else if (so_info->is_connected) {
+          fprintf(stderr, "%d: so_info->is_connected: fd: %d\n", __LINE__, so_info->fd);
+          ptrace(PTRACE_SYSCALL, child, NULL, NULL);
+        } else {
+          tmp_addr = ptrace(PTRACE_PEEKUSER, child, &user_space->regs.rsi, NULL);
+          getdata(child, tmp_addr, (char *)&tmp_sa, sizeof(tmp_sa));
+          unsigned int ip_int = SOCKADDR(tmp_sa);
+          unsigned short ip_port = SOCKPORT(tmp_sa);
+          struct in_addr tmp_ip_addr;
+          tmp_ip_addr.s_addr = ip_int;
+          fprintf(stderr, "%d: The IP address is %s\n", __LINE__, inet_ntoa(tmp_ip_addr));
+          fprintf(stderr, "%d: port: %d\n", __LINE__, ntohs(ip_port));
+          putdata(child, tmp_addr, (char *)&proxy_sa, sizeof(proxy_sa));
+          ptrace(PTRACE_SYSCALL, child, NULL, NULL);
+
+          char buf[1024] = {0};
+          strcpy(buf, inet_ntoa(tmp_ip_addr));
+          strcat(&buf[strlen(buf)], ":");
+          sprintf(&buf[strlen(buf)], "%d", ntohs(ip_port));
+          fprintf(stderr, "%d: buf: %s\n", __LINE__, buf);
+          ssize_t retlen;
+          write(fifo_fd, buf, strlen(buf));
+        }
+        break;
+      case SYS_close:
+        // TODO
+        ptrace(PTRACE_SYSCALL, child, NULL, NULL);
+        break;
+      default:
+        ptrace(PTRACE_SYSCALL, child, NULL, NULL);
       }
-      ptrace(PTRACE_SYSCALL, child, NULL, NULL);
     }
   }
   return 0;
