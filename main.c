@@ -138,25 +138,33 @@ int main(int argc, char **argv)
       sys = ptrace(PTRACE_PEEKUSER, child, &user_space->regs.orig_rax, NULL);
       switch (sys) {
       case SYS_socket:
+        fprintf(stderr, "%d:====\n", __LINE__);
         ptrace(PTRACE_GETREGS, child, NULL, &regs);
+        fprintf(stderr, "%d:====\n", __LINE__);
         struct socket_info *si = malloc(sizeof(*si));
         si->domain = regs.rdi;
         si->type = regs.rsi;
-        long ret = ptrace(PTRACE_SYSCALL, child, NULL, &regs);
-        fprintf(stderr, "%d: ret = %d\n", __LINE__, (int)ret);
-        user_space = (struct user*)0;
+        // long ret = ptrace(PTRACE_SYSCALL, child, NULL, &regs);
+        long ret = ptrace(PTRACE_SYSCALL, child, NULL, NULL);
+        // fprintf(stderr, "%d: ret = %d\n", __LINE__, (int)ret);
+        // user_space = (struct user*)0;
         ret = ptrace(PTRACE_GETREGS, child, NULL, &regs);
         if (ret < 0) {
-          perror("ptrace");
-          exit(errno);
+          fprintf(stderr, "%s:%d:======\n", __FILE__, __LINE__);
+          // perror("ptrace");
+          // exit(errno);
         }
+        fprintf(stderr, "%s:%d:======\n", __FILE__, __LINE__);
         si->fd = (int)regs.rax;
         fprintf(stderr, "%d: domain: %d, type: %d, fd: %d\n", __LINE__, si->domain, si->type, si->fd);
         si->is_connected = false;
         add_socket_info(si);
+        fprintf(stderr, "%d:====\n", __LINE__);
         break;
       case SYS_connect:
+        fprintf(stderr, "%d:====\n", __LINE__);
         ptrace(PTRACE_GETREGS, child, NULL, &regs);
+        fprintf(stderr, "%d:====\n", __LINE__);
         int socket_fd = regs.rdi;
         fprintf(stderr, "%d: socket_fd: %d\n", __LINE__, socket_fd);
         struct socket_info *so_info = find_socket_info(socket_fd);
@@ -185,10 +193,12 @@ int main(int argc, char **argv)
           char buf[1024] = {0};
           strcpy(buf, inet_ntoa(tmp_ip_addr));
           strcat(&buf[strlen(buf)], ":");
-          sprintf(&buf[strlen(buf)], "%d", ntohs(ip_port));
+          sprintf(&buf[strlen(buf)], "%d\n", ntohs(ip_port));
           fprintf(stderr, "%d: buf: %s\n", __LINE__, buf);
-          ssize_t retlen;
-          write(fifo_fd, buf, strlen(buf));
+          ssize_t wlen;
+          wlen = write(fifo_fd, buf, strlen(buf));
+          fprintf(stderr, "%s: %d: write: %d\n", __FILE__, __LINE__, wlen);
+          so_info->is_connected = true;
         }
         break;
       case SYS_close:

@@ -42,6 +42,7 @@ func initFifo() {
 		if err != nil {
 			log.Fatal(err)
 		}
+		log.Printf("line: %s\n", string(line))
 		fifoCh <- string(line)
 	}
 }
@@ -94,8 +95,6 @@ func (s *Local) handleConn(conn net.Conn) error {
 }
 
 func pipe(dst, src net.Conn) {
-	buf := make([]byte, 10)
-	src.Read(buf)
 	for {
 		n, err := io.Copy(dst, src)
 		log.Println("io.Copy : ", n)
@@ -117,4 +116,8 @@ func main() {
 	go initFifo()
 	l := newLocal(faddr, baddr)
 	l.start()
+}
+
+func init() {
+	log.SetFlags(log.Flags() | log.Lshortfile)
 }
