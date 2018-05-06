@@ -89,6 +89,10 @@ func (s *Local) handleConn(conn net.Conn) error {
 	destAddr := <-fifoCh
 	log.Printf("destAddr: %s\n", destAddr)
 	socks5Conn, err := dialer.Dial("tcp", destAddr)
+	if err != nil {
+		log.Printf("dialer.Dial(%s) err: %s", destAddr, err.Error())
+		return err
+	}
 	go pipe(conn, socks5Conn)
 	go pipe(socks5Conn, conn)
 	return nil
@@ -99,6 +103,7 @@ func pipe(dst, src net.Conn) {
 		n, err := io.Copy(dst, src)
 		log.Println("io.Copy : ", n)
 		if err != nil {
+			log.Printf("io.Copy err: %s\n", err.Error())
 			return
 		}
 		if n == 0 {
