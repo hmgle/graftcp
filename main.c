@@ -80,6 +80,11 @@ void add_socket_info(struct socket_info *s)
   HASH_ADD_INT(SOCKET_TAB, fd, s);
 }
 
+void del_socket_info(struct socket_info *s)
+{
+  HASH_DEL(SOCKET_TAB, s);
+}
+
 struct socket_info *find_socket_info(int fd)
 {
   struct socket_info *s;
@@ -172,6 +177,7 @@ int main(int argc, char **argv)
           fprintf(stderr, "%d: find_socket_info(%d) return NULL\n", __LINE__, socket_fd);
           exit(-1);
         }
+        fprintf(stderr, "%s:%d: SOCK_STREAM: %d, AF_INET: %d\n", __FILE__, __LINE__, SOCK_STREAM, AF_INET);
         if (so_info->type != SOCK_STREAM || so_info->domain != AF_INET) {
           fprintf(stderr, "%d: so_info->type: %d, so_info->domain: %d, fd: %d\n", __LINE__, so_info->type, so_info->domain, so_info->fd);
           ptrace(PTRACE_SYSCALL, child, NULL, NULL);
@@ -202,7 +208,15 @@ int main(int argc, char **argv)
         }
         break;
       case SYS_close:
-        // TODO
+        ptrace(PTRACE_GETREGS, child, NULL, &regs);
+        socket_fd = regs.rdi;
+        fprintf(stderr, "%d: socket_fd: %d\n", __LINE__, socket_fd);
+        so_info = find_socket_info(socket_fd);
+        if (so_info == NULL) {
+          fprintf(stderr, "%d: find_socket_info(%d) return NULL\n", __LINE__, socket_fd);
+          exit(-1);
+        }
+        del_socket_info(so_info);
         ptrace(PTRACE_SYSCALL, child, NULL, NULL);
         break;
       default:
