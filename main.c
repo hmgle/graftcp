@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include <unistd.h>
 #include <errno.h>
 #include <sys/ptrace.h>
 #include <sys/types.h>
@@ -147,6 +146,7 @@ int main(int argc, char **argv)
         ptrace(PTRACE_GETREGS, child, NULL, &regs);
         fprintf(stderr, "%d:====\n", __LINE__);
         struct socket_info *si = malloc(sizeof(*si));
+        si->pid = child;
         si->domain = regs.rdi;
         si->type = regs.rsi;
         // long ret = ptrace(PTRACE_SYSCALL, child, NULL, &regs);
