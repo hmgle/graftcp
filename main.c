@@ -117,7 +117,7 @@ int do_child(const char *file, char *argv[])
   return execvp(file, argv);
 }
 
-void socket_pre_handle(pid_t pid)
+int socket_pre_handle(pid_t pid)
 {
   struct user_regs_struct regs;
   struct socket_info *si = malloc(sizeof(*si));
@@ -127,16 +127,14 @@ void socket_pre_handle(pid_t pid)
   si->type = regs.rsi;
   ptrace(PTRACE_SYSCALL, pid, 0, 0);
   assert(errno == 0);
-  ptrace(PTRACE_GETREGS, pid, 0, &regs);
-  assert(errno == 0);
-  si->fd = (int)regs.rax;
+  si->fd = -1;
   si->is_connected = false;
   add_socket_info(si);
+  return SYS_socket;
 }
 
 void connect_pre_handle(pid_t pid)
 {
-  // TODO
   struct user_regs_struct regs;
   ptrace(PTRACE_GETREGS, pid, NULL, &regs);
   assert(errno == 0);
@@ -189,7 +187,7 @@ int wait_syscall_enter_stop()
       __LINE__, __func__, syscall_num);
   switch (syscall_num) {
   case SYS_socket:
-    socket_pre_handle(pid);
+    return socket_pre_handle(pid);
     break;
   case SYS_connect:
     connect_pre_handle(pid);
@@ -200,7 +198,7 @@ int wait_syscall_enter_stop()
   return 0;
 }
 
-int wait_syscall_exit_stop()
+int wait_syscall_exit_stop(int syscall_num)
 {
   int status;
   pid_t pid;
@@ -208,6 +206,17 @@ int wait_syscall_exit_stop()
   pid = wait(&status);
   if (WIFEXITED(status)) {
     return -1;
+  }
+  if (syscall_num == SYS_socket) {
+    struct socket_info *so_info = find_socket_info(-1);
+    if (so_info != NULL) {
+      struct user_regs_struct regs;
+      ptrace(PTRACE_GETREGS, pid, 0, &regs);
+      perror("ptrace");
+      assert(errno == 0);
+      so_info->fd = (int)regs.rax;
+      so_info->is_connected = false;
+    }
   }
   fprintf(stderr, "%d: %s: pid: %d\n", __LINE__, __func__, pid);
   ptrace(PTRACE_SYSCALL, pid, 0, 0);
@@ -236,7 +245,7 @@ int do_trace(pid_t child)
     if (ret < 0) {
       return 0;
     }
-    ret = wait_syscall_exit_stop();
+    ret = wait_syscall_exit_stop(ret);
     if (ret < 0) {
       return 0;
     }
