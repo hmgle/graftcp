@@ -110,10 +110,7 @@ struct socket_info *find_socket_info(int fd)
 int do_child(const char *file, char *argv[])
 {
   ptrace(PTRACE_TRACEME, 0, NULL, NULL);
-  fprintf(stderr, "%d\n", __LINE__);
-  fprintf(stderr, "%d, %s\n", __LINE__, __func__);
   kill(getpid(), SIGSTOP);
-  fprintf(stderr, "%d, %s\n", __LINE__, __func__);
   return execvp(file, argv);
 }
 
@@ -141,7 +138,7 @@ void connect_pre_handle(pid_t pid)
   int socket_fd = regs.rdi;
   struct socket_info *so_info = find_socket_info(socket_fd);
   if (so_info == NULL) {
-    fprintf(stderr, "find_socket_info(%d) return NULL\n", socket_fd);
+    fprintf(stderr, "%s:%d: find_socket_info(%d) return NULL\n", __func__, __LINE__, socket_fd);
     exit(-1);
   }
   if (so_info->type != SOCK_STREAM || so_info->domain != AF_INET) {
@@ -170,57 +167,57 @@ void connect_pre_handle(pid_t pid)
   so_info->is_connected = true;
 }
 
-int wait_syscall_enter_stop()
+int wait_syscall_enter_stop(pid_t pid)
 {
   int status;
   int syscall_num;
-  pid_t pid;
 
-  pid = wait(&status);
-  if (WIFEXITED(status)) {
-    fprintf(stderr, "%d: %s\n", __LINE__, __func__);
-    return -1;
-  }
-  fprintf(stderr, "%d: %s: pid: %d\n", __LINE__, __func__, pid);
-  syscall_num = get_reg(pid, orig_rax);
-  fprintf(stderr, "%d: %s: syscall_num: %d\n",
-      __LINE__, __func__, syscall_num);
-  switch (syscall_num) {
-  case SYS_socket:
-    return socket_pre_handle(pid);
-    break;
-  case SYS_connect:
-    connect_pre_handle(pid);
-    break;
-  default:
+  for (;;) {
     ptrace(PTRACE_SYSCALL, pid, 0, 0);
-  }
-  return 0;
-}
-
-int wait_syscall_exit_stop(int syscall_num)
-{
-  int status;
-  pid_t pid;
-
-  pid = wait(&status);
-  if (WIFEXITED(status)) {
-    return -1;
-  }
-  if (syscall_num == SYS_socket) {
-    struct socket_info *so_info = find_socket_info(-1);
-    if (so_info != NULL) {
-      struct user_regs_struct regs;
-      ptrace(PTRACE_GETREGS, pid, 0, &regs);
-      perror("ptrace");
-      assert(errno == 0);
-      so_info->fd = (int)regs.rax;
-      so_info->is_connected = false;
+    pid = wait(&status);
+    if (WIFEXITED(status)) {
+      return -1;
+    }
+    if (WIFSTOPPED(status) && WSTOPSIG(status) & 0x80) {
+      syscall_num = get_reg(pid, orig_rax);
+      switch (syscall_num) {
+        case SYS_socket:
+          return socket_pre_handle(pid);
+          break;
+        case SYS_connect:
+          connect_pre_handle(pid);
+          break;
+        default:
+          ;
+      }
+      return syscall_num;
     }
   }
-  fprintf(stderr, "%d: %s: pid: %d\n", __LINE__, __func__, pid);
-  ptrace(PTRACE_SYSCALL, pid, 0, 0);
-  return 0;
+}
+
+int wait_syscall_exit_stop(pid_t pid, int syscall_num)
+{
+  int status;
+  int ret;
+
+  for (;;) {
+    ptrace(PTRACE_SYSCALL, pid, 0, 0);
+    pid = wait(&status);
+    if (WIFEXITED(status)) {
+      return -1;
+    }
+    if (WIFSTOPPED(status) && WSTOPSIG(status) & 0x80) {
+      if (syscall_num == SYS_socket) {
+        ret = get_reg(pid, rax);
+        struct socket_info *so_info = find_socket_info(-1);
+        if (so_info != NULL) {
+          so_info->fd = ret;
+          so_info->is_connected = false;
+        }
+      }
+      return 0;
+    }
+  }
 }
 
 int do_trace(pid_t child)
@@ -232,20 +229,15 @@ int do_trace(pid_t child)
   waitpid(child, &status, 0);
   assert(WIFSTOPPED(status));
   if (ptrace(PTRACE_SETOPTIONS, child, 0, options) < 0) {
-    fprintf(stderr, "%d\n", __LINE__);
     perror("ptrace");
     exit(errno);
   }
-  fprintf(stderr, "%d: %s\n", __LINE__, __func__);
-  ptrace(PTRACE_SYSCALL, child, 0, 0);
-  fprintf(stderr, "%d: %s\n", __LINE__, __func__);
-
   for (;;)  {
-    ret = wait_syscall_enter_stop();
+    ret = wait_syscall_enter_stop(child);
     if (ret < 0) {
       return 0;
     }
-    ret = wait_syscall_exit_stop(ret);
+    ret = wait_syscall_exit_stop(child, ret);
     if (ret < 0) {
       return 0;
     }
@@ -293,6 +285,5 @@ int main(int argc, char **argv)
   } else if (child == 0) {
     return do_child(argv[1], &argv[1]);
   }
-  fprintf(stderr, "%d: pid: %d\n", __LINE__, child);
   return do_trace(child);
 }
