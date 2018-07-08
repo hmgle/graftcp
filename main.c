@@ -1,289 +1,295 @@
 #include <stdio.h>
-#include <errno.h>
-#include <sys/ptrace.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <netinet/tcp.h>
-#include <netdb.h>
-#include <string.h>
-#include <sys/wait.h>
-#include <sys/user.h>
-#include <sys/reg.h>
-#include <sys/syscall.h>
-#include <fcntl.h>
-#include <assert.h>
 
-#include "tcptrace.h"
-
-#define satosin(x)  ((struct sockaddr_in *) &(x))
-#define SOCKADDR(x) (satosin(x)->sin_addr.s_addr)
-#define SOCKPORT(x) (satosin(x)->sin_port)
-
-#ifndef offsetof
-#define offsetof(a, b) __builtin_offsetof(a,b)
-#endif
-#define get_reg(child, name) __get_reg(child, offsetof(struct user, regs.name))
-
-long __get_reg(pid_t child, int off) {
-  long val = ptrace(PTRACE_PEEKUSER, child, off);
-  assert(errno == 0);
-  return val;
-}
+#include "graftcp.h"
 
 char *LOCAL_ADDR = "127.0.0.1";
 uint16_t LOCAL_PORT = 2080;
-bool is_enter = false;
-struct sockaddr_in proxy_sa;
-int fifo_fd;
+struct sockaddr_in PROXY_SA;
 
-void getdata(pid_t child, long addr, char *dst, int len)
+void socket_pre_handle(struct proc_info *pinfp)
 {
-  char *laddr;
-  int i, j;
-  union u {
-    long val;
-    char chars[sizeof(long)];
-  } data;
-  i = 0;
-  j = len / sizeof(long);
-  laddr = dst;
-  while (i < j) {
-    data.val = ptrace(PTRACE_PEEKDATA, child, addr + i * 8, NULL);
-    memcpy(laddr, data.chars, sizeof(long));
-    ++i;
-    laddr += sizeof(long);
-  }
-  j = len % sizeof(long);
-  if (j != 0) {
-    data.val = ptrace(PTRACE_PEEKDATA, child, addr + i * 8, NULL);
-    memcpy(laddr, data.chars, j);
-  }
-  dst[len] = '\0';
-}
+  struct socket_info *si = calloc(1, sizeof(*si));
+  si->domain = get_syscall_arg(pinfp->pid, 0);
+  si->type = get_syscall_arg(pinfp->pid, 1);
 
-void putdata(pid_t child, long addr, char *src, int len)
-{
-  char *laddr;
-  int i, j;
-  union u {
-    long val;
-    char chars[sizeof(long)];
-  } data;
-  i = 0;
-  j = len / sizeof(long);
-  laddr = src;
-  while (i < j) {
-    memcpy(data.chars, laddr, sizeof(long));
-    ptrace(PTRACE_POKEDATA, child, addr + i * 8, data.val);
-    ++i;
-    laddr += sizeof(long);
-  }
-  j = len % sizeof(long);
-  if (j != 0) {
-    memcpy(data.chars, laddr, j);
-    ptrace(PTRACE_POKEDATA, child, addr + i * 8, data.val);
-  }
-}
-
-struct socket_info *SOCKET_TAB = NULL;
-
-void add_socket_info(struct socket_info *s)
-{
-  HASH_ADD_INT(SOCKET_TAB, fd, s);
-}
-
-void del_socket_info(struct socket_info *s)
-{
-  HASH_DEL(SOCKET_TAB, s);
-}
-
-struct socket_info *find_socket_info(int fd)
-{
-  struct socket_info *s;
-
-  HASH_FIND_INT(SOCKET_TAB, &fd, s);
-  return s;
-}
-
-int do_child(const char *file, char *argv[])
-{
-  ptrace(PTRACE_TRACEME, 0, NULL, NULL);
-  kill(getpid(), SIGSTOP);
-  return execvp(file, argv);
-}
-
-int socket_pre_handle(pid_t pid)
-{
-  struct user_regs_struct regs;
-  struct socket_info *si = malloc(sizeof(*si));
-  ptrace(PTRACE_GETREGS, pid, NULL, &regs);
-  assert(errno == 0);
-  si->domain = regs.rdi;
-  si->type = regs.rsi;
-  ptrace(PTRACE_SYSCALL, pid, 0, 0);
-  assert(errno == 0);
-  si->fd = -1;
-  si->is_connected = false;
-  add_socket_info(si);
-  return SYS_socket;
-}
-
-void connect_pre_handle(pid_t pid)
-{
-  struct user_regs_struct regs;
-  ptrace(PTRACE_GETREGS, pid, NULL, &regs);
-  assert(errno == 0);
-  int socket_fd = regs.rdi;
-  struct socket_info *so_info = find_socket_info(socket_fd);
-  if (so_info == NULL) {
-    fprintf(stderr, "%s:%d: find_socket_info(%d) return NULL\n", __func__, __LINE__, socket_fd);
-    exit(-1);
-  }
-  if (so_info->type != SOCK_STREAM || so_info->domain != AF_INET) {
-    ptrace(PTRACE_SYSCALL, pid, 0, 0);
+  /* If not TCP socket, ignore */
+  if ((si->type & SOCK_STREAM) < 1 || si->domain != AF_INET) {
+    free(si);
     return;
   }
-  long addr = get_reg(pid, rsi);
+  si->fd = -1;
+  si->magic_fd = (MAGIC_FD << 31) + pinfp->pid;
+  si->is_writed = false;
+  si->write_buf = NULL;
+  add_socket_info(si);
+}
+
+void connect_pre_handle(struct proc_info *pinfp)
+{
+  int socket_fd = get_syscall_arg(pinfp->pid, 0);
+  struct socket_info *si = find_socket_info((socket_fd << 31) + pinfp->pid);
+  if (si == NULL)
+    return;
+
+  // XXX not need?
+  if ((si->type & SOCK_STREAM) < 1 || si->domain != AF_INET)
+    return;
+
+  long addr = get_syscall_arg(pinfp->pid, 1);
   struct sockaddr_in tmp_sa;
-  getdata(pid, addr, (char *)&tmp_sa, sizeof(tmp_sa));
+
+  getdata(pinfp->pid, addr, (char *)&tmp_sa, sizeof(tmp_sa));
+
   unsigned int ip_int = SOCKADDR(tmp_sa);
   unsigned short ip_port = SOCKPORT(tmp_sa);
   struct in_addr tmp_ip_addr;
+
   tmp_ip_addr.s_addr = ip_int;
-  putdata(pid, addr, (char *)&proxy_sa, sizeof(proxy_sa));
+  putdata(pinfp->pid, addr, (char *)&PROXY_SA, sizeof(PROXY_SA));
+  si->is_connected = true;
+  si->dest_addr = tmp_ip_addr;
+  si->dest_port = ip_port;
+}
+
+void close_pre_handle(struct proc_info *pinfp)
+{
+  int socket_fd = get_syscall_arg(pinfp->pid, 0);
+  struct socket_info *si = find_socket_info((socket_fd << 31) + pinfp->pid);
+  if (si == NULL) {
+    return;
+  }
+  del_socket_info(si);
+  if (si->write_buf != NULL) {
+    free(si->write_buf);
+  }
+  free(si);
+}
+
+struct buf_info *set_write_buf(struct proc_info *pinfp,
+                               struct in_addr dest_addr,
+                               unsigned int dest_port,
+                               char *buf, size_t buf_count)
+{
+  char dest_info[1024] = {0};
+  uint32_t dest_info_len;
+
+  strcpy(dest_info, inet_ntoa(dest_addr));
+  strcat(&dest_info[strlen(dest_info)], ":");
+  sprintf(&dest_info[strlen(dest_info)], "%d", ntohs(dest_port));
+  dest_info_len = strlen(dest_info);
+
+  char *new_buf = calloc(1, 4 + 4 + dest_info_len + buf_count);
+  uint32_t nval = htonl(dest_info_len);
+  uint32_t magic_num = htonl(MAGIC_NUM);
+
+  memcpy(new_buf, &magic_num, 4);
+  memcpy(new_buf + 4, &nval, 4);
+  memcpy(new_buf + 4 + 4, dest_info, dest_info_len);
+  memcpy(new_buf + 4 + 4 + dest_info_len, buf, buf_count);
+
+  struct buf_info *new_buf_info = malloc(sizeof(*new_buf_info));
+  new_buf_info->buf = new_buf;
+  new_buf_info->size = 4 + 4 + dest_info_len + buf_count;
+  return new_buf_info;
+}
+
+void write_pre_handle(struct proc_info *pinfp)
+{
+  int socket_fd = get_syscall_arg(pinfp->pid, 0);
+  struct socket_info *si = find_socket_info((socket_fd << 31) + pinfp->pid);
+  if (si == NULL || !si->is_connected || si->is_writed)
+    return;
+
+  long bufp_arg = get_syscall_arg(pinfp->pid, 1);
+  long count = get_syscall_arg(pinfp->pid, 2);
+  void *wbuf = calloc(count, sizeof(char));
+  getdata(pinfp->pid, bufp_arg, wbuf, count);
+
+  struct buf_info *wbi = set_write_buf(pinfp, si->dest_addr,
+                                       si->dest_port, (char *)wbuf, count);
+
+  /* modify write(fd, buf, count)'s buf arg */
+  putdata(pinfp->pid, bufp_arg, wbi->buf, wbi->size);
+  /* modify write(fd, buf, count)'s count arg */
+  ptrace(PTRACE_POKEUSER, pinfp->pid, sizeof(long)*RDX, wbi->size);
   assert(errno == 0);
-  ptrace(PTRACE_SYSCALL, pid, 0, 0);
 
-  char buf[1024] = {0};
-  strcpy(buf, inet_ntoa(tmp_ip_addr));
-  strcat(&buf[strlen(buf)], ":");
-  sprintf(&buf[strlen(buf)], "%d\n", ntohs(ip_port));
-  fprintf(stderr, "%d: buf: %s\n", __LINE__, buf);
-  ssize_t wlen;
-  wlen = write(fifo_fd, buf, strlen(buf));
-  fprintf(stderr, "%s: %d: write: %d\n", __FILE__, __LINE__, wlen);
-  so_info->is_connected = true;
+  si->first_write_return = count;
+  si->write_buf = wbi;
+  pinfp->cws = si;
 }
 
-int wait_syscall_enter_stop(pid_t pid)
+void socket_exiting_handle(struct proc_info *pinfp, int fd)
 {
-  int status;
-  int syscall_num;
+  struct socket_info *si;
 
-  for (;;) {
-    ptrace(PTRACE_SYSCALL, pid, 0, 0);
-    pid = wait(&status);
-    if (WIFEXITED(status)) {
-      return -1;
-    }
-    if (WIFSTOPPED(status) && WSTOPSIG(status) & 0x80) {
-      syscall_num = get_reg(pid, orig_rax);
-      switch (syscall_num) {
-        case SYS_socket:
-          return socket_pre_handle(pid);
-          break;
-        case SYS_connect:
-          connect_pre_handle(pid);
-          break;
-        default:
-          ;
-      }
-      return syscall_num;
-    }
-  }
+  si = find_socket_info((MAGIC_FD << 31) + pinfp->pid);
+  if (si == NULL)
+    return;
+
+  si->fd = fd;
+  si->is_connected = false;
+  del_socket_info(si);
+  si->magic_fd = (fd << 31) + pinfp->pid;
+  add_socket_info(si);
 }
 
-int wait_syscall_exit_stop(pid_t pid, int syscall_num)
+void write_exiting_handle(struct proc_info *pinfp)
 {
-  int status;
-  int ret;
+  if (pinfp->cws == NULL || pinfp->cws->is_writed)
+    return;
 
-  for (;;) {
-    ptrace(PTRACE_SYSCALL, pid, 0, 0);
-    pid = wait(&status);
-    if (WIFEXITED(status)) {
-      return -1;
-    }
-    if (WIFSTOPPED(status) && WSTOPSIG(status) & 0x80) {
-      if (syscall_num == SYS_socket) {
-        ret = get_reg(pid, rax);
-        struct socket_info *so_info = find_socket_info(-1);
-        if (so_info != NULL) {
-          so_info->fd = ret;
-          so_info->is_connected = false;
-        }
-      }
-      return 0;
-    }
-  }
-}
-
-int do_trace(pid_t child)
-{
-  int status;
-  int ret;
-  const unsigned int options = PTRACE_O_TRACESYSGOOD | PTRACE_O_TRACECLONE |
-                               PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK;
-  waitpid(child, &status, 0);
-  assert(WIFSTOPPED(status));
-  if (ptrace(PTRACE_SETOPTIONS, child, 0, options) < 0) {
-    perror("ptrace");
-    exit(errno);
-  }
-  for (;;)  {
-    ret = wait_syscall_enter_stop(child);
-    if (ret < 0) {
-      return 0;
-    }
-    ret = wait_syscall_exit_stop(child, ret);
-    if (ret < 0) {
-      return 0;
-    }
-  }
-}
-
-int main(int argc, char **argv)
-{
-  long sys;
-  pid_t child;
-  int status;
-  struct user *user_space = (struct user *) 0;
   struct user_regs_struct regs;
-  long tmp_addr;
 
-  if (argc < 2) {
-    printf("Usage: %s program_name [arguments]\n", argv[0]);
-    return 0;
+  ptrace(PTRACE_GETREGS, pinfp->pid, 0, &regs);
+  assert(errno == 0);
+
+  /* write error, -1 is returned */
+  if ((int64_t)regs.rax <= 0)
+    return;
+
+  if (regs.rax == pinfp->cws->first_write_return) {
+    pinfp->cws->is_writed = true;
+    return;
   }
 
-  fifo_fd = open("/tmp/tcptrace.fifo", O_WRONLY);
-  if (fifo_fd < 0) {
-    perror("open");
-    exit(errno);
-  }
+  /* modify write's return value */
+  regs.rax = pinfp->cws->first_write_return;
+  ptrace(PTRACE_SETREGS, pinfp->pid, 0, &regs);
+  assert(errno == 0);
+  pinfp->cws->is_writed = true;
+}
 
-  socklen_t proxy_addrlen = sizeof(proxy_sa);
-  proxy_sa.sin_family = AF_INET;
-  proxy_sa.sin_port = htons(LOCAL_PORT);
-  if (inet_aton(LOCAL_ADDR, &proxy_sa.sin_addr) == 0) {
-    struct hostent *he;
+void do_child(int argc, char **argv)
+{
+  char *args [argc+1];
+  int i;
+  pid_t pid;
 
-    he = gethostbyname(LOCAL_ADDR);
-    if (he == NULL) {
-      fprintf(stderr, "can't resolve: %s\n", LOCAL_ADDR);
-      return -1;
-    }
-    memcpy(&proxy_sa.sin_addr, he->h_addr, sizeof(struct in_addr));
-  }
+  for (i=0; i<argc; i++)
+    args[i] = argv[i];
+  args[argc] = NULL;
+  ptrace(PTRACE_TRACEME, 0, NULL, NULL);
+  pid = getpid();
+  /*
+   * Induce a ptrace stop. Tracer (our parent)
+   * will resume us with PTRACE_SYSCALL and display
+   * the immediately following execve syscall.
+   */
+  kill(pid, SIGSTOP);
+  execvp(args[0], args);
+}
+
+void init(int argc, char **argv)
+{
+  pid_t child;
+  struct proc_info *pi;
 
   child = fork();
   if (child < 0) {
     perror("fork");
     exit(errno);
   } else if (child == 0) {
-    return do_child(argv[1], &argv[1]);
+    do_child(argc - 1, &argv[1]);
   }
-  return do_trace(child);
+  pi = alloc_proc_info(child);
+  pi->flags |= FLAG_STARTUP;
+}
+
+int trace_syscall_entering(struct proc_info *pinfp)
+{
+  pinfp->csn = get_syscall_number(pinfp->pid);
+  switch (pinfp->csn) {
+  case SYS_socket:
+    socket_pre_handle(pinfp);
+    break;
+  case SYS_connect:
+    connect_pre_handle(pinfp);
+    break;
+  case SYS_close:
+    close_pre_handle(pinfp);
+    break;
+  case SYS_write:
+    write_pre_handle(pinfp);
+    break;
+  }
+  pinfp->flags |= FLAG_INSYSCALL;
+  return 0;
+}
+
+int trace_syscall_exiting(struct proc_info *pinfp)
+{
+  int retval;
+  retval = get_retval(pinfp->pid);
+  switch (pinfp->csn) {
+  case SYS_socket:
+    socket_exiting_handle(pinfp, retval);
+    break;
+  case SYS_write:
+    write_exiting_handle(pinfp);
+    break;
+  }
+  pinfp->flags &= ~FLAG_INSYSCALL;
+  return 0;
+}
+
+int trace_syscall(struct proc_info *pinfp)
+{
+  return exiting(pinfp) ? trace_syscall_exiting(pinfp) :
+                          trace_syscall_entering(pinfp);
+}
+
+int do_trace()
+{
+  pid_t child;
+  int status;
+  struct proc_info *pinfp;
+
+  for (;;) {
+    child = wait(&status);
+    if (child < 0) {
+      perror("wait");
+      return -1;
+    }
+    pinfp = find_proc_info(child);
+    if (!pinfp) {
+      pinfp = alloc_proc_info(child);
+    }
+    if (pinfp->flags & FLAG_STARTUP) {
+      pinfp->flags &= ~FLAG_STARTUP;
+
+      if (ptrace(PTRACE_SETOPTIONS, child, 0,
+	    PTRACE_O_TRACESYSGOOD | PTRACE_O_TRACECLONE |
+	    PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK) < 0) {
+	perror("ptrace");
+	exit(errno);
+      }
+    }
+    if (trace_syscall(pinfp) < 0) {
+      continue;
+    }
+    if (ptrace(PTRACE_SYSCALL, pinfp->pid, 0, 0) < 0) {
+      perror("ptrace");
+      return -1;
+    }
+  }
+  return 0;
+}
+
+int main(int argc, char **argv)
+{
+  PROXY_SA.sin_family = AF_INET;
+  PROXY_SA.sin_port = htons(LOCAL_PORT);
+  if (inet_aton(LOCAL_ADDR, &PROXY_SA.sin_addr) == 0) {
+    struct hostent *he;
+
+    he = gethostbyname(LOCAL_ADDR);
+    if (he == NULL) {
+      perror("gethostbyname");
+      exit(errno);
+    }
+    memcpy(&PROXY_SA.sin_addr, he->h_addr, sizeof(struct in_addr));
+  }
+  init(argc, argv);
+  return do_trace();
 }
