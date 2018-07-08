@@ -1,15 +1,10 @@
-all: tcptrace local
+all: graftcp local
 
-tcptrace: main.o
+graftcp: main.o util.o
 	cc $^ -o $@
 
 local: local.go
 	go build -o $@ $<
 
-test: tcptrace
-	xterm -e nc -l 2080 &
-	sleep 0.5
-	./tcptrace ls
-
 clean::
-	rm *.o tcptrace local
+	rm *.o graftcp local
