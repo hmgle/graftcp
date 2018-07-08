@@ -2,49 +2,24 @@ package main
 
 import (
 	"bufio"
+	"encoding/binary"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net"
 	"os"
-	"syscall"
 
 	"golang.org/x/net/proxy"
 )
 
 var (
-	fifoPath = flag.String("fifo", "/tmp/tcptrace.fifo", "fifo path")
-)
-
-var (
 	fifoFd *os.File
 	bio    *bufio.Reader
-	fifoCh = make(chan string)
 )
 
 type Local struct {
 	faddr, baddr *net.TCPAddr
-}
-
-func initFifo() {
-	os.Remove(*fifoPath)
-	err := syscall.Mkfifo(*fifoPath, 0666)
-	if err != nil {
-		log.Fatal(err)
-	}
-	fifoFd, err = os.Open(*fifoPath)
-	if err != nil {
-		log.Fatal(err)
-	}
-	bio = bufio.NewReader(fifoFd)
-	for {
-		line, _, err := bio.ReadLine()
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Printf("line: %s\n", string(line))
-		fifoCh <- string(line)
-	}
 }
 
 func newLocal(faddr, baddr string) *Local {
@@ -80,17 +55,37 @@ func (s *Local) start() {
 }
 
 func (s *Local) handleConn(conn net.Conn) error {
+	buf := make([]byte, 4096)
+	_, err := io.ReadFull(conn, buf[:8])
+	if err != nil {
+		log.Println("io.ReadFull() err: ", err)
+		return err
+	}
+	magicNum := binary.BigEndian.Uint32(buf[:4])
+	if magicNum != 3579 {
+		log.Printf("magicNum: %d\n", magicNum)
+		return fmt.Errorf("magicNum:%d != %d", magicNum, 3579)
+	}
+	addInfoLen := binary.BigEndian.Uint32(buf[4:8])
+	if addInfoLen < 1 || addInfoLen > 4096 {
+		log.Println("addInfoLen: ", addInfoLen)
+		return fmt.Errorf("addInfoLen: %d", addInfoLen)
+	}
+	_, err = io.ReadFull(conn, buf[:addInfoLen])
+	if err != nil {
+		log.Println("io.ReadFull() err: ", err)
+		return err
+	}
 	dialer, err := proxy.SOCKS5("tcp", s.baddr.String(), nil, proxy.Direct)
 	if err != nil {
 		log.Printf("proxy.SOCKS5(\"tcp\", %s,...) err: %v\n", s.baddr, err)
 		return err
 	}
-
-	destAddr := <-fifoCh
+	destAddr := string(buf[:addInfoLen])
 	log.Printf("destAddr: %s\n", destAddr)
 	socks5Conn, err := dialer.Dial("tcp", destAddr)
 	if err != nil {
-		log.Printf("dialer.Dial(%s) err: %s", destAddr, err.Error())
+		log.Printf("dialer.Dial(%s) err: %v\n", destAddr, err)
 		return err
 	}
 	go pipe(conn, socks5Conn)
@@ -101,7 +96,6 @@ func (s *Local) handleConn(conn net.Conn) error {
 func pipe(dst, src net.Conn) {
 	for {
 		n, err := io.Copy(dst, src)
-		log.Println("io.Copy : ", n)
 		if err != nil {
 			log.Printf("io.Copy err: %s\n", err.Error())
 			return
@@ -118,7 +112,6 @@ func main() {
 	flag.StringVar(&baddr, "backend", "127.0.0.1:1080", "host:port of backend")
 	flag.Parse()
 
-	go initFifo()
 	l := newLocal(faddr, baddr)
 	l.start()
 }
