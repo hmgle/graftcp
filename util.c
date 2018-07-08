@@ -72,12 +72,10 @@ int get_retval(pid_t pid)
 #if 1
   int offset = offsetof(struct user, regs.rax);
   long val = ptrace(PTRACE_PEEKUSER, pid, offset);
-  assert(errno == 0);
   return (int)val;
 #else /* another way */
   struct user_regs_struct regs;
   ptrace(PTRACE_GETREGS, pid, 0, &regs);
-  assert(errno == 0);
   return regs.rax;
 #endif
 }

@@ -221,6 +221,13 @@ int trace_syscall_exiting(struct proc_info *pinfp)
 {
   int retval;
   retval = get_retval(pinfp->pid);
+  if (errno) {
+    /* No such process, child exited */
+    if (errno == ESRCH)
+      exit(0);
+    perror("ptrace");
+    exit(errno);
+  }
   switch (pinfp->csn) {
   case SYS_socket:
     socket_exiting_handle(pinfp, retval);
