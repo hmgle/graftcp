@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 
 	"golang.org/x/net/proxy"
 )
@@ -147,6 +148,7 @@ func main() {
 	flag.StringVar(&pipePath, "pipepath", "/tmp/graftcplocal.fifo", "pipe path")
 	flag.Parse()
 
+	syscall.Mkfifo(pipePath, uint32(os.ModePerm))
 	fifoFd, err = os.OpenFile(pipePath, os.O_RDWR, 0)
 	if err != nil {
 		log.Fatal(err)
