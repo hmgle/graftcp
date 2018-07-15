@@ -2,13 +2,14 @@ package main
 
 import (
 	"bufio"
-	"encoding/binary"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"os"
+	"os/exec"
+	"strings"
 
 	"golang.org/x/net/proxy"
 )
@@ -54,38 +55,44 @@ func (s *Local) start() {
 	}
 }
 
+func getPidByAddr(addr string) (pid string, destAddr string) {
+	log.Printf("addr: %s\n", addr)
+	addrSplit := strings.Split(addr, ":")
+	if len(addrSplit) != 2 {
+		return "", ""
+	}
+	port := addrSplit[1]
+	log.Printf("port: %s\n", port)
+	// lsof -i :1234 |awk 'NR > 1 {print $2}'
+	cmd := fmt.Sprintf("lsof -i :%s | awk 'NR > 1 {print $2}'", port)
+	out, err := exec.Command("bash", "-c", cmd).Output()
+	if err != nil {
+		log.Println(err)
+		return "", ""
+	}
+	log.Println("out: ", string(out))
+	pids := strings.Split(string(out), "\n")
+	for _, pid := range pids {
+		if addr, ok := ProcessPortMap[pid]; ok {
+			return pid, addr
+		}
+	}
+	return "", ""
+}
+
 func (s *Local) handleConn(conn net.Conn) error {
-	buf := make([]byte, 4096)
-	_, err := io.ReadFull(conn, buf[:8])
-	if err != nil {
-		log.Println("io.ReadFull() err: ", err)
-		return err
-	}
-	magicNum := binary.BigEndian.Uint32(buf[:4])
-	if magicNum != 3579 {
-		log.Printf("magicNum: %d\n", magicNum)
-		return fmt.Errorf("magicNum:%d != %d", magicNum, 3579)
-	}
-	addInfoLen := binary.BigEndian.Uint32(buf[4:8])
-	if addInfoLen < 1 || addInfoLen > 4096 {
-		log.Println("addInfoLen: ", addInfoLen)
-		return fmt.Errorf("addInfoLen: %d", addInfoLen)
-	}
-	_, err = io.ReadFull(conn, buf[:addInfoLen])
-	if err != nil {
-		log.Println("io.ReadFull() err: ", err)
-		return err
-	}
+	raddr := conn.RemoteAddr()
+	pid, addr := getPidByAddr(raddr.String())
+	log.Println("pid: ", pid, "\naddr: ", addr)
+
 	dialer, err := proxy.SOCKS5("tcp", s.baddr.String(), nil, proxy.Direct)
 	if err != nil {
 		log.Printf("proxy.SOCKS5(\"tcp\", %s,...) err: %v\n", s.baddr, err)
 		return err
 	}
-	destAddr := string(buf[:addInfoLen])
-	log.Printf("destAddr: %s\n", destAddr)
-	socks5Conn, err := dialer.Dial("tcp", destAddr)
+	socks5Conn, err := dialer.Dial("tcp", addr)
 	if err != nil {
-		log.Printf("dialer.Dial(%s) err: %v\n", destAddr, err)
+		log.Printf("dialer.Dial(%s) err: %v\n", addr, err)
 		return err
 	}
 	go pipe(conn, socks5Conn)
@@ -106,11 +113,45 @@ func pipe(dst, src net.Conn) {
 	}
 }
 
+var (
+	// map[pid]dest-ip-info
+	ProcessPortMap = make(map[string]string)
+)
+
+func updateProcessPortInfo() {
+	r := bufio.NewReader(fifoFd)
+	for {
+		line, _, err := r.ReadLine()
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Println(string(line))
+		// dest_ipaddr:dest_port:pid
+		s := strings.Split(string(line), ":")
+		if len(s) != 3 {
+			log.Println("r.ReadLine() :", string(line))
+			break
+		}
+		ProcessPortMap[s[2]] = s[0] + ":" + s[1]
+	}
+}
+
 func main() {
-	var faddr, baddr string
+	var (
+		faddr, baddr string
+		pipePath     string
+		err          error
+	)
 	flag.StringVar(&faddr, "listen", ":2080", "host:port listen on")
 	flag.StringVar(&baddr, "backend", "127.0.0.1:1080", "host:port of backend")
+	flag.StringVar(&pipePath, "pipepath", "/tmp/graftcplocal.fifo", "pipe path")
 	flag.Parse()
+
+	fifoFd, err = os.OpenFile(pipePath, os.O_RDWR, 0)
+	if err != nil {
+		log.Fatal(err)
+	}
+	go updateProcessPortInfo()
 
 	l := newLocal(faddr, baddr)
 	l.start()
