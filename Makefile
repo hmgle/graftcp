@@ -1,10 +1,10 @@
-all: graftcp local
+all: graftcp local/local
 
 graftcp: main.o util.o
 	cc $^ -o $@
 
-local: local.go
-	go build -o $@ $<
+local/local: local/local.go
+	cd local && go build
 
 clean::
-	rm *.o graftcp local
+	rm -f *.o graftcp local/local

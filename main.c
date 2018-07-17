@@ -5,6 +5,8 @@
 char *LOCAL_ADDR = "127.0.0.1";
 uint16_t LOCAL_PORT = 2080;
 struct sockaddr_in PROXY_SA;
+char *LOCAL_PIPE_PAHT = "/tmp/graftcplocal.fifo";
+int LOCAL_PIPE_FD;
 
 void socket_pre_handle(struct proc_info *pinfp)
 {
@@ -49,74 +51,16 @@ void connect_pre_handle(struct proc_info *pinfp)
   si->is_connected = true;
   si->dest_addr = tmp_ip_addr;
   si->dest_port = ip_port;
-}
 
-void close_pre_handle(struct proc_info *pinfp)
-{
-  int socket_fd = get_syscall_arg(pinfp->pid, 0);
-  struct socket_info *si = find_socket_info((socket_fd << 31) + pinfp->pid);
-  if (si == NULL) {
-    return;
+  char buf[1024] = {0};
+  strcpy(buf, inet_ntoa(tmp_ip_addr));
+  strcat(buf, ":");
+  sprintf(&buf[strlen(buf)], "%d:%d\n", ntohs(ip_port), pinfp->pid);
+  if (write(LOCAL_PIPE_FD, buf, strlen(buf)) <= 0) {
+    if (errno)
+      perror("write");
+    fprintf(stderr, "write failed!\n");
   }
-  del_socket_info(si);
-  if (si->write_buf != NULL) {
-    free(si->write_buf);
-  }
-  free(si);
-}
-
-struct buf_info *set_write_buf(struct proc_info *pinfp,
-                               struct in_addr dest_addr,
-                               unsigned int dest_port,
-                               char *buf, size_t buf_count)
-{
-  char dest_info[1024] = {0};
-  uint32_t dest_info_len;
-
-  strcpy(dest_info, inet_ntoa(dest_addr));
-  strcat(&dest_info[strlen(dest_info)], ":");
-  sprintf(&dest_info[strlen(dest_info)], "%d", ntohs(dest_port));
-  dest_info_len = strlen(dest_info);
-
-  char *new_buf = calloc(1, 4 + 4 + dest_info_len + buf_count);
-  uint32_t nval = htonl(dest_info_len);
-  uint32_t magic_num = htonl(MAGIC_NUM);
-
-  memcpy(new_buf, &magic_num, 4);
-  memcpy(new_buf + 4, &nval, 4);
-  memcpy(new_buf + 4 + 4, dest_info, dest_info_len);
-  memcpy(new_buf + 4 + 4 + dest_info_len, buf, buf_count);
-
-  struct buf_info *new_buf_info = malloc(sizeof(*new_buf_info));
-  new_buf_info->buf = new_buf;
-  new_buf_info->size = 4 + 4 + dest_info_len + buf_count;
-  return new_buf_info;
-}
-
-void write_pre_handle(struct proc_info *pinfp)
-{
-  int socket_fd = get_syscall_arg(pinfp->pid, 0);
-  struct socket_info *si = find_socket_info((socket_fd << 31) + pinfp->pid);
-  if (si == NULL || !si->is_connected || si->is_writed)
-    return;
-
-  long bufp_arg = get_syscall_arg(pinfp->pid, 1);
-  long count = get_syscall_arg(pinfp->pid, 2);
-  void *wbuf = calloc(count, sizeof(char));
-  getdata(pinfp->pid, bufp_arg, wbuf, count);
-
-  struct buf_info *wbi = set_write_buf(pinfp, si->dest_addr,
-                                       si->dest_port, (char *)wbuf, count);
-
-  /* modify write(fd, buf, count)'s buf arg */
-  putdata(pinfp->pid, bufp_arg, wbi->buf, wbi->size);
-  /* modify write(fd, buf, count)'s count arg */
-  ptrace(PTRACE_POKEUSER, pinfp->pid, sizeof(long)*RDX, wbi->size);
-  assert(errno == 0);
-
-  si->first_write_return = count;
-  si->write_buf = wbi;
-  pinfp->cws = si;
 }
 
 void socket_exiting_handle(struct proc_info *pinfp, int fd)
@@ -132,32 +76,6 @@ void socket_exiting_handle(struct proc_info *pinfp, int fd)
   del_socket_info(si);
   si->magic_fd = (fd << 31) + pinfp->pid;
   add_socket_info(si);
-}
-
-void write_exiting_handle(struct proc_info *pinfp)
-{
-  if (pinfp->cws == NULL || pinfp->cws->is_writed)
-    return;
-
-  struct user_regs_struct regs;
-
-  ptrace(PTRACE_GETREGS, pinfp->pid, 0, &regs);
-  assert(errno == 0);
-
-  /* write error, -1 is returned */
-  if ((int64_t)regs.rax <= 0)
-    return;
-
-  if (regs.rax == pinfp->cws->first_write_return) {
-    pinfp->cws->is_writed = true;
-    return;
-  }
-
-  /* modify write's return value */
-  regs.rax = pinfp->cws->first_write_return;
-  ptrace(PTRACE_SETREGS, pinfp->pid, 0, &regs);
-  assert(errno == 0);
-  pinfp->cws->is_writed = true;
 }
 
 void do_child(int argc, char **argv)
@@ -206,12 +124,6 @@ int trace_syscall_entering(struct proc_info *pinfp)
   case SYS_connect:
     connect_pre_handle(pinfp);
     break;
-  case SYS_close:
-    close_pre_handle(pinfp);
-    break;
-  case SYS_write:
-    write_pre_handle(pinfp);
-    break;
   }
   pinfp->flags |= FLAG_INSYSCALL;
   return 0;
@@ -231,9 +143,6 @@ int trace_syscall_exiting(struct proc_info *pinfp)
   switch (pinfp->csn) {
   case SYS_socket:
     socket_exiting_handle(pinfp, retval);
-    break;
-  case SYS_write:
-    write_exiting_handle(pinfp);
     break;
   }
   pinfp->flags &= ~FLAG_INSYSCALL;
@@ -297,6 +206,13 @@ int main(int argc, char **argv)
     }
     memcpy(&PROXY_SA.sin_addr, he->h_addr, sizeof(struct in_addr));
   }
+
+  LOCAL_PIPE_FD = open(LOCAL_PIPE_PAHT, O_WRONLY);
+  if (LOCAL_PIPE_FD < 0) {
+    perror("open");
+    exit(errno);
+  }
+
   init(argc, argv);
   return do_trace();
 }
