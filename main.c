@@ -131,8 +131,14 @@ int trace_syscall_entering(struct proc_info *pinfp)
 
 int trace_syscall_exiting(struct proc_info *pinfp)
 {
-  int retval;
-  retval = get_retval(pinfp->pid);
+  int ret = 0;
+  if (pinfp->csn == SYS_exit || pinfp->csn == SYS_exit_group) {
+    ret = -1;
+    goto end;
+  }
+
+  int child_ret;
+  child_ret = get_retval(pinfp->pid);
   if (errno) {
     /* No such process, child exited */
     if (errno == ESRCH)
@@ -142,11 +148,12 @@ int trace_syscall_exiting(struct proc_info *pinfp)
   }
   switch (pinfp->csn) {
   case SYS_socket:
-    socket_exiting_handle(pinfp, retval);
+    socket_exiting_handle(pinfp, child_ret);
     break;
   }
+end:
   pinfp->flags &= ~FLAG_INSYSCALL;
-  return 0;
+  return ret;
 }
 
 int trace_syscall(struct proc_info *pinfp)
