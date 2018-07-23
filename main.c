@@ -167,6 +167,8 @@ int do_trace()
 {
   pid_t child;
   int status;
+  int stopped;
+  int sig;
   struct proc_info *pinfp;
 
   for (;;) {
@@ -176,9 +178,9 @@ int do_trace()
       return -1;
     }
     pinfp = find_proc_info(child);
-    if (!pinfp) {
+    if (!pinfp)
       pinfp = alloc_proc_info(child);
-    }
+
     if (pinfp->flags & FLAG_STARTUP) {
       pinfp->flags &= ~FLAG_STARTUP;
 
@@ -189,11 +191,32 @@ int do_trace()
 	exit(errno);
       }
     }
-    if (trace_syscall(pinfp) < 0) {
-      continue;
+
+    sig = WSTOPSIG(status);
+    if (sig == SIGSTOP) {
+      sig = 0;
+      goto end;
     }
-    if (ptrace(PTRACE_SYSCALL, pinfp->pid, 0, 0) < 0) {
-      perror("ptrace");
+    if (sig != SIGTRAP) {
+      siginfo_t si;
+      stopped = (ptrace(PTRACE_GETSIGINFO, child, 0, (long) &si) < 0);
+      if (!stopped) {
+        /* It's signal-delivery-stop. Inject the signal */
+        goto end;
+      }
+    }
+    if (trace_syscall(pinfp) < 0)
+      continue;
+    sig = 0;
+end:
+    /*
+     * Since the value returned by a successful PTRACE_PEEK*  request  may  be
+     * -1,  the  caller  must  clear  errno before the call of ptrace(2).
+     */
+    errno = 0;
+    if (ptrace(PTRACE_SYSCALL, pinfp->pid, 0, sig) < 0) {
+      if (errno == ESRCH)
+        continue;
       return -1;
     }
   }
