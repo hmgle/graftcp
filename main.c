@@ -173,10 +173,8 @@ int do_trace()
 
   for (;;) {
     child = wait(&status);
-    if (child < 0) {
-      perror("wait");
-      return -1;
-    }
+    if (child < 0)
+      return 0;
     pinfp = find_proc_info(child);
     if (!pinfp)
       pinfp = alloc_proc_info(child);
@@ -192,6 +190,10 @@ int do_trace()
       }
     }
 
+    if (WIFSIGNALED(status) || WIFEXITED(status) || !WIFSTOPPED(status)) {
+      /* TODO free pinfp */
+      continue;
+    }
     sig = WSTOPSIG(status);
     if (sig == SIGSTOP) {
       sig = 0;
