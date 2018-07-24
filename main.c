@@ -169,6 +169,7 @@ int do_trace()
   int status;
   int stopped;
   int sig;
+  unsigned event;
   struct proc_info *pinfp;
 
   for (;;) {
@@ -183,13 +184,17 @@ int do_trace()
       pinfp->flags &= ~FLAG_STARTUP;
 
       if (ptrace(PTRACE_SETOPTIONS, child, 0,
-	    PTRACE_O_TRACESYSGOOD | PTRACE_O_TRACECLONE |
+	    PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXEC |
 	    PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK) < 0) {
 	perror("ptrace");
 	exit(errno);
       }
     }
-
+    event = ((unsigned)status >> 16);
+    if (event != 0) {
+      sig = 0;
+      goto end;
+    }
     if (WIFSIGNALED(status) || WIFEXITED(status) || !WIFSTOPPED(status)) {
       /* TODO free pinfp */
       continue;
