@@ -25,11 +25,6 @@
 #define SOCKADDR(x) (satosin(x)->sin_addr.s_addr)
 #define SOCKPORT(x) (satosin(x)->sin_port)
 
-struct buf_info {
-  char *buf;
-  size_t size;
-};
-
 struct socket_info {
   pid_t pid;
   int fd;

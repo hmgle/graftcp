@@ -60,6 +60,16 @@ void connect_pre_handle(struct proc_info *pinfp)
   }
 }
 
+void close_pre_handle(struct proc_info *pinfp)
+{
+  int fd = get_syscall_arg(pinfp->pid, 0);
+  struct socket_info *si = find_socket_info((fd << 31) + pinfp->pid);
+  if (si) {
+    del_socket_info(si);
+    free(si);
+  }
+}
+
 void socket_exiting_handle(struct proc_info *pinfp, int fd)
 {
   struct socket_info *si;
@@ -67,7 +77,11 @@ void socket_exiting_handle(struct proc_info *pinfp, int fd)
   si = find_socket_info((MAGIC_FD << 31) + pinfp->pid);
   if (si == NULL)
     return;
-
+  if ((si->type & SOCK_STREAM) < 1 || si->domain != AF_INET) {
+    del_socket_info(si);
+    free(si);
+    return;
+  }
   si->fd = fd;
   del_socket_info(si);
   si->magic_fd = (fd << 31) + pinfp->pid;
@@ -119,6 +133,9 @@ int trace_syscall_entering(struct proc_info *pinfp)
     break;
   case SYS_connect:
     connect_pre_handle(pinfp);
+    break;
+  case SYS_close:
+    close_pre_handle(pinfp);
     break;
   }
   pinfp->flags |= FLAG_INSYSCALL;
