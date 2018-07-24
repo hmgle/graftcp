@@ -21,8 +21,6 @@ void socket_pre_handle(struct proc_info *pinfp)
   }
   si->fd = -1;
   si->magic_fd = (MAGIC_FD << 31) + pinfp->pid;
-  si->is_writed = false;
-  si->write_buf = NULL;
   add_socket_info(si);
 }
 
@@ -48,7 +46,6 @@ void connect_pre_handle(struct proc_info *pinfp)
 
   tmp_ip_addr.s_addr = ip_int;
   putdata(pinfp->pid, addr, (char *)&PROXY_SA, sizeof(PROXY_SA));
-  si->is_connected = true;
   si->dest_addr = tmp_ip_addr;
   si->dest_port = ip_port;
 
@@ -72,7 +69,6 @@ void socket_exiting_handle(struct proc_info *pinfp, int fd)
     return;
 
   si->fd = fd;
-  si->is_connected = false;
   del_socket_info(si);
   si->magic_fd = (fd << 31) + pinfp->pid;
   add_socket_info(si);

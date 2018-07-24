@@ -38,10 +38,6 @@ struct socket_info {
   int type;
   struct in_addr dest_addr;
   unsigned int dest_port;
-  bool is_connected;
-  bool is_writed;
-  struct buf_info *write_buf;
-  ssize_t first_write_return;   /* write first should return */
   UT_hash_handle hh;            /* makes this structure hashable */
 };
 
