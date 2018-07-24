@@ -55,6 +55,7 @@ struct proc_info *alloc_proc_info(pid_t pid)
 int get_syscall_number(pid_t pid)
 {
 #if 1
+  errno = 0;
   int offset = offsetof(struct user, regs.orig_rax);
   long val = ptrace(PTRACE_PEEKUSER, pid, offset);
   assert(errno == 0);
@@ -70,6 +71,7 @@ int get_syscall_number(pid_t pid)
 int get_retval(pid_t pid)
 {
 #if 1
+  errno = 0;
   int offset = offsetof(struct user, regs.rax);
   long val = ptrace(PTRACE_PEEKUSER, pid, offset);
   return (int)val;
@@ -119,6 +121,7 @@ long get_syscall_arg(pid_t pid, int order)
   default:
     return -1;
   }
+  errno = 0;
   val = ptrace(PTRACE_PEEKUSER, pid, offset);
   assert(errno == 0);
   return val;

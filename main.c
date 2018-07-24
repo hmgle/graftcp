@@ -131,22 +131,30 @@ int trace_syscall_entering(struct proc_info *pinfp)
 
 int trace_syscall_exiting(struct proc_info *pinfp)
 {
-  int retval;
-  retval = get_retval(pinfp->pid);
-  if (errno) {
-    /* No such process, child exited */
-    if (errno == ESRCH)
-      exit(0);
-    perror("ptrace");
-    exit(errno);
+  int ret = 0;
+  if (pinfp->csn == SYS_exit || pinfp->csn == SYS_exit_group) {
+    ret = -1;
+    goto end;
   }
+
+  int child_ret;
+
   switch (pinfp->csn) {
   case SYS_socket:
-    socket_exiting_handle(pinfp, retval);
+    child_ret = get_retval(pinfp->pid);
+    if (errno) {
+      /* No such process, child exited */
+      if (errno == ESRCH)
+	exit(0);
+      perror("ptrace");
+      exit(errno);
+    }
+    socket_exiting_handle(pinfp, child_ret);
     break;
   }
+end:
   pinfp->flags &= ~FLAG_INSYSCALL;
-  return 0;
+  return ret;
 }
 
 int trace_syscall(struct proc_info *pinfp)
@@ -159,33 +167,63 @@ int do_trace()
 {
   pid_t child;
   int status;
+  int stopped;
+  int sig;
+  unsigned event;
   struct proc_info *pinfp;
 
   for (;;) {
     child = wait(&status);
-    if (child < 0) {
-      perror("wait");
-      return -1;
-    }
+    if (child < 0)
+      return 0;
     pinfp = find_proc_info(child);
-    if (!pinfp) {
+    if (!pinfp)
       pinfp = alloc_proc_info(child);
-    }
+
     if (pinfp->flags & FLAG_STARTUP) {
       pinfp->flags &= ~FLAG_STARTUP;
 
       if (ptrace(PTRACE_SETOPTIONS, child, 0,
-	    PTRACE_O_TRACESYSGOOD | PTRACE_O_TRACECLONE |
+	    PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXEC |
 	    PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK) < 0) {
 	perror("ptrace");
 	exit(errno);
       }
     }
-    if (trace_syscall(pinfp) < 0) {
+    event = ((unsigned)status >> 16);
+    if (event != 0) {
+      sig = 0;
+      goto end;
+    }
+    if (WIFSIGNALED(status) || WIFEXITED(status) || !WIFSTOPPED(status)) {
+      /* TODO free pinfp */
       continue;
     }
-    if (ptrace(PTRACE_SYSCALL, pinfp->pid, 0, 0) < 0) {
-      perror("ptrace");
+    sig = WSTOPSIG(status);
+    if (sig == SIGSTOP) {
+      sig = 0;
+      goto end;
+    }
+    if (sig != SIGTRAP) {
+      siginfo_t si;
+      stopped = (ptrace(PTRACE_GETSIGINFO, child, 0, (long) &si) < 0);
+      if (!stopped) {
+        /* It's signal-delivery-stop. Inject the signal */
+        goto end;
+      }
+    }
+    if (trace_syscall(pinfp) < 0)
+      continue;
+    sig = 0;
+end:
+    /*
+     * Since the value returned by a successful PTRACE_PEEK*  request  may  be
+     * -1,  the  caller  must  clear  errno before the call of ptrace(2).
+     */
+    errno = 0;
+    if (ptrace(PTRACE_SYSCALL, pinfp->pid, 0, sig) < 0) {
+      if (errno == ESRCH)
+        continue;
       return -1;
     }
   }
