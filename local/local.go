@@ -3,12 +3,10 @@ package main
 import (
 	"bufio"
 	"flag"
-	"fmt"
 	"io"
 	"log"
 	"net"
 	"os"
-	"os/exec"
 	"strings"
 	"syscall"
 
@@ -56,25 +54,14 @@ func (s *Local) start() {
 	}
 }
 
-func getPidByAddr(addr string) (pid string, destAddr string) {
-	log.Printf("addr: %s\n", addr)
-	addrSplit := strings.Split(addr, ":")
-	if len(addrSplit) != 2 {
-		return "", ""
-	}
-	port := addrSplit[1]
-	log.Printf("port: %s\n", port)
-	// lsof -i :1234 |awk 'NR > 1 {print $2}'
-	cmd := fmt.Sprintf("lsof -i :%s | awk 'NR > 1 {print $2}'", port)
-	out, err := exec.Command("bash", "-c", cmd).Output()
+func getPidByAddr(localAddr string) (pid string, destAddr string) {
+	inode, err := getInodeByAddrs(localAddr, faddr)
 	if err != nil {
-		log.Println(err)
+		log.Printf("getInodeByAddrs(%s, %s) err: %s\n", localAddr, faddr, err.Error())
 		return "", ""
 	}
-	log.Println("out: ", string(out))
-	pids := strings.Split(string(out), "\n")
-	for _, pid := range pids {
-		if addr, ok := ProcessPortMap[pid]; ok {
+	for pid, addr := range ProcessPortMap {
+		if hasIncludeInode(pid, inode) {
 			return pid, addr
 		}
 	}
@@ -137,11 +124,13 @@ func updateProcessPortInfo() {
 	}
 }
 
+var faddr string
+
 func main() {
 	var (
-		faddr, baddr string
-		pipePath     string
-		err          error
+		baddr    string
+		pipePath string
+		err      error
 	)
 	flag.StringVar(&faddr, "listen", ":2080", "host:port listen on")
 	flag.StringVar(&baddr, "backend", "127.0.0.1:1080", "host:port of backend")
