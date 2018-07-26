@@ -62,6 +62,7 @@ func getPidByAddr(localAddr string) (pid string, destAddr string) {
 	}
 	for pid, addr := range ProcessPortMap {
 		if hasIncludeInode(pid, inode) {
+			delete(ProcessPortMap, pid)
 			return pid, addr
 		}
 	}
