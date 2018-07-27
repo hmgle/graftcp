@@ -5,11 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os"
 	"strings"
 	"syscall"
+
+	"github.com/jedisct1/dlog"
 
 	"golang.org/x/net/proxy"
 )
@@ -22,11 +23,11 @@ type Local struct {
 func NewLocal(faddr, baddr string) *Local {
 	a1, err := net.ResolveTCPAddr("tcp", faddr)
 	if err != nil {
-		log.Fatalf("resolve frontend(%s) error: %s\n", faddr, err.Error())
+		dlog.Fatalf("resolve frontend(%s) error: %s", faddr, err.Error())
 	}
 	a2, err := net.ResolveTCPAddr("tcp", baddr)
 	if err != nil {
-		log.Fatalf("resolve backend(%s) error: %s\n", baddr, err.Error())
+		dlog.Fatalf("resolve backend(%s) error: %s", baddr, err.Error())
 	}
 	return &Local{
 		faddr: a1,
@@ -37,14 +38,14 @@ func NewLocal(faddr, baddr string) *Local {
 func (l *Local) Start() {
 	ln, err := net.ListenTCP("tcp", l.faddr)
 	if err != nil {
-		log.Fatalf("net.ListenTCP(%s) err: %s\n", l.faddr.String(), err.Error())
+		dlog.Fatalf("net.ListenTCP(%s) err: %s", l.faddr.String(), err.Error())
 	}
 	defer ln.Close()
 
 	for {
 		conn, err := ln.AcceptTCP()
 		if err != nil {
-			log.Println("accept err:", err)
+			dlog.Errorf("accept err: %s", err.Error())
 			continue
 		}
 		go l.HandleConn(conn)
@@ -54,7 +55,7 @@ func (l *Local) Start() {
 func getPidByAddr(localAddr string) (pid string, destAddr string) {
 	inode, err := getInodeByAddrs(localAddr, ListenAddr)
 	if err != nil {
-		log.Printf("getInodeByAddrs(%s, %s) err: %s\n", localAddr, ListenAddr, err.Error())
+		dlog.Errorf("getInodeByAddrs(%s, %s) err: %s", localAddr, ListenAddr, err.Error())
 		return "", ""
 	}
 	RangePidAddr(func(p, a string) bool {
@@ -80,12 +81,12 @@ func (l *Local) HandleConn(conn net.Conn) error {
 
 	dialer, err := proxy.SOCKS5("tcp", l.baddr.String(), nil, proxy.Direct)
 	if err != nil {
-		log.Printf("proxy.SOCKS5(\"tcp\", %s,...) err: %v\n", l.baddr, err)
+		dlog.Errorf("proxy.SOCKS5(\"tcp\", %s,...) err: %s", l.baddr, err.Error())
 		return err
 	}
 	socks5Conn, err := dialer.Dial("tcp", addr)
 	if err != nil {
-		log.Printf("dialer.Dial(%s) err: %v\n", addr, err)
+		dlog.Errorf("dialer.Dial(%s) err: %s", addr, err.Error())
 		return err
 	}
 	go pipe(conn, socks5Conn)
@@ -97,7 +98,7 @@ func pipe(dst, src net.Conn) {
 	for {
 		n, err := io.Copy(dst, src)
 		if err != nil {
-			log.Printf("io.Copy err: %s\n", err.Error())
+			dlog.Errorf("io.Copy err: %s", err.Error())
 			return
 		}
 		if n == 0 {
@@ -111,13 +112,13 @@ func updateProcessAddrInfo() {
 	for {
 		line, _, err := r.ReadLine()
 		if err != nil {
-			log.Printf("r.ReadLine err: %v\n", err)
+			dlog.Errorf("r.ReadLine err: %s", err.Error())
 			break
 		}
 		// dest_ipaddr:dest_port:pid
 		s := strings.Split(string(line), ":")
 		if len(s) != 3 {
-			log.Println("r.ReadLine() :", string(line))
+			dlog.Errorf("r.ReadLine(): %d", string(line))
 			continue
 		}
 		StorePidAddr(s[2], s[0]+":"+s[1])
@@ -135,22 +136,20 @@ func main() {
 		pipePath string
 		err      error
 	)
+	dlog.Init("graftcp-local", dlog.SeverityInfo, "")
+
 	flag.StringVar(&ListenAddr, "listen", ":2233", "Listen address")
-	flag.StringVar(&Socks5Addr, "socks5", "127.0.0.1:1080", "SOCKS5 listen address")
+	flag.StringVar(&Socks5Addr, "socks5", "127.0.0.1:1080", "SOCKS5 address")
 	flag.StringVar(&pipePath, "pipepath", "/tmp/graftcplocal.fifo", "Pipe path for graftcp to send address info")
 	flag.Parse()
 
 	syscall.Mkfifo(pipePath, uint32(os.ModePerm))
 	FifoFd, err = os.OpenFile(pipePath, os.O_RDWR, 0)
 	if err != nil {
-		log.Fatal(err)
+		dlog.Fatalf("os.OpenFile(%s) err: %s", pipePath, err.Error())
 	}
 	go updateProcessAddrInfo()
 
 	l := NewLocal(ListenAddr, Socks5Addr)
 	l.Start()
-}
-
-func init() {
-	log.SetFlags(log.Flags() | log.Lshortfile)
 }
