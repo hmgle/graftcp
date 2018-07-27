@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -60,19 +61,27 @@ func getPidByAddr(localAddr string) (pid string, destAddr string) {
 		log.Printf("getInodeByAddrs(%s, %s) err: %s\n", localAddr, faddr, err.Error())
 		return "", ""
 	}
-	for pid, addr := range ProcessPortMap {
-		if hasIncludeInode(pid, inode) {
-			delete(ProcessPortMap, pid)
-			return pid, addr
+	RangePidAddr(func(p, a string) bool {
+		if hasIncludeInode(p, inode) {
+			pid = p
+			destAddr = a
+			return false
 		}
+		return true
+	})
+	if pid != "" {
+		DeletePidAddr(pid)
 	}
-	return "", ""
+	return
 }
 
 func (s *Local) handleConn(conn net.Conn) error {
 	raddr := conn.RemoteAddr()
 	pid, addr := getPidByAddr(raddr.String())
 	log.Println("pid: ", pid, "\naddr: ", addr)
+	if pid == "" || addr == "" {
+		return fmt.Errorf("can't find the pid and addr for %s", raddr.String())
+	}
 
 	dialer, err := proxy.SOCKS5("tcp", s.baddr.String(), nil, proxy.Direct)
 	if err != nil {
@@ -102,11 +111,6 @@ func pipe(dst, src net.Conn) {
 	}
 }
 
-var (
-	// map[pid]dest-ip-info
-	ProcessPortMap = make(map[string]string)
-)
-
 func updateProcessPortInfo() {
 	r := bufio.NewReader(fifoFd)
 	for {
@@ -121,7 +125,7 @@ func updateProcessPortInfo() {
 			log.Println("r.ReadLine() :", string(line))
 			break
 		}
-		ProcessPortMap[s[2]] = s[0] + ":" + s[1]
+		StorePidAddr(s[2], s[0]+":"+s[1])
 	}
 }
 
