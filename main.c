@@ -3,7 +3,7 @@
 #include "graftcp.h"
 
 char *LOCAL_ADDR = "127.0.0.1";
-uint16_t LOCAL_PORT = 2080;
+uint16_t LOCAL_PORT = 2233;
 struct sockaddr_in PROXY_SA;
 char *LOCAL_PIPE_PAHT = "/tmp/graftcplocal.fifo";
 int LOCAL_PIPE_FD;
