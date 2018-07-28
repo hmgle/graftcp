@@ -54,7 +54,7 @@ func parseLine(line string) (key, val string) {
 	return strings.TrimSpace(items[0]), strings.TrimSpace(items[1])
 }
 
-func ParseConfigFile(path string) error {
+func ParseConfigFile(path string, app *App) error {
 	file, err := os.Open(path)
 	if err != nil {
 		dlog.Errorf("os.Open(%s) err: %s", path, err.Error())
@@ -75,21 +75,21 @@ func ParseConfigFile(path string) error {
 		}
 		setCfg(parseLine(line))
 	}
-	overrideConfig()
+	overrideConfig(app)
 	return nil
 }
 
-func overrideConfig() {
+func overrideConfig(app *App) {
 	flagset := make(map[string]bool)
 	flag.Visit(func(f *flag.Flag) { flagset[f.Name] = true })
 	if !flagset["listen"] && Cfg.Listen != "" {
-		ListenAddr = Cfg.Listen
+		app.ListenAddr = Cfg.Listen
 	}
 	if !flagset["socks5"] && Cfg.Socks5 != "" {
-		Socks5Addr = Cfg.Socks5
+		app.Socks5Addr = Cfg.Socks5
 	}
 	if !flagset["pipepath"] && Cfg.PipePath != "" {
-		PipePath = Cfg.PipePath
+		app.PipePath = Cfg.PipePath
 	}
 	if !flagset["logfile"] && Cfg.Logfile != "" {
 		dlog.UseLogFile(Cfg.Logfile)

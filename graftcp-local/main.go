@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/jedisct1/dlog"
+	"github.com/kardianos/service"
 
 	"golang.org/x/net/proxy"
 )
@@ -18,20 +19,25 @@ import (
 type Local struct {
 	faddr *net.TCPAddr // Frontend address: graftcp-local address
 	baddr *net.TCPAddr // Backend address: socks5 address
+
+	faddrString string
+	baddrString string
 }
 
-func NewLocal(faddr, baddr string) *Local {
-	a1, err := net.ResolveTCPAddr("tcp", faddr)
+func NewLocal(listenAddr, socks5Addr string) *Local {
+	a1, err := net.ResolveTCPAddr("tcp", listenAddr)
 	if err != nil {
-		dlog.Fatalf("resolve frontend(%s) error: %s", faddr, err.Error())
+		dlog.Fatalf("resolve frontend(%s) error: %s", listenAddr, err.Error())
 	}
-	a2, err := net.ResolveTCPAddr("tcp", baddr)
+	a2, err := net.ResolveTCPAddr("tcp", socks5Addr)
 	if err != nil {
-		dlog.Fatalf("resolve backend(%s) error: %s", baddr, err.Error())
+		dlog.Fatalf("resolve backend(%s) error: %s", socks5Addr, err.Error())
 	}
 	return &Local{
-		faddr: a1,
-		baddr: a2,
+		faddr:       a1,
+		baddr:       a2,
+		faddrString: listenAddr,
+		baddrString: socks5Addr,
 	}
 }
 
@@ -53,10 +59,10 @@ func (l *Local) Start() {
 	}
 }
 
-func getPidByAddr(localAddr string) (pid string, destAddr string) {
-	inode, err := getInodeByAddrs(localAddr, ListenAddr)
+func (l *Local) getPidByAddr(localAddr string) (pid string, destAddr string) {
+	inode, err := getInodeByAddrs(localAddr, l.faddrString)
 	if err != nil {
-		dlog.Errorf("getInodeByAddrs(%s, %s) err: %s", localAddr, ListenAddr, err.Error())
+		dlog.Errorf("getInodeByAddrs(%s, %s) err: %s", localAddr, l.faddrString, err.Error())
 		return "", ""
 	}
 	RangePidAddr(func(p, a string) bool {
@@ -75,7 +81,7 @@ func getPidByAddr(localAddr string) (pid string, destAddr string) {
 
 func (l *Local) HandleConn(conn net.Conn) error {
 	raddr := conn.RemoteAddr()
-	pid, addr := getPidByAddr(raddr.String())
+	pid, addr := l.getPidByAddr(raddr.String())
 	if pid == "" || addr == "" {
 		dlog.Errorf("getPidByAddr(%s) failed", raddr.String())
 		return fmt.Errorf("can't find the pid and addr for %s", raddr.String())
@@ -128,34 +134,118 @@ func updateProcessAddrInfo() {
 	}
 }
 
-var (
+type App struct {
 	ListenAddr string
 	Socks5Addr string
-	ConfigFile string
 	PipePath   string
-	FifoFd     *os.File
-)
+}
 
-func main() {
-	var err error
-	dlog.Init("graftcp-local", dlog.SeverityInfo, "")
-
-	flag.StringVar(&ListenAddr, "listen", ":2233", "Listen address")
-	flag.StringVar(&Socks5Addr, "socks5", "127.0.0.1:1080", "SOCKS5 address")
-	flag.StringVar(&ConfigFile, "config", "", "Path to the configuration file")
-	flag.StringVar(&PipePath, "pipepath", "/tmp/graftcplocal.fifo", "Pipe path for graftcp to send address info")
-	flag.Parse()
-	if ConfigFile != "" {
-		ParseConfigFile(ConfigFile)
+func (app *App) Start(s service.Service) error {
+	if s != nil {
+		go func() {
+			app.run()
+		}()
+	} else {
+		app.run()
 	}
+	return nil
+}
 
-	syscall.Mkfifo(PipePath, uint32(os.ModePerm))
-	FifoFd, err = os.OpenFile(PipePath, os.O_RDWR, 0)
+func (app *App) run() {
+	var err error
+
+	syscall.Mkfifo(app.PipePath, uint32(os.ModePerm))
+	FifoFd, err = os.OpenFile(app.PipePath, os.O_RDWR, 0)
 	if err != nil {
-		dlog.Fatalf("os.OpenFile(%s) err: %s", PipePath, err.Error())
+		dlog.Fatalf("os.OpenFile(%s) err: %s", app.PipePath, err.Error())
 	}
 	go updateProcessAddrInfo()
 
-	l := NewLocal(ListenAddr, Socks5Addr)
+	l := NewLocal(app.ListenAddr, app.Socks5Addr)
 	l.Start()
+}
+
+func (app *App) Stop(s service.Service) error {
+	return nil
+}
+
+var (
+	FifoFd *os.File
+)
+
+func main() {
+	var (
+		err        error
+		configFile string
+	)
+	dlog.Init("graftcp-local", dlog.SeverityInfo, "")
+
+	pwd, err := os.Getwd()
+	if err != nil {
+		dlog.Fatal("Unable to find the path to the current directory")
+	}
+	svcConfig := &service.Config{
+		Name:             "graftcp-local",
+		DisplayName:      "graftcp local service",
+		Description:      "Translate graftcp TCP to SOCKS5",
+		WorkingDirectory: pwd,
+	}
+	svcFlag := flag.String("service", "", fmt.Sprintf("Control the system service: %q", service.ControlAction))
+	app := &App{}
+	svc, err := service.New(app, svcConfig)
+	if err != nil {
+		svc = nil
+		dlog.Debug(err)
+	}
+
+	flag.StringVar(&app.ListenAddr, "listen", ":2233", "Listen address")
+	flag.StringVar(&app.Socks5Addr, "socks5", "127.0.0.1:1080", "SOCKS5 address")
+	flag.StringVar(&configFile, "config", "", "Path to the configuration file")
+	flag.StringVar(&app.PipePath, "pipepath", "/tmp/graftcplocal.fifo", "Pipe path for graftcp to send address info")
+	flag.Parse()
+	if configFile != "" {
+		ParseConfigFile(configFile, app)
+	}
+
+	dlog.Noticef("graftcp-local")
+	if *svcFlag != "" {
+		if svc == nil {
+			dlog.Fatal("Built-in service installation is not supported on this platform")
+		}
+		if err := service.Control(svc, *svcFlag); err != nil {
+			dlog.Fatal(err)
+		}
+		if *svcFlag == "install" {
+			dlog.Notice("Installed as a service. Use `-service start` to start")
+		} else if *svcFlag == "uninstall" {
+			dlog.Notice("Service uninstalled")
+		} else if *svcFlag == "start" {
+			dlog.Notice("Service started")
+		} else if *svcFlag == "stop" {
+			dlog.Notice("Service stopped")
+		} else if *svcFlag == "restart" {
+			dlog.Notice("Service restarted")
+		}
+		return
+	}
+	if svc != nil {
+		err = svc.Run()
+		if err != nil {
+			dlog.Fatal(err)
+		}
+	} else {
+		app.Start(nil)
+	}
+
+	/*
+		syscall.Mkfifo(PipePath, uint32(os.ModePerm))
+		FifoFd, err = os.OpenFile(PipePath, os.O_RDWR, 0)
+		if err != nil {
+			dlog.Fatalf("os.OpenFile(%s) err: %s", PipePath, err.Error())
+		}
+		go updateProcessAddrInfo()
+
+		l := NewLocal(ListenAddr, Socks5Addr)
+		l.Start()
+	*/
 }
