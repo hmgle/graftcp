@@ -22,6 +22,8 @@ type Local struct {
 
 	faddrString string
 	baddrString string
+
+	fifoFd *os.File
 }
 
 func NewLocal(listenAddr, socks5Addr string) *Local {
@@ -116,8 +118,8 @@ func pipe(dst, src net.Conn) {
 	}
 }
 
-func updateProcessAddrInfo() {
-	r := bufio.NewReader(FifoFd)
+func (l *Local) updateProcessAddrInfo() {
+	r := bufio.NewReader(l.fifoFd)
 	for {
 		line, _, err := r.ReadLine()
 		if err != nil {
@@ -154,24 +156,21 @@ func (app *App) Start(s service.Service) error {
 func (app *App) run() {
 	var err error
 
+	l := NewLocal(app.ListenAddr, app.Socks5Addr)
+
 	syscall.Mkfifo(app.PipePath, uint32(os.ModePerm))
-	FifoFd, err = os.OpenFile(app.PipePath, os.O_RDWR, 0)
+	l.fifoFd, err = os.OpenFile(app.PipePath, os.O_RDWR, 0)
 	if err != nil {
 		dlog.Fatalf("os.OpenFile(%s) err: %s", app.PipePath, err.Error())
 	}
-	go updateProcessAddrInfo()
 
-	l := NewLocal(app.ListenAddr, app.Socks5Addr)
+	go l.updateProcessAddrInfo()
 	l.Start()
 }
 
 func (app *App) Stop(s service.Service) error {
 	return nil
 }
-
-var (
-	FifoFd *os.File
-)
 
 func main() {
 	var (
