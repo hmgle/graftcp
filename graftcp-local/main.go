@@ -41,6 +41,7 @@ func (l *Local) Start() {
 		dlog.Fatalf("net.ListenTCP(%s) err: %s", l.faddr.String(), err.Error())
 	}
 	defer ln.Close()
+	dlog.Infof("graft-local start listening %s...", l.faddr.String())
 
 	for {
 		conn, err := ln.AcceptTCP()
@@ -76,8 +77,10 @@ func (l *Local) HandleConn(conn net.Conn) error {
 	raddr := conn.RemoteAddr()
 	pid, addr := getPidByAddr(raddr.String())
 	if pid == "" || addr == "" {
+		dlog.Errorf("getPidByAddr(%s) failed", raddr.String())
 		return fmt.Errorf("can't find the pid and addr for %s", raddr.String())
 	}
+	dlog.Infof("Request PID: %s, Source Addr: %s, Dest Addr: %s", pid, raddr.String(), addr)
 
 	dialer, err := proxy.SOCKS5("tcp", l.baddr.String(), nil, proxy.Direct)
 	if err != nil {
@@ -128,25 +131,28 @@ func updateProcessAddrInfo() {
 var (
 	ListenAddr string
 	Socks5Addr string
+	ConfigFile string
+	PipePath   string
 	FifoFd     *os.File
 )
 
 func main() {
-	var (
-		pipePath string
-		err      error
-	)
+	var err error
 	dlog.Init("graftcp-local", dlog.SeverityInfo, "")
 
 	flag.StringVar(&ListenAddr, "listen", ":2233", "Listen address")
 	flag.StringVar(&Socks5Addr, "socks5", "127.0.0.1:1080", "SOCKS5 address")
-	flag.StringVar(&pipePath, "pipepath", "/tmp/graftcplocal.fifo", "Pipe path for graftcp to send address info")
+	flag.StringVar(&ConfigFile, "config", "", "Path to the configuration file")
+	flag.StringVar(&PipePath, "pipepath", "/tmp/graftcplocal.fifo", "Pipe path for graftcp to send address info")
 	flag.Parse()
+	if ConfigFile != "" {
+		ParseConfigFile(ConfigFile)
+	}
 
-	syscall.Mkfifo(pipePath, uint32(os.ModePerm))
-	FifoFd, err = os.OpenFile(pipePath, os.O_RDWR, 0)
+	syscall.Mkfifo(PipePath, uint32(os.ModePerm))
+	FifoFd, err = os.OpenFile(PipePath, os.O_RDWR, 0)
 	if err != nil {
-		dlog.Fatalf("os.OpenFile(%s) err: %s", pipePath, err.Error())
+		dlog.Fatalf("os.OpenFile(%s) err: %s", PipePath, err.Error())
 	}
 	go updateProcessAddrInfo()
 
