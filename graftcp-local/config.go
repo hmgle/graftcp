@@ -5,6 +5,7 @@ import (
 	"flag"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -55,6 +56,16 @@ func parseLine(line string) (key, val string) {
 }
 
 func ParseConfigFile(path string, app *App) error {
+	if path == "" {
+		// try default config file "graftcp-local.conf"
+		exePath, _ := os.Executable()
+		defaultConf := filepath.Dir(exePath) + "/graftcp-local.conf"
+		if _, err := os.Stat(defaultConf); err == nil {
+			dlog.Infof("find config: %s", defaultConf)
+			path = defaultConf
+		}
+	}
+
 	file, err := os.Open(path)
 	if err != nil {
 		dlog.Errorf("os.Open(%s) err: %s", path, err.Error())

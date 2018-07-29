@@ -81,9 +81,7 @@ func main() {
 	flag.StringVar(&configFile, "config", "", "Path to the configuration file")
 	flag.StringVar(&app.PipePath, "pipepath", "/tmp/graftcplocal.fifo", "Pipe path for graftcp to send address info")
 	flag.Parse()
-	if configFile != "" {
-		ParseConfigFile(configFile, app)
-	}
+	ParseConfigFile(configFile, app)
 
 	dlog.Noticef("graftcp-local start")
 	if *svcFlag != "" {
