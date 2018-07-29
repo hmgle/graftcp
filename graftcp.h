@@ -17,6 +17,7 @@
 #include <sys/reg.h>
 #include <sys/syscall.h>
 #include <fcntl.h>
+#include<linux/sched.h>
 #include <assert.h>
 
 #include "uthash.h"
@@ -31,8 +32,6 @@ struct socket_info {
   uint64_t magic_fd;
   int domain;
   int type;
-  struct in_addr dest_addr;
-  unsigned int dest_port;
   UT_hash_handle hh;            /* makes this structure hashable */
 };
 

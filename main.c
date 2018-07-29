@@ -36,23 +36,20 @@ void connect_pre_handle(struct proc_info *pinfp)
     return;
 
   long addr = get_syscall_arg(pinfp->pid, 1);
-  struct sockaddr_in tmp_sa;
+  struct sockaddr_in dest_sa;
 
-  getdata(pinfp->pid, addr, (char *)&tmp_sa, sizeof(tmp_sa));
+  getdata(pinfp->pid, addr, (char *)&dest_sa, sizeof(dest_sa));
 
-  unsigned int ip_int = SOCKADDR(tmp_sa);
-  unsigned short ip_port = SOCKPORT(tmp_sa);
-  struct in_addr tmp_ip_addr;
+  unsigned short dest_ip_port = SOCKPORT(dest_sa);
+  struct in_addr dest_ip_addr;
 
-  tmp_ip_addr.s_addr = ip_int;
+  dest_ip_addr.s_addr = SOCKADDR(dest_sa);
   putdata(pinfp->pid, addr, (char *)&PROXY_SA, sizeof(PROXY_SA));
-  si->dest_addr = tmp_ip_addr;
-  si->dest_port = ip_port;
 
   char buf[1024] = {0};
-  strcpy(buf, inet_ntoa(tmp_ip_addr));
+  strcpy(buf, inet_ntoa(dest_ip_addr));
   strcat(buf, ":");
-  sprintf(&buf[strlen(buf)], "%d:%d\n", ntohs(ip_port), pinfp->pid);
+  sprintf(&buf[strlen(buf)], "%d:%d\n", ntohs(dest_ip_port), pinfp->pid);
   if (write(LOCAL_PIPE_FD, buf, strlen(buf)) <= 0) {
     if (errno)
       perror("write");
@@ -68,6 +65,13 @@ void close_pre_handle(struct proc_info *pinfp)
     del_socket_info(si);
     free(si);
   }
+}
+
+void clone_pre_handle(struct proc_info *pinfp)
+{
+  long flags = get_syscall_arg(pinfp->pid, 2);
+  flags &= ~CLONE_UNTRACED;
+  ptrace(PTRACE_POKEUSER, pinfp->pid, sizeof(long)*RDX, flags);
 }
 
 void socket_exiting_handle(struct proc_info *pinfp, int fd)
@@ -136,6 +140,9 @@ int trace_syscall_entering(struct proc_info *pinfp)
     break;
   case SYS_close:
     close_pre_handle(pinfp);
+    break;
+  case SYS_clone:
+    clone_pre_handle(pinfp);
     break;
   }
   pinfp->flags |= FLAG_INSYSCALL;
