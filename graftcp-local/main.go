@@ -33,6 +33,10 @@ func (app *App) run() {
 	l := NewLocal(app.ListenAddr, app.Socks5Addr)
 
 	syscall.Mkfifo(app.PipePath, uint32(os.ModePerm))
+	err = os.Chmod(app.PipePath, 0666)
+	if err != nil {
+		dlog.Fatalf("os.Chmod(%s, 0666) err: %s", app.PipePath, err.Error())
+	}
 	l.FifoFd, err = os.OpenFile(app.PipePath, os.O_RDWR, 0)
 	if err != nil {
 		dlog.Fatalf("os.OpenFile(%s) err: %s", app.PipePath, err.Error())
@@ -43,6 +47,7 @@ func (app *App) run() {
 }
 
 func (app *App) Stop(s service.Service) error {
+	dlog.Noticef("graftcp-local stop")
 	return nil
 }
 
@@ -80,7 +85,7 @@ func main() {
 		ParseConfigFile(configFile, app)
 	}
 
-	dlog.Noticef("graftcp-local")
+	dlog.Noticef("graftcp-local start")
 	if *svcFlag != "" {
 		if svc == nil {
 			dlog.Fatal("Built-in service installation is not supported on this platform")
