@@ -69,9 +69,9 @@ void close_pre_handle(struct proc_info *pinfp)
 
 void clone_pre_handle(struct proc_info *pinfp)
 {
-  long flags = get_syscall_arg(pinfp->pid, 2);
+  long flags = get_syscall_arg(pinfp->pid, 0);
   flags &= ~CLONE_UNTRACED;
-  ptrace(PTRACE_POKEUSER, pinfp->pid, sizeof(long)*RDX, flags);
+  ptrace(PTRACE_POKEUSER, pinfp->pid, sizeof(long)*RDI, flags);
 }
 
 void socket_exiting_handle(struct proc_info *pinfp, int fd)
