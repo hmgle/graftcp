@@ -82,6 +82,7 @@ func (l *Local) HandleConn(conn net.Conn) error {
 	pid, addr := l.getPidByAddr(raddr.String())
 	if pid == "" || addr == "" {
 		dlog.Errorf("getPidByAddr(%s) failed", raddr.String())
+		conn.Close()
 		return fmt.Errorf("can't find the pid and addr for %s", raddr.String())
 	}
 	dlog.Infof("Request PID: %s, Source Addr: %s, Dest Addr: %s", pid, raddr.String(), addr)
@@ -89,29 +90,28 @@ func (l *Local) HandleConn(conn net.Conn) error {
 	dialer, err := proxy.SOCKS5("tcp", l.baddr.String(), nil, proxy.Direct)
 	if err != nil {
 		dlog.Errorf("proxy.SOCKS5(\"tcp\", %s,...) err: %s", l.baddr, err.Error())
+		conn.Close()
 		return err
 	}
 	socks5Conn, err := dialer.Dial("tcp", addr)
 	if err != nil {
 		dlog.Errorf("dialer.Dial(%s) err: %s", addr, err.Error())
+		conn.Close()
 		return err
 	}
-	go pipe(conn, socks5Conn)
-	go pipe(socks5Conn, conn)
+	readChan, writeChan := make(chan int64), make(chan int64)
+	go pipe(conn, socks5Conn, writeChan)
+	go pipe(socks5Conn, conn, readChan)
+	<-writeChan
+	<-readChan
+	conn.Close()
+	socks5Conn.Close()
 	return nil
 }
 
-func pipe(dst, src net.Conn) {
-	for {
-		n, err := io.Copy(dst, src)
-		if err != nil {
-			dlog.Errorf("io.Copy err: %s", err.Error())
-			return
-		}
-		if n == 0 {
-			return
-		}
-	}
+func pipe(dst, src net.Conn, c chan int64) {
+	n, _ := io.Copy(dst, src)
+	c <- n
 }
 
 func (l *Local) UpdateProcessAddrInfo() {
