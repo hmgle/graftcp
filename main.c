@@ -32,10 +32,6 @@ void connect_pre_handle(struct proc_info *pinfp)
   if (si == NULL)
     return;
 
-  // XXX not need?
-  if ((si->type & SOCK_STREAM) < 1 || si->domain != AF_INET)
-    return;
-
   long addr = get_syscall_arg(pinfp->pid, 1);
   struct sockaddr_in dest_sa;
 
@@ -45,6 +41,7 @@ void connect_pre_handle(struct proc_info *pinfp)
   struct in_addr dest_ip_addr;
 
   dest_ip_addr.s_addr = SOCKADDR(dest_sa);
+
   putdata(pinfp->pid, addr, (char *)&PROXY_SA, sizeof(PROXY_SA));
 
   char buf[1024] = {0};
@@ -82,11 +79,6 @@ void socket_exiting_handle(struct proc_info *pinfp, int fd)
   si = find_socket_info((MAGIC_FD << 31) + pinfp->pid);
   if (si == NULL)
     return;
-  if ((si->type & SOCK_STREAM) < 1 || si->domain != AF_INET) {
-    del_socket_info(si);
-    free(si);
-    return;
-  }
   si->fd = fd;
   del_socket_info(si);
   si->magic_fd = (fd << 31) + pinfp->pid;
