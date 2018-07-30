@@ -5,6 +5,7 @@
 #include "string-set.h"
 
 char *LOCAL_ADDR = "127.0.0.1";
+char *LOCAL_DEFAULT_ADDR = "0.0.0.0";
 uint16_t LOCAL_PORT = 2233;
 struct sockaddr_in PROXY_SA;
 char *LOCAL_PIPE_PAHT = "/tmp/graftcplocal.fifo";
@@ -23,9 +24,8 @@ static void load_blackip_file(char *path)
     perror("fopen");
     exit(1);
   }
-  if (BLACKLIST_IP == NULL) {
+  if (BLACKLIST_IP == NULL)
     BLACKLIST_IP = str_set_new();
-  }
   while ((read = getline(&line, &len, f)) != -1) {
     /* 7 is the shortest ip: (x.x.x.x) */
     if (read < 7)
@@ -289,22 +289,26 @@ static void usage(char **argv)
       "    Path of fifo to communicate with graftcp-local. Default: /tmp/graftcplocal.fifo\n"
       " -b --blackip-file=<black-ip-file-path>\n"
       "    The IP in black-ip-file will connect direct.\n"
+      " -n --not-ignore-local\n"
+      "    Connecting to local is not changed by default, this option will redirect it to SOCKS5.\n"
       "\n", argv[0]);
 }
 
 int main(int argc, char **argv)
 {
   int opt, index;
+  bool ignore_local = true;
   struct option long_opts[] = {
     {"help",       no_argument,       0, 'h'},
     {"local-addr", required_argument, 0, 'a'},
     {"local-port", required_argument, 0, 'p'},
     {"local-fifo", required_argument, 0, 'f'},
     {"blackip-file", required_argument, 0, 'b'},
+    {"not-ignore-local", no_argument, 0, 'n'},
     {0, 0, 0, 0}
   };
 
-  while ((opt = getopt_long(argc, argv, "+ha:p:f:b:", long_opts, &index)) != -1) {
+  while ((opt = getopt_long(argc, argv, "+ha:p:f:b:n", long_opts, &index)) != -1) {
     switch (opt) {
     case 'a':
       LOCAL_ADDR = optarg;
@@ -318,12 +322,21 @@ int main(int argc, char **argv)
     case 'b':
       load_blackip_file(optarg);
       break;
+    case 'n':
+      ignore_local = false;
+      break;
     case 0:
     case 'h':
     default:
       usage(argv);
       exit(0);
     }
+  }
+  if (ignore_local) {
+    if (BLACKLIST_IP == NULL)
+      BLACKLIST_IP = str_set_new();
+    str_set_put(BLACKLIST_IP, LOCAL_ADDR);
+    str_set_put(BLACKLIST_IP, LOCAL_DEFAULT_ADDR);
   }
   PROXY_SA.sin_family = AF_INET;
   PROXY_SA.sin_port = htons(LOCAL_PORT);
