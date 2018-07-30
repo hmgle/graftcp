@@ -11,8 +11,9 @@ struct sockaddr_in PROXY_SA;
 char *LOCAL_PIPE_PAHT = "/tmp/graftcplocal.fifo";
 int LOCAL_PIPE_FD;
 struct str_set *BLACKLIST_IP = NULL;
+struct str_set *WHITELACKLIST_IP = NULL;
 
-static void load_blackip_file(char *path)
+static void load_ip_file(char *path, struct str_set **set)
 {
   FILE *f;
   char *line = NULL;
@@ -24,17 +25,40 @@ static void load_blackip_file(char *path)
     perror("fopen");
     exit(1);
   }
-  if (BLACKLIST_IP == NULL)
-    BLACKLIST_IP = str_set_new();
+  if (*set == NULL)
+    *set = str_set_new();
   while ((read = getline(&line, &len, f)) != -1) {
     /* 7 is the shortest ip: (x.x.x.x) */
     if (read < 7)
       continue;
     line[read - 1] = '\0';
-    str_set_put(BLACKLIST_IP, line);
+    str_set_put(*set, line);
     line = NULL;
   }
   fclose(f);
+}
+
+static void load_blackip_file(char *path)
+{
+  load_ip_file(path, &BLACKLIST_IP);
+}
+
+static void load_whiteip_file(char *path)
+{
+  load_ip_file(path, &WHITELACKLIST_IP);
+}
+
+static bool is_ignore(const char *ip)
+{
+  if (BLACKLIST_IP) {
+    if (is_str_set_member(BLACKLIST_IP, ip))
+      return true;
+  }
+  if (WHITELACKLIST_IP) {
+    if (!is_str_set_member(WHITELACKLIST_IP, ip))
+      return true;
+  }
+  return false;
 }
 
 void socket_pre_handle(struct proc_info *pinfp)
@@ -71,10 +95,8 @@ void connect_pre_handle(struct proc_info *pinfp)
 
   dest_ip_addr.s_addr = SOCKADDR(dest_sa);
   dest_ip_addr_str = inet_ntoa(dest_ip_addr);
-  if (BLACKLIST_IP) {
-    if (is_str_set_member(BLACKLIST_IP, dest_ip_addr_str))
-      return;
-  }
+  if (is_ignore(dest_ip_addr_str))
+    return
 
   putdata(pinfp->pid, addr, (char *)&PROXY_SA, sizeof(PROXY_SA));
 
@@ -289,6 +311,8 @@ static void usage(char **argv)
       "    Path of fifo to communicate with graftcp-local. Default: /tmp/graftcplocal.fifo\n"
       " -b --blackip-file=<black-ip-file-path>\n"
       "    The IP in black-ip-file will connect direct.\n"
+      " -w --whiteip-file=<white-ip-file-path>\n"
+      "    Only redirect the connect that destination ip in the white-ip-file to SOCKS5\n"
       " -n --not-ignore-local\n"
       "    Connecting to local is not changed by default, this option will redirect it to SOCKS5.\n"
       "\n", argv[0]);
@@ -304,6 +328,7 @@ int main(int argc, char **argv)
     {"local-port", required_argument, 0, 'p'},
     {"local-fifo", required_argument, 0, 'f'},
     {"blackip-file", required_argument, 0, 'b'},
+    {"whiteip-file", required_argument, 0, 'w'},
     {"not-ignore-local", no_argument, 0, 'n'},
     {0, 0, 0, 0}
   };
@@ -321,6 +346,9 @@ int main(int argc, char **argv)
       break;
     case 'b':
       load_blackip_file(optarg);
+      break;
+    case 'w':
+      load_whiteip_file(optarg);
       break;
     case 'n':
       ignore_local = false;
