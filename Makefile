@@ -1,6 +1,6 @@
 all: graftcp graftcp-local/graftcp-local
 
-graftcp: main.o util.o
+graftcp: main.o util.o string-set.o
 	cc $^ -o $@
 
 graftcp-local/graftcp-local: graftcp-local/*.go

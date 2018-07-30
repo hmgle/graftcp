@@ -2,12 +2,40 @@
 #include <getopt.h>
 
 #include "graftcp.h"
+#include "string-set.h"
 
 char *LOCAL_ADDR = "127.0.0.1";
 uint16_t LOCAL_PORT = 2233;
 struct sockaddr_in PROXY_SA;
 char *LOCAL_PIPE_PAHT = "/tmp/graftcplocal.fifo";
 int LOCAL_PIPE_FD;
+struct str_set *BLACKLIST_IP = NULL;
+
+static void load_blackip_file(char *path)
+{
+  FILE *f;
+  char *line = NULL;
+  size_t len = 0;
+  ssize_t read;
+
+  f = fopen(path, "r");
+  if (f == NULL) {
+    perror("fopen");
+    exit(1);
+  }
+  if (BLACKLIST_IP == NULL) {
+    BLACKLIST_IP = str_set_new();
+  }
+  while ((read = getline(&line, &len, f)) != -1) {
+    /* 7 is the shortest ip: (x.x.x.x) */
+    if (read < 7)
+      continue;
+    line[read - 1] = '\0';
+    str_set_put(BLACKLIST_IP, line);
+    line = NULL;
+  }
+  fclose(f);
+}
 
 void socket_pre_handle(struct proc_info *pinfp)
 {
@@ -39,13 +67,19 @@ void connect_pre_handle(struct proc_info *pinfp)
 
   unsigned short dest_ip_port = SOCKPORT(dest_sa);
   struct in_addr dest_ip_addr;
+  char *dest_ip_addr_str;
 
   dest_ip_addr.s_addr = SOCKADDR(dest_sa);
+  dest_ip_addr_str = inet_ntoa(dest_ip_addr);
+  if (BLACKLIST_IP) {
+    if (is_str_set_member(BLACKLIST_IP, dest_ip_addr_str))
+      return;
+  }
 
   putdata(pinfp->pid, addr, (char *)&PROXY_SA, sizeof(PROXY_SA));
 
   char buf[1024] = {0};
-  strcpy(buf, inet_ntoa(dest_ip_addr));
+  strcpy(buf, dest_ip_addr_str);
   strcat(buf, ":");
   sprintf(&buf[strlen(buf)], "%d:%d\n", ntohs(dest_ip_port), pinfp->pid);
   if (write(LOCAL_PIPE_FD, buf, strlen(buf)) <= 0) {
@@ -253,6 +287,8 @@ static void usage(char **argv)
       "    Which port is graftcp-local listening? Default: 2233\n"
       " -f --local-fifo=<fifo-path>\n"
       "    Path of fifo to communicate with graftcp-local. Default: /tmp/graftcplocal.fifo\n"
+      " -b --blackip-file=<black-ip-file-path>\n"
+      "    The IP in black-ip-file will connect direct.\n"
       "\n", argv[0]);
 }
 
@@ -264,10 +300,11 @@ int main(int argc, char **argv)
     {"local-addr", required_argument, 0, 'a'},
     {"local-port", required_argument, 0, 'p'},
     {"local-fifo", required_argument, 0, 'f'},
+    {"blackip-file", required_argument, 0, 'b'},
     {0, 0, 0, 0}
   };
 
-  while ((opt = getopt_long(argc, argv, "+ha:p:f:", long_opts, &index)) != -1) {
+  while ((opt = getopt_long(argc, argv, "+ha:p:f:b:", long_opts, &index)) != -1) {
     switch (opt) {
     case 'a':
       LOCAL_ADDR = optarg;
@@ -277,6 +314,9 @@ int main(int argc, char **argv)
       break;
     case 'f':
       LOCAL_PIPE_PAHT = optarg;
+      break;
+    case 'b':
+      load_blackip_file(optarg);
       break;
     case 0:
     case 'h':
