@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <getopt.h>
 
 #include "graftcp.h"
 
@@ -94,11 +95,11 @@ void socket_exiting_handle(struct proc_info *pinfp, int fd)
 
 void do_child(int argc, char **argv)
 {
-  char *args [argc+1];
+  char *args[argc+1];
   int i;
   pid_t pid;
 
-  for (i=0; i<argc; i++)
+  for (i = 0; i < argc; i++)
     args[i] = argv[i];
   args[argc] = NULL;
   ptrace(PTRACE_TRACEME, 0, NULL, NULL);
@@ -122,7 +123,7 @@ void init(int argc, char **argv)
     perror("fork");
     exit(errno);
   } else if (child == 0) {
-    do_child(argc - 1, &argv[1]);
+    do_child(argc, argv);
   }
   pi = alloc_proc_info(child);
   pi->flags |= FLAG_STARTUP;
@@ -250,8 +251,48 @@ end:
   return 0;
 }
 
+static void usage(char **argv)
+{
+  fprintf(stderr, "Usage: %s [options] prog [prog-args]\n"
+      "Options:\n"
+      " -a --local-addr=<graftcp-local-IP-addr>\n"
+      "    graftcp-local's IP address. Default: localhost\n"
+      " -p --local-port=<graftcp-local-port>\n"
+      "    Which port is graftcp-local listening? Default: 2233\n"
+      " -f --local-fifo=<fifo-path>\n"
+      "    Path of fifo to communicate with graftcp-local. Default: /tmp/graftcplocal.fifo\n"
+      "\n", argv[0]);
+}
+
 int main(int argc, char **argv)
 {
+  int opt, index;
+  struct option long_opts[] = {
+    {"help",       no_argument,       0, 'h'},
+    {"local-addr", required_argument, 0, 'a'},
+    {"local-port", required_argument, 0, 'p'},
+    {"local-fifo", required_argument, 0, 'f'},
+    {0, 0, 0, 0}
+  };
+
+  while ((opt = getopt_long(argc, argv, "ha:p:f:", long_opts, &index)) != -1) {
+    switch (opt) {
+    case 'a':
+      LOCAL_ADDR = optarg;
+      break;
+    case 'p':
+      LOCAL_PORT = atoi(optarg);
+      break;
+    case 'f':
+      LOCAL_PIPE_PAHT = optarg;
+      break;
+    case 0:
+    case 'h':
+    default:
+      usage(argv);
+      exit(0);
+    }
+  }
   PROXY_SA.sin_family = AF_INET;
   PROXY_SA.sin_port = htons(LOCAL_PORT);
   if (inet_aton(LOCAL_ADDR, &PROXY_SA.sin_addr) == 0) {
@@ -271,6 +312,6 @@ int main(int argc, char **argv)
     exit(errno);
   }
 
-  init(argc, argv);
+  init(argc - optind, argv + optind);
   return do_trace();
 }
