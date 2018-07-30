@@ -275,7 +275,7 @@ int main(int argc, char **argv)
     {0, 0, 0, 0}
   };
 
-  while ((opt = getopt_long(argc, argv, "ha:p:f:", long_opts, &index)) != -1) {
+  while ((opt = getopt_long(argc, argv, "+ha:p:f:", long_opts, &index)) != -1) {
     switch (opt) {
     case 'a':
       LOCAL_ADDR = optarg;
