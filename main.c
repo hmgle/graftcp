@@ -96,7 +96,7 @@ void connect_pre_handle(struct proc_info *pinfp)
   dest_ip_addr.s_addr = SOCKADDR(dest_sa);
   dest_ip_addr_str = inet_ntoa(dest_ip_addr);
   if (is_ignore(dest_ip_addr_str))
-    return
+    return;
 
   putdata(pinfp->pid, addr, (char *)&PROXY_SA, sizeof(PROXY_SA));
 
@@ -333,7 +333,7 @@ int main(int argc, char **argv)
     {0, 0, 0, 0}
   };
 
-  while ((opt = getopt_long(argc, argv, "+ha:p:f:b:n", long_opts, &index)) != -1) {
+  while ((opt = getopt_long(argc, argv, "+ha:p:f:b:w:n", long_opts, &index)) != -1) {
     switch (opt) {
     case 'a':
       LOCAL_ADDR = optarg;
