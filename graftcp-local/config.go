@@ -63,6 +63,8 @@ func ParseConfigFile(path string, app *App) error {
 		if _, err := os.Stat(defaultConf); err == nil {
 			dlog.Infof("find config: %s", defaultConf)
 			path = defaultConf
+		} else {
+			return nil
 		}
 	}
 

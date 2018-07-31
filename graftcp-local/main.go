@@ -54,6 +54,7 @@ func main() {
 		configFile string
 	)
 	dlog.Init("graftcp-local", dlog.SeverityInfo, "")
+	dlog.Noticef("graftcp-local start")
 
 	pwd, err := os.Getwd()
 	if err != nil {
@@ -80,7 +81,6 @@ func main() {
 	flag.Parse()
 	ParseConfigFile(configFile, app)
 
-	dlog.Noticef("graftcp-local start")
 	if *svcFlag != "" {
 		if svc == nil {
 			dlog.Fatal("Built-in service installation is not supported on this platform")
