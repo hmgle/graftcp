@@ -2,12 +2,12 @@
 #define _STRING_SET_H
 
 struct str_set {
-  int length;
-  int size;
-  struct member {
-    struct member *link;
-    const char *element;
-  } **buckets;
+	int length;
+	int size;
+	struct member {
+		struct member *link;
+		const char *element;
+	} **buckets;
 };
 
 struct str_set *str_set_new();

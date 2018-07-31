@@ -27,12 +27,12 @@
 #define SOCKPORT(x) (satosin(x)->sin_port)
 
 struct socket_info {
-  pid_t pid;
-  int fd;
-  uint64_t magic_fd;
-  int domain;
-  int type;
-  UT_hash_handle hh;            /* makes this structure hashable */
+	pid_t pid;
+	int fd;
+	uint64_t magic_fd;
+	int domain;
+	int type;
+	UT_hash_handle hh;	/* makes this structure hashable */
 };
 
 /* magic fd number */
@@ -45,11 +45,11 @@ struct socket_info {
 #define exiting(pinfp)  ((pinfp)->flags & FLAG_INSYSCALL)
 
 struct proc_info {
-  pid_t pid;
-  int flags;
-  int csn;                      /* current syscall number */
-  struct socket_info *cws;      /* current process's writing socket info */
-  UT_hash_handle hh;            /* makes this structure hashable */
+	pid_t pid;
+	int flags;
+	int csn;		/* current syscall number */
+	struct socket_info *cws;	/* current process's writing socket info */
+	UT_hash_handle hh;	/* makes this structure hashable */
 };
 
 void add_socket_info(struct socket_info *s);
