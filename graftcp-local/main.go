@@ -33,10 +33,7 @@ func (app *App) run() {
 	l := NewLocal(app.ListenAddr, app.Socks5Addr)
 
 	syscall.Mkfifo(app.PipePath, uint32(os.ModePerm))
-	err = os.Chmod(app.PipePath, 0666)
-	if err != nil {
-		dlog.Fatalf("os.Chmod(%s, 0666) err: %s", app.PipePath, err.Error())
-	}
+	os.Chmod(app.PipePath, 0666)
 	l.FifoFd, err = os.OpenFile(app.PipePath, os.O_RDWR, 0)
 	if err != nil {
 		dlog.Fatalf("os.OpenFile(%s) err: %s", app.PipePath, err.Error())

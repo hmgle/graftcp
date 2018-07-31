@@ -14,12 +14,19 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+debug = 0
+
 PREFIX = /usr/local
 BINDIR = $(PREFIX)/bin
 
 INSTALL = install -c
 
 CFLAGS += -Wall
+ifeq ($(debug), 1)
+	CFLAGS += -O0 -g
+else
+	CFLAGS += -O2 -DNDEBUG
+endif
 
 SRC := $(wildcard *.c)
 
