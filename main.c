@@ -404,7 +404,8 @@ int main(int argc, char **argv)
 
 	LOCAL_PIPE_FD = open(LOCAL_PIPE_PAHT, O_WRONLY);
 	if (LOCAL_PIPE_FD < 0) {
-		perror("open");
+		perror("open fifo");
+		fprintf(stderr, "It seems that graftcp-local is not running, should start graftcp-local first.\n");
 		exit(errno);
 	}
 
