@@ -54,7 +54,6 @@ func main() {
 		configFile string
 	)
 	dlog.Init("graftcp-local", dlog.SeverityInfo, "")
-	dlog.Noticef("graftcp-local start")
 
 	pwd, err := os.Getwd()
 	if err != nil {
@@ -80,6 +79,7 @@ func main() {
 	flag.StringVar(&app.PipePath, "pipepath", "/tmp/graftcplocal.fifo", "Pipe path for graftcp to send address info")
 	flag.Parse()
 	ParseConfigFile(configFile, app)
+	dlog.Noticef("graftcp-local start")
 
 	if *svcFlag != "" {
 		if svc == nil {

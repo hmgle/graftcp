@@ -323,24 +323,24 @@ end:
 
 static void usage(char **argv)
 {
-	fprintf(stderr, "Usage: %s [options] prog [prog-args]\n"
+	fprintf(stderr, "Usage: %s [options] prog [prog-args]\n\n"
 		"Options:\n"
-		" -a --local-addr=<graftcp-local-IP-addr>\n"
+		"  -a --local-addr=<graftcp-local-IP-addr>\n"
 		"                    graftcp-local's IP address. Default: localhost\n"
-		" -p --local-port=<graftcp-local-port>\n"
+		"  -p --local-port=<graftcp-local-port>\n"
 		"                    Which port is graftcp-local listening? Default: 2233\n"
-		" -f --local-fifo=<fifo-path>\n"
+		"  -f --local-fifo=<fifo-path>\n"
 		"                    Path of fifo to communicate with graftcp-local.\n"
 		"                    Default: /tmp/graftcplocal.fifo\n"
-		" -b --blackip-file=<black-ip-file-path>\n"
+		"  -b --blackip-file=<black-ip-file-path>\n"
 		"                    The IP in black-ip-file will connect direct\n"
-		" -w --whiteip-file=<white-ip-file-path>\n"
+		"  -w --whiteip-file=<white-ip-file-path>\n"
 		"                    Only redirect the connect that destination ip in the\n"
 		"                    white-ip-file to SOCKS5\n"
-		" -n --not-ignore-local\n"
+		"  -n --not-ignore-local\n"
 		"                    Connecting to local is not changed by default, this\n"
 		"                    option will redirect it to SOCKS5\n"
-		" -h --help\n"
+		"  -h --help\n"
 		"                    Display this help and exit\n"
 		"\n", argv[0]);
 }
