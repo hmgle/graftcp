@@ -9,5 +9,5 @@ compiler:
 
 script:
         - pwd
-        - cd graftcp-local && go get . && cd ..
-        - make
+        - make graftcp
+        - go get -v github.com/hmgle/graftcp/graftcp-local
