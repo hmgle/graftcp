@@ -7,4 +7,6 @@ go:
 compiler:
         - gcc
 
-script: make
+script:
+        - cd graftcp-local && go get . && cd ..
+        - make
