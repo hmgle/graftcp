@@ -1,12 +1,13 @@
-language: c, go
+language: go, c
 
 go:
-        - "1.6"
+        - "1.7"
         - "1.10"
 
 compiler:
         - gcc
 
 script:
+        - pwd
         - cd graftcp-local && go get . && cd ..
         - make
