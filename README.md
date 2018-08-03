@@ -6,7 +6,7 @@ It hooks `connect(2)` funciton via `ptrace(2)` and redirects the connection thro
 -->
 # graftcp
 
-[![Build Status](https://travis-ci.org/hmgle/graftcp.svg?branch=dev)](https://travis-ci.org/hmgle/graftcp)
+[![Build Status](https://travis-ci.org/hmgle/graftcp.svg?branch=master)](https://travis-ci.org/hmgle/graftcp)
 
 **English** | [简体中文](./README.zh-CN.md)
 
