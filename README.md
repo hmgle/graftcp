@@ -19,7 +19,7 @@ given program's connect by [`ptrace(2)`](https://en.wikipedia.org/wiki/Ptrace), 
 
 ## Installation 
 
-Building `graftcp-local` requires [Go](https://golang.org/doc/install) installed.
+Building `graftcp-local` requires [Go 1.8+](https://golang.org/doc/install) installed.
 
 ```sh
 git clone https://github.com/hmgle/graftcp.git

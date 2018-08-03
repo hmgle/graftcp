@@ -13,7 +13,7 @@
 
 ## 安装
 
-`graftcp-local` 使用 Go 编写, [Go](https://golang.org/doc/install) 环境是必需的。
+`graftcp-local` 使用 Go 编写, [Go 1.8+](https://golang.org/doc/install) 环境是必需的。
 
 ```
 git clone https://github.com/hmgle/graftcp.git

@@ -1,7 +1,7 @@
 language: go, c
 
 go:
-        - "1.7"
+        - "1.8"
         - "1.10"
 
 compiler:
