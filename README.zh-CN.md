@@ -1,5 +1,7 @@
 # graftcp
 
+[![Build Status](https://travis-ci.org/hmgle/graftcp.svg?branch=dev)](https://travis-ci.org/hmgle/graftcp)
+
 [English](./README.md) | **简体中文**
 
 ## 简介
@@ -112,7 +114,7 @@ $ wget https://www.google.com
 要达到重定向一个 app 发起的的 TCP 连接到其他目标地址并且该 app 本身对此毫无感知的目的，大概需要这些条件：
 
 - `fork(2)` 一个新进程，通过 `execv(2)` 启动该 app，并使用 `ptrace(2)` 进行跟踪，在 app 执行每一次 TCP 连接前，捕获并拦截这次 `connect(2)` 系统调用，获取目标地址的参数，并通过管道传给 `graftcp-local`。
-- 修改这次 `connect(2)` 系统调用的目标地址参数为 `graftcp-local` 的地址，然后恢复执行被中断的系统调用。返回成功后，这个程序以为自己连的是原始的地址，但其实连的是 `graftcp-local` 的地址。这个就叫“移花接木” :smile: 。
+- 修改这次 `connect(2)` 系统调用的目标地址参数为 `graftcp-local` 的地址，然后恢复执行被中断的系统调用。返回成功后，这个程序以为自己连的是原始的地址，但其实连的是 `graftcp-local` 的地址。这个就叫“移花接木”。
 - `graftcp-local` 根据连接信息和目标地址信息，与 SOCKS5 proxy 建立连接，把 app 的请求的数据重定向到 SOCKS5 proxy。
 
 这里可能有个疑问：既然可以修改任何系统调用的参数，那么通过修改 app 的 `write(2)` / `send(2)` 的参数，直接往 `buffer` 里面附加原始目标地址信息给 `graftcp-local` 不是更简单吗？答案是这无法做到。如果直接往运行在子进程的被跟踪程序的 `buffer` 添加信息，可能会造成缓冲区溢出，造成程序崩溃或者覆盖了其他数据。  

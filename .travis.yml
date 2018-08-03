@@ -1,0 +1,15 @@
+language: go, c
+
+go:
+        - "1.6"
+        - "1.9"
+        - "1.10"
+
+compiler:
+        - gcc
+
+script:
+        - pwd
+        - go version
+        - make graftcp
+        - go get -v github.com/hmgle/graftcp/graftcp-local
