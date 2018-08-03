@@ -6,6 +6,8 @@ It hooks `connect(2)` funciton via `ptrace(2)` and redirects the connection thro
 -->
 # graftcp
 
+[![Build Status](https://travis-ci.org/hmgle/graftcp.svg?branch=dev)](https://travis-ci.org/hmgle/graftcp)
+
 **English** | [简体中文](./README.zh-CN.md)
 
 ## Introduction 
@@ -116,7 +118,7 @@ $ wget https://www.google.com
 To achieve the goal of redirecting the TCP connection of a app to another destination address and the app itself is not aware of it, these conditions are probably required:
 
 - `fork(2)` a new process and trace it using `ptrace(2)`, `execv(2)` to run the app. Every `connect(2)` syscall will be intercepted, then get the destination address argument and send it to `graftcp-local` via `pipe`.
-- Modify the destination address argument of `connect(2)` to `graftcp-local`'s address, and restart the stoped syscall. After the syscall returns successfully, the app thought it has connected the original destination address, but in face it connected the `graftcp-local`, so we named it "graft". :smile:
+- Modify the destination address argument of `connect(2)` to `graftcp-local`'s address, and restart the stoped syscall. After the syscall returns successfully, the app thought it has connected the original destination address, but in face it connected the `graftcp-local`, so we named it "graft".
 - `graftcp-local` establish a SOCKS5 connection based on the information of app's original destination address, then redirect the requests from the app to the SOCKS5 proxy.
 
 Someone may have a question here: since we can modify the arguments of a syscall, modify the app's `write(2)` / `send(2)` buf argument, attach the original destination information to the `write` buffer, isn't it simpler? The answer is that cannot be done. Because attach data to the buffer of the tracked child process, it may case a buffer overflow, causing crash or overwrite other data.  
@@ -152,7 +154,7 @@ The main ones are: global way, environment variables setting way, and programs s
 
 Global way: e.g., use `iptables` + `RedSocks` to convert the system's traffic that match certain rules into SOCKS5 traffic. The pros is that it is globally effective; the cons is that all traffic that satisfies the rule is redirected, and the scope of influence is large.
 
-Environment variable setting: some programs will read the proxy-related environment variables to determine whether to convert their own traffic to the corresponding proxy protocol traffic, such as `curl` will [read `http_proxy`, `ftp_proxy`, `all_proxy ` Environment variables and decide which proxy traffic to convert based on the request URL scheme] (https://curl.haxx.se/libcurl/c/CURLOPT_PROXY.html). This way is effective only if the program itself implements the traffic conversion function, so
+Environment variable setting: some programs will read the proxy-related environment variables to determine whether to convert their own traffic to the corresponding proxy protocol traffic, such as `curl` will [read `http_proxy`, `ftp_proxy`, `all_proxy ` Environment variables and decide which proxy traffic to convert based on the request URL scheme](https://curl.haxx.se/libcurl/c/CURLOPT_PROXY.html). This way is effective only if the program itself implements the traffic conversion function, so
 it is very limited.
 
 programs selection way: this way can only perform redirection for specified programs, such as `tsocks` or `proxychains`. As mentioned earlier, they were using the `LD_PRELOAD` hijacking dynamic library funciton, and the default static link compiled program such as `Go` is invalid. `graftcp` improves this by being able to redirect TCP connections from any program.

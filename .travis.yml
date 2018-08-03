@@ -1,0 +1,8 @@
+language: c, go
+
+go:
+        - "1.6"
+        - "1.10"
+
+compiler:
+        - gcc
