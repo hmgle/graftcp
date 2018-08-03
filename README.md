@@ -14,7 +14,7 @@ It hooks `connect(2)` funciton via `ptrace(2)` and redirects the connection thro
 
 `graftcp` can redirect the TCP connection made by the given program \[application, script, shell, etc.\] to SOCKS5 proxy.
 
-Compared with [tsocks](https://linux.die.net/man/8/tsocks), [proxychains](http://proxychains.sourceforge.net/) or [proxyChains-ng](https://github.com/rofl0r/proxychains-ng), `graftcp` is not using the [LD_PRELOAD trick](https://stackoverflow.com/questions/426230/what-is-the-ld-preload-trick) which only work for dynamically linked programs (e.g., [applications builded by Go can not be hook by proxychains-ng](https://github.com/rofl0r/proxychains-ng/issues/199). `graftcp` can trace or modify any
+Compared with [tsocks](https://linux.die.net/man/8/tsocks), [proxychains](http://proxychains.sourceforge.net/) or [proxyChains-ng](https://github.com/rofl0r/proxychains-ng), `graftcp` is not using the [LD_PRELOAD trick](https://stackoverflow.com/questions/426230/what-is-the-ld-preload-trick) which only work for dynamically linked programs, e.g., [applications builded by Go can not be hook by proxychains-ng](https://github.com/rofl0r/proxychains-ng/issues/199). `graftcp` can trace or modify any
 given program's connect by [`ptrace(2)`](https://en.wikipedia.org/wiki/Ptrace), so it is workable for any program. The principle will be explained in this paragraph of [how does it work](#principles).
 
 ## Installation 
