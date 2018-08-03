@@ -109,6 +109,7 @@ $ wget https://www.google.com
 
 ![demo](demo.gif)
 
+<a id="principles"></a>
 ## 工作原理
 
 要达到重定向一个 app 发起的的 TCP 连接到其他目标地址并且该 app 本身对此毫无感知的目的，大概需要这些条件：

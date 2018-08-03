@@ -113,6 +113,7 @@ $ wget https://www.google.com
 ```
 ![demo](demo.gif)
 
+<a id="principles"></a>
 ## How does it work?
 
 To achieve the goal of redirecting the TCP connection of a app to another destination address and the app itself is not aware of it, these conditions are probably required:
