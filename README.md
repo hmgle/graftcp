@@ -19,7 +19,7 @@ given program's connect by [`ptrace(2)`](https://en.wikipedia.org/wiki/Ptrace), 
 
 ## Installation 
 
-Building `graftcp-local` requires [Go](https://golang.org/doc/install) installed.
+`graftcp` runs on Linux. Building `graftcp-local` requires [Go](https://golang.org/doc/install) installed.
 
 ```sh
 git clone https://github.com/hmgle/graftcp.git
@@ -118,7 +118,7 @@ $ wget https://www.google.com
 
 To achieve the goal of redirecting the TCP connection of a app to another destination address and the app itself is not aware of it, these conditions are probably required:
 
-- `fork(2)` a new process and trace it using `ptrace(2)`, `execv(2)` to run the app. Every `connect(2)` syscall will be intercepted, then get the destination address argument and send it to `graftcp-local` via `pipe`.
+- `fork(2)` a new process and trace it using `ptrace(2)`, `execve(2)` to run the app. Every `connect(2)` syscall will be intercepted, then get the destination address argument and send it to `graftcp-local` via `pipe`.
 - Modify the destination address argument of `connect(2)` to `graftcp-local`'s address, and restart the stoped syscall. After the syscall returns successfully, the app thought it has connected the original destination address, but in face it connected the `graftcp-local`, so we named it "graft".
 - `graftcp-local` establish a SOCKS5 connection based on the information of app's original destination address, then redirect the requests from the app to the SOCKS5 proxy.
 
@@ -187,7 +187,6 @@ No. macOS's [`ptrace(2)`](http://polarhome.com/service/man/?qf=ptrace&af=0&sf=0&
 
 - [maybe](https://github.com/p-e-w/maybe), [proxychains](http://proxychains.sourceforge.net/) and [proxyChains-ng](https://github.com/rofl0r/proxychains-ng) for inspiration.
 - [strace](https://strace.io/).
-- [uthash](https://troydhanson.github.io/uthash/)
 - [uthash](https://troydhanson.github.io/uthash/)
 - [service](https://github.com/kardianos/service)
 - [dlog](https://github.com/jedisct1/dlog)

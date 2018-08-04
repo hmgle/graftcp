@@ -49,10 +49,7 @@ func (app *App) Stop(s service.Service) error {
 }
 
 func main() {
-	var (
-		err        error
-		configFile string
-	)
+	var configFile string
 	dlog.Init("graftcp-local", dlog.SeverityInfo, "")
 
 	pwd, err := os.Getwd()
