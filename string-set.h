@@ -12,8 +12,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
-#ifndef _STRING_SET_H
-#define _STRING_SET_H
+#ifndef STRING_SET_H
+#define STRING_SET_H
 
 struct str_set {
 	int length;

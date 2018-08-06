@@ -12,8 +12,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
-#ifndef _GRAFTCP_H
-#define _GRAFTCP_H
+#ifndef GRAFTCP_H
+#define GRAFTCP_H
 
 #include <stdbool.h>
 #include <unistd.h>
@@ -31,7 +31,7 @@
 #include <sys/reg.h>
 #include <sys/syscall.h>
 #include <fcntl.h>
-#include<linux/sched.h>
+#include <linux/sched.h>
 #include <assert.h>
 
 #include "uthash.h"
