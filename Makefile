@@ -41,7 +41,7 @@ graftcp: main.o util.o string-set.o
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 graftcp-local/graftcp-local: graftcp-local/*.go
-	cd graftcp-local && go build
+	cd graftcp-local && go get ./... && go build
 
 install:: graftcp graftcp-local/graftcp-local
 	$(INSTALL) $< $(BINDIR); \
