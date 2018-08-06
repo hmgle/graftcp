@@ -26,7 +26,7 @@ git clone https://github.com/hmgle/graftcp.git
 cd graftcp
 make
 ```
-After make finishes, you'll be able to use `./graftcp-local/graftcp-local` and `./graftcp`.
+After make finishes, you'll be able to use `graftcp-local` and `./graftcp`.
 Optionally, you can also install them to system:
 
 ```sh
@@ -40,8 +40,8 @@ Then `graftcp-local` will run automatically as the operating system starts.
 `graftcp-local`:
 
 ```console
-$ graftcp-local/graftcp-local -h
-Usage of graftcp-local/graftcp-local:
+$ graftcp-local -h
+Usage of graftcp-local:
   -config string
         Path to the configuration file
   -listen string
@@ -91,7 +91,7 @@ Options:
 Assume you are running the SOCKS5 proxy with the default IP address: "localhost:1080". Start the `graftcp-local` first:
 
 ```sh
-./graftcp-local/graftcp-local
+graftcp-local
 ```
 Install the Go package from golang.org (now is blocked by the GFW) via `graftcp`:
 
