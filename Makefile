@@ -30,7 +30,8 @@ endif
 
 SRC := $(wildcard *.c)
 
-TARGET = graftcp graftcp-local/graftcp-local
+GRAFTCP_LOCAL_BIN = $(GOPATH)/bin/graftcp-local
+TARGET = graftcp $(GRAFTCP_LOCAL_BIN)
 
 all:: $(TARGET)
 
@@ -40,17 +41,16 @@ graftcp: main.o util.o string-set.o
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-graftcp-local/graftcp-local: graftcp-local/*.go
-	cd graftcp-local && go build
+$(GRAFTCP_LOCAL_BIN)::
+	go get -v github.com/hmgle/graftcp/graftcp-local
 
-install:: graftcp graftcp-local/graftcp-local
+install:: graftcp $(GRAFTCP_LOCAL_BIN)
 	$(INSTALL) $< $(BINDIR); \
-	cd graftcp-local && ./graftcp-local -service install && \
-		./graftcp-local -service start
+	graftcp-local -service install && graftcp-local -service start
 
-uninstall:: graftcp-local/graftcp-local
+uninstall:: $(GRAFTCP_LOCAL_BIN)
 	-rm -f $(BINDIR)/graftcp; \
-	cd graftcp-local && ./graftcp-local -service uninstall
+	graftcp-local -service uninstall
 
 install_graftcp:: graftcp 
 	$(INSTALL) $< $(BINDIR)
@@ -58,13 +58,11 @@ install_graftcp:: graftcp
 uninstall_graftcp::
 	-rm -f $(BINDIR)/graftcp
 
-install_graftcp_local:: graftcp-local/graftcp-local
-	cd graftcp-local && ./graftcp-local -service install && \
-		./graftcp-local -service restart
+install_graftcp_local:: $(GRAFTCP_LOCAL_BIN)
+	graftcp-local -service install && graftcp-local -service restart
 
-uninstall_graftcp_local:: graftcp-local/graftcp-local
-	cd graftcp-local && ./graftcp-local -service stop && \
-		./graftcp-local -service uninstall
+uninstall_graftcp_local:: $(GRAFTCP_LOCAL_BIN)
+	graftcp-local -service stop && graftcp-local -service uninstall
 
 sinclude $(SRC:.c=.d)
 
