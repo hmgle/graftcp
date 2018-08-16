@@ -101,7 +101,7 @@ void set_retval(pid_t pid, long new_val)
 	struct user_regs_struct regs;
 	ptrace(PTRACE_GETREGS, pid, 0, &regs);
 	assert(errno == 0);
-	if (regs.rax == new_val)
+	if ((long)regs.rax == new_val)
 		return;
 	regs.rax = new_val;
 	ptrace(PTRACE_SETREGS, pid, 0, &regs);

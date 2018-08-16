@@ -50,7 +50,7 @@ struct socket_info {
 };
 
 /* magic fd number */
-#define MAGIC_FD 7777777
+#define MAGIC_FD  7777777
 #define MAGIC_NUM 3579
 
 #define FLAG_STARTUP    00002

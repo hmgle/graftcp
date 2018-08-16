@@ -160,7 +160,7 @@ it is very limited.
 
 programs selection way: this way can only perform redirection for specified programs, such as `tsocks` or `proxychains`. As mentioned earlier, they were using the `LD_PRELOAD` hijacking dynamic library funciton, and the default static link compiled program such as `Go` is invalid. `graftcp` improves this by being able to redirect TCP connections from any program.
 
-### will `graftcp` redirect the connection to the SOCKS5 proxy if the target address is localhost?
+### Will `graftcp` redirect the connection to the SOCKS5 proxy if the target address is localhost?
 
 No. By default, `graftcp` ignore the connections to localhost. If you want to redirect all addresses, you can use the `-n` option. If you want to ignore more addresses, you can add them to the blacklist IP file; if you want to redirect only certain IP addresses, you can add them to the whitelist IP file. Use `graftcp --help` to get more information.
 
