@@ -30,7 +30,9 @@ After make finishes, you'll be able to use `graftcp-local` and `./graftcp`.
 Optionally, you can also install them to system:
 
 ```sh
-sudo make install
+# sudo's PATH may be overridden by the security policy,
+# so set the PATH for Go
+sudo env "PATH=$PATH" make install
 ```
 
 Then `graftcp-local` will run automatically as the operating system starts.
