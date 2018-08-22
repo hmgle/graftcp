@@ -15,7 +15,7 @@ graftcp-local: .gopath/.created $(wildcard *.go)
 	touch $@
 
 install: graftcp-local
-	./graftcp-local -service install && ./graftcp-local -service restart
+	./graftcp-local -service install && ./graftcp-local -service start
 
 uninstall: graftcp-local
 	./graftcp-local -service stop && ./graftcp-local -service uninstall
