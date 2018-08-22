@@ -11,5 +11,5 @@ compiler:
 script:
         - pwd
         - go version
-        - make graftcp
-        - go get -v github.com/hmgle/graftcp/graftcp-local
+        - make
+        - sudo make install
