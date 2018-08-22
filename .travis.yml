@@ -1,4 +1,4 @@
-language: go, c
+language: go
 
 go:
         - "1.6"
