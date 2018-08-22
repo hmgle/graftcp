@@ -19,10 +19,10 @@ graftcp-local: .gopath/.created $(wildcard *.go)
 	ln -s $(CURDIR) .gopath/src/$(GO_IMPORT_PATH)
 	touch $@
 
-install:: graftcp-local
+install: graftcp-local
 	./graftcp-local -service install && ./graftcp-local -service restart
 
-uninstall:: graftcp-local
+uninstall: graftcp-local
 	./graftcp-local -service stop && ./graftcp-local -service uninstall
 
 clean::
