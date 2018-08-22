@@ -21,7 +21,7 @@ cd graftcp
 make
 ```
 
-make 执行完后，即可运行 `graftcp-local` 和 `./graftcp`。可以把它们都安装进系统：
+make 执行完后，即可运行 `graftcp-local/graftcp-local` 和 `./graftcp`。可以把它们都安装进系统：
 
 ```sh
 # sudo's PATH may be overridden by the security policy,
@@ -36,8 +36,8 @@ sudo env "PATH=$PATH" make install
 `graftcp-local`:
 
 ```console
-$ graftcp-local -h
-Usage of graftcp-local:
+$ graftcp-local/graftcp-local -h
+Usage of graftcp-local/graftcp-local:
   -config string
         Path to the configuration file
   -listen string
@@ -87,7 +87,7 @@ Options:
 假设你正在运行默认地址 "localhost:1080" 的 SOCKS5 代理，首先启动 `graftcp-local`：
 
 ```sh
-graftcp-local
+graftcp-local/graftcp-local
 ```
 
 通过 `graftcp` 安装来自 golang.org 的 Go 包:

@@ -14,6 +14,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+KERNEL = $(shell uname -s)
+ifneq ($(KERNEL), Linux)
+$(error only support Linux now.)
+endif
+
 debug = 0
 
 PREFIX = /usr/local
@@ -30,7 +35,7 @@ endif
 
 SRC := $(wildcard *.c)
 
-GRAFTCP_LOCAL_BIN = $(GOPATH)/bin/graftcp-local
+GRAFTCP_LOCAL_BIN = graftcp-local/graftcp-local
 TARGET = graftcp $(GRAFTCP_LOCAL_BIN)
 
 all:: $(TARGET)
@@ -42,15 +47,15 @@ graftcp: main.o util.o string-set.o
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(GRAFTCP_LOCAL_BIN)::
-	go get -v github.com/hmgle/graftcp/graftcp-local
+	$(MAKE) -C graftcp-local
 
 install:: graftcp $(GRAFTCP_LOCAL_BIN)
-	$(INSTALL) $< $(BINDIR); \
-	graftcp-local -service install && graftcp-local -service start
+	$(INSTALL) $< $(BINDIR)
+	$(MAKE) -C graftcp-local $@
 
 uninstall:: $(GRAFTCP_LOCAL_BIN)
-	-rm -f $(BINDIR)/graftcp; \
-	graftcp-local -service uninstall
+	-rm -f $(BINDIR)/graftcp
+	$(MAKE) -C graftcp-local $@
 
 install_graftcp:: graftcp 
 	$(INSTALL) $< $(BINDIR)
@@ -58,11 +63,11 @@ install_graftcp:: graftcp
 uninstall_graftcp::
 	-rm -f $(BINDIR)/graftcp
 
-install_graftcp_local:: $(GRAFTCP_LOCAL_BIN)
-	graftcp-local -service install && graftcp-local -service restart
+install_graftcp_local:
+	$(MAKE) -C graftcp-local install
 
-uninstall_graftcp_local:: $(GRAFTCP_LOCAL_BIN)
-	graftcp-local -service stop && graftcp-local -service uninstall
+uninstall_graftcp_local:
+	$(MAKE) -C graftcp-local uninstall
 
 sinclude $(SRC:.c=.d)
 
@@ -73,4 +78,5 @@ sinclude $(SRC:.c=.d)
 		rm -f $@.$$$$
 
 clean::
-	-rm -f *.o $(TARGET) *.d
+	-rm -f *.o graftcp *.d
+	$(MAKE) -C graftcp-local $@
