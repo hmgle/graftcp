@@ -1,8 +1,3 @@
-GO_CMD := $(shell command -v go 2> /dev/null)
-ifndef GO_CMD
-$(error "go is not available, please install go")
-endif
-
 export GOPATH := $(CURDIR)/.gopath
 export PATH := $(PATH):$(CURDIR)/.gopath/bin
 
