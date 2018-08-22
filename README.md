@@ -30,8 +30,6 @@ After make finishes, you'll be able to use `graftcp-local/graftcp-local` and `./
 Optionally, you can also install them to system:
 
 ```sh
-# sudo's PATH may be overridden by the security policy,
-# so set the PATH for Go
 sudo make install
 ```
 
