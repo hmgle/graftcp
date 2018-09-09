@@ -88,7 +88,7 @@ void socket_pre_handle(struct proc_info *pinfp)
 		return;
 	}
 	si->fd = -1;
-	si->magic_fd = (MAGIC_FD << 31) + pinfp->pid;
+	si->magic_fd = ((uint64_t)MAGIC_FD << 31) + pinfp->pid;
 	add_socket_info(si);
 }
 
@@ -150,7 +150,7 @@ void socket_exiting_handle(struct proc_info *pinfp, int fd)
 {
 	struct socket_info *si;
 
-	si = find_socket_info((MAGIC_FD << 31) + pinfp->pid);
+	si = find_socket_info(((uint64_t)MAGIC_FD << 31) + pinfp->pid);
 	if (si == NULL)
 		return;
 	si->fd = fd;
