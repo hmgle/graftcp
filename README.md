@@ -86,7 +86,7 @@ Options:
                     Display this help and exit
 ```
 
-## Quick start
+## Demo
 
 Assume you are running the SOCKS5 proxy with the default IP address: "localhost:1080". Start the `graftcp-local` first:
 

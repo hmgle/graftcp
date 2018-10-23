@@ -80,7 +80,7 @@ Options:
                     Display this help and exit
 ```
 
-## 快速开始
+## 使用示例
 
 假设你正在运行默认地址 "localhost:1080" 的 SOCKS5 代理，首先启动 `graftcp-local`：
 
