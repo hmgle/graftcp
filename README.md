@@ -12,7 +12,7 @@ It hooks `connect(2)` funciton via `ptrace(2)` and redirects the connection thro
 
 ## Introduction 
 
-`graftcp` can redirect the TCP connection made by the given program \[application, script, shell, etc.\] to SOCKS5 proxy.
+`graftcp` can redirect the TCP connection made by the given program \[application, script, shell, etc.\] to SOCKS5 or HTTP proxy.
 
 Compared with [tsocks](https://linux.die.net/man/8/tsocks), [proxychains](http://proxychains.sourceforge.net/) or [proxyChains-ng](https://github.com/rofl0r/proxychains-ng), `graftcp` is not using the [LD_PRELOAD trick](https://stackoverflow.com/questions/426230/what-is-the-ld-preload-trick) which only work for dynamically linked programs, e.g., [applications builded by Go can not be hook by proxychains-ng](https://github.com/rofl0r/proxychains-ng/issues/199). `graftcp` can trace or modify any
 given program's connect by [`ptrace(2)`](https://en.wikipedia.org/wiki/Ptrace), so it is workable for any program. The principle will be explained in this paragraph of [how does it work](#principles).
@@ -44,6 +44,8 @@ $ graftcp-local/graftcp-local -h
 Usage of graftcp-local/graftcp-local:
   -config string
         Path to the configuration file
+  -http_proxy string
+        http proxy address, e.g.: 127.0.0.1:8080
   -listen string
         Listen address (default ":2233")
   -logfile string
@@ -52,6 +54,8 @@ Usage of graftcp-local/graftcp-local:
         Log level (0-6) (default 1)
   -pipepath string
         Pipe path for graftcp to send address info (default "/tmp/graftcplocal.fifo")
+  -select_proxy_mode string
+        Set the mode for select a proxy [auto | random | only_http_proxy | only_socks5] (default "auto")
   -service string
         Control the system service: ["start" "stop" "restart" "install" "uninstall"]
   -socks5 string
@@ -137,10 +141,10 @@ The simple sketch is as follows:
 |      v        |             |         |         |        |         |      |
 |  +---------+  |             |         |         |        |         |      |
 |  |         |  |  connect    |         | connect |        | connect |      |
-|  |         +--------------->| graftcp +-------->| socks5 +-------->| dest |
-|  |         |  |             | -local  |         | proxy  |         | host |
-|  |  app    |  |  req        |         |  req    |        |  req    |      |
-|  |(tracee) +--------------->|         +-------->|        +-------->|      |
+|  |         +--------------->| graftcp +-------->| SOCKS5 +-------->| dest |
+|  |         |  |             | -local  |         |  or    |         | host |
+|  |  app    |  |  req        |         |  req    | HTTP   |  req    |      |
+|  |(tracee) +--------------->|         +-------->| proxy  +-------->|      |
 |  |         |  |             |         |         |        |         |      |
 |  |         |  |  resp       |         |  resp   |        |  resp   |      |
 |  |         |<---------------+         |<--------+        |<--------+      |

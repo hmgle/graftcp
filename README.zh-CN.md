@@ -6,7 +6,7 @@
 
 ## 简介
 
-`graftcp` 可以把任何指定程序（应用程序、脚本、shell 等）的 TCP 连接重定向到 SOCKS5 代理。
+`graftcp` 可以把任何指定程序（应用程序、脚本、shell 等）的 TCP 连接重定向到 SOCKS5 或 HTTP 代理。
 
 对比 [tsocks](https://linux.die.net/man/8/tsocks)、[proxychains](http://proxychains.sourceforge.net/) 或 [proxyChains-ng](https://github.com/rofl0r/proxychains-ng)，`graftcp` 并不使用 [LD_PRELOAD 技巧](https://stackoverflow.com/questions/426230/what-is-the-ld-preload-trick)来劫持共享库的 connect()、getaddrinfo()
 等系列函数达到重定向目的，这种方法只对使用动态链接编译的程序有效，对于静态链接编译出来的程序，例如[默认选项编译的 Go 程序](https://golang.org/cmd/link/)，[proxychains-ng 就无效了](https://github.com/rofl0r/proxychains-ng/issues/199)。`graftcp` 使用 [`ptrace(2)`](https://en.wikipedia.org/wiki/Ptrace) 系统调用跟踪或修改任意指定程序的 connect 信息，对任何程序都有效。[工作原理](#principles)后面将会解释。
@@ -38,6 +38,8 @@ $ graftcp-local/graftcp-local -h
 Usage of graftcp-local/graftcp-local:
   -config string
         Path to the configuration file
+  -http_proxy string
+        http proxy address, e.g.: 127.0.0.1:8080
   -listen string
         Listen address (default ":2233")
   -logfile string
@@ -46,6 +48,8 @@ Usage of graftcp-local/graftcp-local:
         Log level (0-6) (default 1)
   -pipepath string
         Pipe path for graftcp to send address info (default "/tmp/graftcplocal.fifo")
+  -select_proxy_mode string
+        Set the mode for select a proxy [auto | random | only_http_proxy | only_socks5] (default "auto")
   -service string
         Control the system service: ["start" "stop" "restart" "install" "uninstall"]
   -socks5 string
@@ -132,10 +136,10 @@ $ wget https://www.google.com
 |      v        |             |         |         |        |         |      |
 |  +---------+  |             |         |         |        |         |      |
 |  |         |  |  connect    |         | connect |        | connect |      |
-|  |         +--------------->| graftcp +-------->| socks5 +-------->| dest |
-|  |         |  |             | -local  |         | proxy  |         | host |
-|  |  app    |  |  req        |         |  req    |        |  req    |      |
-|  |(tracee) +--------------->|         +-------->|        +-------->|      |
+|  |         +--------------->| graftcp +-------->| SOCKS5 +-------->| dest |
+|  |         |  |             | -local  |         |  or    |         | host |
+|  |  app    |  |  req        |         |  req    | HTTP   |  req    |      |
+|  |(tracee) +--------------->|         +-------->| proxy  +-------->|      |
 |  |         |  |             |         |         |        |         |      |
 |  |         |  |  resp       |         |  resp   |        |  resp   |      |
 |  |         |<---------------+         |<--------+        |<--------+      |
