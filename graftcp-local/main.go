@@ -10,10 +10,13 @@ import (
 	"github.com/kardianos/service"
 )
 
+var selectProxyMode string
+
 type App struct {
-	ListenAddr string
-	Socks5Addr string
-	PipePath   string
+	ListenAddr    string
+	Socks5Addr    string
+	HttpProxyAddr string
+	PipePath      string
 }
 
 func (app *App) Start(s service.Service) error {
@@ -30,7 +33,8 @@ func (app *App) Start(s service.Service) error {
 func (app *App) run() {
 	var err error
 
-	l := NewLocal(app.ListenAddr, app.Socks5Addr)
+	l := NewLocal(app.ListenAddr, app.Socks5Addr, app.HttpProxyAddr)
+	l.SetSelectMode(selectProxyMode)
 
 	syscall.Mkfifo(app.PipePath, uint32(os.ModePerm))
 	os.Chmod(app.PipePath, 0666)
@@ -59,7 +63,7 @@ func main() {
 	svcConfig := &service.Config{
 		Name:             "graftcp-local",
 		DisplayName:      "graftcp local service",
-		Description:      "Translate graftcp TCP to SOCKS5",
+		Description:      "Translate graftcp TCP to SOCKS5 or HTTP proxy",
 		WorkingDirectory: pwd,
 	}
 	svcFlag := flag.String("service", "", fmt.Sprintf("Control the system service: %q", service.ControlAction))
@@ -72,6 +76,8 @@ func main() {
 
 	flag.StringVar(&app.ListenAddr, "listen", ":2233", "Listen address")
 	flag.StringVar(&app.Socks5Addr, "socks5", "127.0.0.1:1080", "SOCKS5 address")
+	flag.StringVar(&app.HttpProxyAddr, "http_proxy", "", "http proxy address, e.g.: 127.0.0.1:8080")
+	flag.StringVar(&selectProxyMode, "select_proxy_mode", "auto", "Set the mode for select a proxy [auto | random | only_http_proxy | only_socks5]")
 	flag.StringVar(&configFile, "config", "", "Path to the configuration file")
 	flag.StringVar(&app.PipePath, "pipepath", "/tmp/graftcplocal.fifo", "Pipe path for graftcp to send address info")
 	flag.Parse()

@@ -18,6 +18,7 @@ type Config struct {
 	Loglevel  int    // Log level (0-6)
 	PipePath  string // Pipe path for graftcp to send address info
 	Socks5    string // SOCKS5 address
+	HttpProxy string // HTTP proxy address
 	UseSyslog bool   // Use the system logger
 }
 
@@ -38,6 +39,8 @@ func setCfg(key, val string) {
 		Cfg.PipePath = val
 	case "socks5":
 		Cfg.Socks5 = val
+	case "http_proxy":
+		Cfg.HttpProxy = val
 	case "usesyslog":
 		if strings.ToLower(val) == "true" {
 			Cfg.UseSyslog = true
@@ -100,6 +103,9 @@ func overrideConfig(app *App) {
 	}
 	if !flagset["socks5"] && Cfg.Socks5 != "" {
 		app.Socks5Addr = Cfg.Socks5
+	}
+	if !flagset["http_proxy"] && Cfg.HttpProxy != "" {
+		app.HttpProxyAddr = Cfg.HttpProxy
 	}
 	if !flagset["pipepath"] && Cfg.PipePath != "" {
 		app.PipePath = Cfg.PipePath

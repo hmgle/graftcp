@@ -3,8 +3,6 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
@@ -52,8 +50,7 @@ func (h *httpDialer) Dial(network, addr string) (net.Conn, error) {
 		conn.Close()
 		return nil, err
 	}
-	defer resp.Body.Close()
-	io.Copy(ioutil.Discard, resp.Body)
+	resp.Body.Close()
 	if resp.StatusCode != 200 {
 		conn.Close()
 		return nil, fmt.Errorf("connect proxy error: %v", strings.SplitN(resp.Status, " ", 2)[1])
