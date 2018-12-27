@@ -83,7 +83,8 @@ void socket_pre_handle(struct proc_info *pinfp)
 	si->type = get_syscall_arg(pinfp->pid, 1);
 
 	/* If not TCP socket, ignore */
-	if ((si->type & SOCK_STREAM) < 1 || si->domain != AF_INET) {
+	if ((si->type & SOCK_STREAM) < 1
+	     || (si->domain != AF_INET && si->domain != AF_INET6)) {
 		free(si);
 		return;
 	}
