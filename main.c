@@ -103,15 +103,27 @@ void connect_pre_handle(struct proc_info *pinfp)
 
 	long addr = get_syscall_arg(pinfp->pid, 1);
 	struct sockaddr_in dest_sa;
+	struct sockaddr_in6 dest_sa6;
 
 	getdata(pinfp->pid, addr, (char *)&dest_sa, sizeof(dest_sa));
 
-	unsigned short dest_ip_port = SOCKPORT(dest_sa);
+	unsigned short dest_ip_port;
 	struct in_addr dest_ip_addr;
 	char *dest_ip_addr_str;
+	char dest_str[INET6_ADDRSTRLEN];
 
-	dest_ip_addr.s_addr = SOCKADDR(dest_sa);
-	dest_ip_addr_str = inet_ntoa(dest_ip_addr);
+	if (dest_sa.sin_family == AF_INET) { /* IPv4 */
+		dest_ip_port = SOCKPORT(dest_sa);
+		dest_ip_addr.s_addr = SOCKADDR(dest_sa);
+		dest_ip_addr_str = inet_ntoa(dest_ip_addr);
+	} else if (dest_sa.sin_family == AF_INET6) { /* IPv6 */
+		getdata(pinfp->pid, addr, (char *)&dest_sa6, sizeof(dest_sa6));
+		dest_ip_port = SOCKPORT6(dest_sa6);
+		inet_ntop(AF_INET6, &(dest_sa6.sin6_addr), dest_str, INET6_ADDRSTRLEN);
+		dest_ip_addr_str = dest_str;
+	} else {
+		return;
+	}
 	if (is_ignore(dest_ip_addr_str))
 		return;
 

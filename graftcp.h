@@ -40,6 +40,9 @@
 #define SOCKADDR(x) (satosin(x)->sin_addr.s_addr)
 #define SOCKPORT(x) (satosin(x)->sin_port)
 
+#define satosin6(x)  ((struct sockaddr_in6 *) &(x))
+#define SOCKPORT6(x) (satosin6(x)->sin6_port)
+
 struct socket_info {
 	pid_t pid;
 	int fd;
