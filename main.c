@@ -104,13 +104,12 @@ void connect_pre_handle(struct proc_info *pinfp)
 	long addr = get_syscall_arg(pinfp->pid, 1);
 	struct sockaddr_in dest_sa;
 	struct sockaddr_in6 dest_sa6;
-
-	getdata(pinfp->pid, addr, (char *)&dest_sa, sizeof(dest_sa));
-
 	unsigned short dest_ip_port;
 	struct in_addr dest_ip_addr;
 	char *dest_ip_addr_str;
 	char dest_str[INET6_ADDRSTRLEN];
+
+	getdata(pinfp->pid, addr, (char *)&dest_sa, sizeof(dest_sa));
 
 	if (dest_sa.sin_family == AF_INET) { /* IPv4 */
 		dest_ip_port = SOCKPORT(dest_sa);
@@ -119,7 +118,7 @@ void connect_pre_handle(struct proc_info *pinfp)
 	} else if (dest_sa.sin_family == AF_INET6) { /* IPv6 */
 		getdata(pinfp->pid, addr, (char *)&dest_sa6, sizeof(dest_sa6));
 		dest_ip_port = SOCKPORT6(dest_sa6);
-		inet_ntop(AF_INET6, &(dest_sa6.sin6_addr), dest_str, INET6_ADDRSTRLEN);
+		inet_ntop(AF_INET6, &dest_sa6.sin6_addr, dest_str, INET6_ADDRSTRLEN);
 		dest_ip_addr_str = dest_str;
 	} else {
 		return;
@@ -130,9 +129,14 @@ void connect_pre_handle(struct proc_info *pinfp)
 	putdata(pinfp->pid, addr, (char *)&PROXY_SA, sizeof(PROXY_SA));
 
 	char buf[1024] = { 0 };
+	char delimiter;
 	strcpy(buf, dest_ip_addr_str);
-	strcat(buf, ":");
-	sprintf(&buf[strlen(buf)], "%d:%d\n", ntohs(dest_ip_port), pinfp->pid);
+	if (dest_sa.sin_family == AF_INET)		/* IPv4 */
+		delimiter = ':';
+	else if (dest_sa.sin_family == AF_INET6)	/* IPv6 */
+		delimiter = '@';
+	sprintf(&buf[strlen(buf)], "%c%d%c%d\n",
+		delimiter, ntohs(dest_ip_port), delimiter, pinfp->pid);
 	if (write(LOCAL_PIPE_FD, buf, strlen(buf)) <= 0) {
 		if (errno)
 			perror("write");
