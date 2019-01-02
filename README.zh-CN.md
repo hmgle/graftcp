@@ -175,7 +175,7 @@ Linux 提供了一种限制被 `ptrace(2)` 跟踪的方法：设置 [`/proc/sys/
 
 ### 支持 macOS 吗？
 
-不。macOS 的 [`ptrace(2)`](http://polarhome.com/service/man/?qf=ptrace&af=0&sf=0&of=Darwin&tf=2) 是个半残品。不过理论上参考 DTrace那一套也能实现，有兴趣的同学可以趟下这趟浑水 :grin:
+不。macOS 的 [`ptrace(2)`](http://polarhome.com/service/man/?qf=ptrace&af=0&sf=0&of=Darwin&tf=2) 是个半残品。~~不过理论上参考 DTrace那一套也能实现，~~见[issue 12](https://github.com/hmgle/graftcp/issues/12)。或许有兴趣的同学可以趟下这趟浑水 :grin:
 
 ## TODO
 
