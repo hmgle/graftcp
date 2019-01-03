@@ -12,9 +12,11 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <errno.h>
 
 #include "string-set.h"
 
@@ -36,6 +38,10 @@ struct str_set *str_set_new()
 	int i;
 
 	set = calloc(1, sizeof(*set) + 509 * sizeof(set->buckets[0]));
+	if (!set) {
+		fprintf(stderr, "calloc: %s\n", strerror(errno));
+		exit(1);
+	}
 	set->size = 509;
 	set->buckets = (struct member **)(set + 1);
 	for (i = 0; i < set->size; i++)
@@ -58,6 +64,10 @@ void str_set_put(struct str_set *set, const char *elem)
 	}
 	if (p == NULL) {
 		p = calloc(1, sizeof(*p));
+		if (!p) {
+			fprintf(stderr, "calloc: %s\n", strerror(errno));
+			exit(1);
+		}
 		p->element = elem;
 		p->link = set->buckets[i];
 		set->buckets[i] = p;
