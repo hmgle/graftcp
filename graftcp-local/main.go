@@ -34,6 +34,7 @@ func (app *App) run() {
 	var err error
 
 	l := NewLocal(app.ListenAddr, app.Socks5Addr, app.HttpProxyAddr)
+	dlog.Infof("select_proxy_mode: %s", selectProxyMode)
 	l.SetSelectMode(selectProxyMode)
 
 	syscall.Mkfifo(app.PipePath, uint32(os.ModePerm))

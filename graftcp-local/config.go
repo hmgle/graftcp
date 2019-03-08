@@ -13,13 +13,14 @@ import (
 )
 
 type Config struct {
-	Listen    string // Listen address
-	Logfile   string // Write logs to file
-	Loglevel  int    // Log level (0-6)
-	PipePath  string // Pipe path for graftcp to send address info
-	Socks5    string // SOCKS5 address
-	HttpProxy string // HTTP proxy address
-	UseSyslog bool   // Use the system logger
+	Listen          string // Listen address
+	Logfile         string // Write logs to file
+	Loglevel        int    // Log level (0-6)
+	PipePath        string // Pipe path for graftcp to send address info
+	Socks5          string // SOCKS5 address
+	HttpProxy       string // HTTP proxy address
+	UseSyslog       bool   // Use the system logger
+	SelectProxyMode string // Set the mode for select a proxy (auto, random, only_http_proxy, only_socks5)
 }
 
 var Cfg = &Config{Loglevel: -1}
@@ -47,6 +48,8 @@ func setCfg(key, val string) {
 		} else {
 			Cfg.UseSyslog = false
 		}
+	case "select_proxy_mode":
+		Cfg.SelectProxyMode = val
 	}
 }
 
@@ -118,5 +121,8 @@ func overrideConfig(app *App) {
 	}
 	if !flagset["syslog"] {
 		dlog.UseSyslog(Cfg.UseSyslog)
+	}
+	if !flagset["select_proxy_mode"] && Cfg.SelectProxyMode != "" {
+		selectProxyMode = Cfg.SelectProxyMode
 	}
 }
