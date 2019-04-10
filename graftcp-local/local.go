@@ -127,7 +127,7 @@ func (l *Local) Start() {
 		dlog.Fatalf("net.ListenTCP(%s) err: %s", l.faddr.String(), err.Error())
 	}
 	defer ln.Close()
-	dlog.Infof("graft-local start listening %s...", l.faddr.String())
+	dlog.Infof("graftcp-local start listening %s...", l.faddr.String())
 
 	for {
 		conn, err := ln.AcceptTCP()
