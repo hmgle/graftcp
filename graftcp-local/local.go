@@ -207,7 +207,7 @@ func (l *Local) UpdateProcessAddrInfo() {
 		// dest_ipaddr:dest_port:pid
 		s := strings.Split(string(line), ":")
 		if len(s) != 3 {
-			dlog.Errorf("r.ReadLine(): %d", string(line))
+			dlog.Errorf("r.ReadLine(): %s", string(line))
 			continue
 		}
 		StorePidAddr(s[2], s[0]+":"+s[1])

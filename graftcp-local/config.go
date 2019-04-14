@@ -89,7 +89,7 @@ func ParseConfigFile(path string, app *App) error {
 				setCfg(parseLine(line))
 				break
 			}
-			dlog.Errorf("reader.ReadString('\\n') err: %s, path: %s", err.Error, path)
+			dlog.Errorf("reader.ReadString('\\n') err: %s, path: %s", err.Error(), path)
 			return err
 		}
 		setCfg(parseLine(line))
