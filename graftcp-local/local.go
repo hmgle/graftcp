@@ -18,13 +18,13 @@ import (
 type modeT int
 
 const (
-	// AutoSelectMode: select socks5 if socks5 is reachable, else HTTP proxy
+	// AutoSelectMode select socks5 if socks5 is reachable, else HTTP proxy
 	AutoSelectMode modeT = iota
-	// RandomSelectMode: select the reachable proxy randomly
+	// RandomSelectMode select the reachable proxy randomly
 	RandomSelectMode
-	// OnlySocks5Mode: force use socks5
+	// OnlySocks5Mode force use socks5
 	OnlySocks5Mode
-	// OnlyHttpProxyMode: force use HTTP proxy
+	// OnlyHttpProxyMode force use HTTP proxy
 	OnlyHttpProxyMode
 )
 

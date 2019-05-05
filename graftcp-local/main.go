@@ -82,7 +82,8 @@ func main() {
 	flag.StringVar(&app.Socks5Username, "socks5_username", "", "SOCKS5 username")
 	flag.StringVar(&app.Socks5Password, "socks5_password", "", "SOCKS5 password")
 	flag.StringVar(&app.HttpProxyAddr, "http_proxy", "", "http proxy address, e.g.: 127.0.0.1:8080")
-	flag.StringVar(&selectProxyMode, "select_proxy_mode", "auto", "Set the mode for select a proxy [auto | random | only_http_proxy | only_socks5]")
+	flag.StringVar(&selectProxyMode, "select_proxy_mode", "auto",
+		"Set the mode for select a proxy [auto | random | only_http_proxy | only_socks5]")
 	flag.StringVar(&configFile, "config", "", "Path to the configuration file")
 	flag.StringVar(&app.PipePath, "pipepath", "/tmp/graftcplocal.fifo", "Pipe path for graftcp to send address info")
 	flag.Parse()

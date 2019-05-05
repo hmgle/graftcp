@@ -12,7 +12,7 @@ func StorePidAddr(pid, addr string) {
 	pidAddrMap.Store(pid, addr)
 }
 
-// Load returns the address stored in the pidAddrMap for pid.
+// LoadPidAddr returns the address stored in the pidAddrMap for pid.
 // The ok result indicates whether address was found in the pidAddrMap.
 func LoadPidAddr(pid string) (addr string, ok bool) {
 	v, ok := pidAddrMap.Load(pid)
