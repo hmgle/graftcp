@@ -41,7 +41,7 @@ type Local struct {
 	selectMode modeT
 }
 
-func NewLocal(listenAddr, socks5Addr, httpProxyAddr string) *Local {
+func NewLocal(listenAddr, socks5Addr, socks5Username, socks5PassWord, httpProxyAddr string) *Local {
 	listenTCPAddr, err := net.ResolveTCPAddr("tcp", listenAddr)
 	if err != nil {
 		dlog.Fatalf("resolve frontend(%s) error: %s", listenAddr, err.Error())
@@ -59,7 +59,14 @@ func NewLocal(listenAddr, socks5Addr, httpProxyAddr string) *Local {
 			socks5Addr, httpProxyAddr, socks5Addr, err1, httpProxyAddr, err2)
 	}
 	if err1 == nil {
-		dialerSocks5, err := proxy.SOCKS5("tcp", socks5TCPAddr.String(), nil, proxy.Direct)
+		var auth *proxy.Auth
+		if socks5Username != "" {
+			auth = &proxy.Auth{
+				User:     socks5Username,
+				Password: socks5PassWord,
+			}
+		}
+		dialerSocks5, err := proxy.SOCKS5("tcp", socks5TCPAddr.String(), auth, proxy.Direct)
 		if err != nil {
 			dlog.Errorf("proxy.SOCKS5(%s) fail: %s", socks5TCPAddr.String(), err.Error())
 		} else {
