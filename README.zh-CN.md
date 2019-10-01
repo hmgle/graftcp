@@ -184,8 +184,8 @@ Linux 提供了一种限制被 `ptrace(2)` 跟踪的方法：设置 [`/proc/sys/
 
 ## 感谢及参考
 
-- [maybe](https://github.com/p-e-w/maybe), [proxychains](http://proxychains.sourceforge.net/) and [proxyChains-ng](https://github.com/rofl0r/proxychains-ng) for inspiration.
-- [strace](https://strace.io/).
+- [maybe](https://github.com/p-e-w/maybe), [proxychains](http://proxychains.sourceforge.net/) and [proxychains-ng](https://github.com/rofl0r/proxychains-ng) for inspiration
+- [strace](https://strace.io/)
 - [uthash](https://troydhanson.github.io/uthash/)
 - [service](https://github.com/kardianos/service)
 - [dlog](https://github.com/jedisct1/dlog)

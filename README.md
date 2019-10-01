@@ -190,8 +190,8 @@ No. macOS's [`ptrace(2)`](http://polarhome.com/service/man/?qf=ptrace&af=0&sf=0&
 
 ## Acknowledgements and References
 
-- [maybe](https://github.com/p-e-w/maybe), [proxychains](http://proxychains.sourceforge.net/) and [proxyChains-ng](https://github.com/rofl0r/proxychains-ng) for inspiration.
-- [strace](https://strace.io/).
+- [maybe](https://github.com/p-e-w/maybe), [proxychains](http://proxychains.sourceforge.net/) and [proxychains-ng](https://github.com/rofl0r/proxychains-ng) for inspiration
+- [strace](https://strace.io/)
 - [uthash](https://troydhanson.github.io/uthash/)
 - [service](https://github.com/kardianos/service)
 - [dlog](https://github.com/jedisct1/dlog)
