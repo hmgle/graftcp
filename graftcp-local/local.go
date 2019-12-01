@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/jedisct1/dlog"
 	"golang.org/x/net/proxy"
@@ -152,14 +153,20 @@ func (l *Local) getPidByAddr(localAddr string) (pid string, destAddr string) {
 		dlog.Errorf("getInodeByAddrs(%s, %s) err: %s", localAddr, l.faddrString, err.Error())
 		return "", ""
 	}
-	RangePidAddr(func(p, a string) bool {
-		if hasIncludeInode(p, inode) {
-			pid = p
-			destAddr = a
-			return false
+	for i := 0; i < 3; i++ { // try 3 times
+		RangePidAddr(func(p, a string) bool {
+			if hasIncludeInode(p, inode) {
+				pid = p
+				destAddr = a
+				return false
+			}
+			return true
+		})
+		if pid != "" {
+			break
 		}
-		return true
-	})
+		time.Sleep(20 * time.Millisecond)
+	}
 	if pid != "" {
 		DeletePidAddr(pid)
 	}
@@ -211,13 +218,14 @@ func (l *Local) UpdateProcessAddrInfo() {
 			dlog.Errorf("r.ReadLine err: %s", err.Error())
 			break
 		}
+		copyLine := append(line[:0:0], line...)
 		// dest_ipaddr:dest_port:pid
-		s := strings.Split(string(line), ":")
+		s := strings.Split(*(*string)(unsafe.Pointer(&copyLine)), ":")
 		if len(s) != 3 {
-			dlog.Errorf("r.ReadLine(): %s", string(line))
+			dlog.Errorf("r.ReadLine(): %s", *(*string)(unsafe.Pointer(&copyLine)))
 			continue
 		}
-		StorePidAddr(s[2], s[0]+":"+s[1])
+		go StorePidAddr(s[2], s[0]+":"+s[1])
 	}
 }
 
