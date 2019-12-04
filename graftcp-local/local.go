@@ -10,7 +10,6 @@ import (
 	"os"
 	"strings"
 	"time"
-	"unsafe"
 
 	"github.com/jedisct1/dlog"
 	"golang.org/x/net/proxy"
@@ -218,11 +217,11 @@ func (l *Local) UpdateProcessAddrInfo() {
 			dlog.Errorf("r.ReadLine err: %s", err.Error())
 			break
 		}
-		copyLine := append(line[:0:0], line...)
+		copyLine := string(line)
 		// dest_ipaddr:dest_port:pid
-		s := strings.Split(*(*string)(unsafe.Pointer(&copyLine)), ":")
+		s := strings.Split(copyLine, ":")
 		if len(s) != 3 {
-			dlog.Errorf("r.ReadLine(): %s", *(*string)(unsafe.Pointer(&copyLine)))
+			dlog.Errorf("r.ReadLine(): %s", copyLine)
 			continue
 		}
 		go StorePidAddr(s[2], s[0]+":"+s[1])
