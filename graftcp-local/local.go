@@ -194,19 +194,25 @@ func (l *Local) HandleConn(conn net.Conn) error {
 		conn.Close()
 		return err
 	}
-	readChan, writeChan := make(chan int64), make(chan int64)
-	go pipe(conn, destConn, writeChan)
-	go pipe(destConn, conn, readChan)
-	<-writeChan
-	<-readChan
+	go pipe(conn, destConn)
+	pipe(destConn, conn)
 	conn.Close()
 	destConn.Close()
 	return nil
 }
 
-func pipe(dst, src net.Conn, c chan int64) {
-	n, _ := io.Copy(dst, src)
-	c <- n
+func pipe(dst, src net.Conn) {
+	defer func() {
+		dst.Close()
+		src.Close()
+	}()
+	_, err := io.Copy(dst, src)
+	if err==io.EOF {
+		dlog.Debugf("receive EOF and close conn")
+	}else if err!=nil {
+		dlog.Errorf("occur error %s and close conn", err.Error())
+	}
+	return
 }
 
 func (l *Local) UpdateProcessAddrInfo() {
