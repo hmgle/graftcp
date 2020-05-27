@@ -206,6 +206,9 @@ func (l *Local) HandleConn(conn net.Conn) error {
 
 func pipe(dst, src net.Conn, c chan int64) {
 	n, _ := io.Copy(dst, src)
+	now := time.Now()
+	dst.SetDeadline(now)
+	src.SetDeadline(now)
 	c <- n
 }
 
