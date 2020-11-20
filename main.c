@@ -193,7 +193,10 @@ void do_child(int argc, char **argv)
 	 * the immediately following execve syscall.
 	 */
 	kill(pid, SIGSTOP);
-	execvp(args[0], args);
+	if (execvp(args[0], args) < 0) {
+		fprintf(stderr, "graftcp %s: %s\n", args[0], strerror(errno));
+		exit(errno);
+	}
 }
 
 void init(int argc, char **argv)

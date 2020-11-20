@@ -13,13 +13,16 @@ import (
 )
 
 type Config struct {
-	Listen    string // Listen address
-	Logfile   string // Write logs to file
-	Loglevel  int    // Log level (0-6)
-	PipePath  string // Pipe path for graftcp to send address info
-	Socks5    string // SOCKS5 address
-	HttpProxy string // HTTP proxy address
-	UseSyslog bool   // Use the system logger
+	Listen          string // Listen address
+	Logfile         string // Write logs to file
+	Loglevel        int    // Log level (0-6)
+	PipePath        string // Pipe path for graftcp to send address info
+	Socks5          string // SOCKS5 address
+	Socks5Username  string // SOCKS5 proxy username
+	Socks5Password  string // SOCKS5 proxy password
+	HttpProxy       string // HTTP proxy address
+	UseSyslog       bool   // Use the system logger
+	SelectProxyMode string // Set the mode for select a proxy (auto, random, only_http_proxy, only_socks5)
 }
 
 var Cfg = &Config{Loglevel: -1}
@@ -39,6 +42,10 @@ func setCfg(key, val string) {
 		Cfg.PipePath = val
 	case "socks5":
 		Cfg.Socks5 = val
+	case "socks5_username":
+		Cfg.Socks5Username = val
+	case "socks5_password":
+		Cfg.Socks5Password = val
 	case "http_proxy":
 		Cfg.HttpProxy = val
 	case "usesyslog":
@@ -47,6 +54,8 @@ func setCfg(key, val string) {
 		} else {
 			Cfg.UseSyslog = false
 		}
+	case "select_proxy_mode":
+		Cfg.SelectProxyMode = val
 	}
 }
 
@@ -86,7 +95,7 @@ func ParseConfigFile(path string, app *App) error {
 				setCfg(parseLine(line))
 				break
 			}
-			dlog.Errorf("reader.ReadString('\\n') err: %s, path: %s", err.Error, path)
+			dlog.Errorf("reader.ReadString('\\n') err: %s, path: %s", err.Error(), path)
 			return err
 		}
 		setCfg(parseLine(line))
@@ -104,6 +113,12 @@ func overrideConfig(app *App) {
 	if !flagset["socks5"] && Cfg.Socks5 != "" {
 		app.Socks5Addr = Cfg.Socks5
 	}
+	if !flagset["socks5_username"] && Cfg.Socks5Username != "" {
+		app.Socks5Username = Cfg.Socks5Username
+	}
+	if !flagset["socks5_password"] && Cfg.Socks5Password != "" {
+		app.Socks5Password = Cfg.Socks5Password
+	}
 	if !flagset["http_proxy"] && Cfg.HttpProxy != "" {
 		app.HttpProxyAddr = Cfg.HttpProxy
 	}
@@ -118,5 +133,8 @@ func overrideConfig(app *App) {
 	}
 	if !flagset["syslog"] {
 		dlog.UseSyslog(Cfg.UseSyslog)
+	}
+	if !flagset["select_proxy_mode"] && Cfg.SelectProxyMode != "" {
+		selectProxyMode = Cfg.SelectProxyMode
 	}
 }

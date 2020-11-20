@@ -2,7 +2,7 @@
 # GRAFTCP
 
 `graftcp` is a proxy tool inspiring by [maybe](https://github.com/p-e-w/maybe) and [proxychains](https://github.com/haad/proxychains).
-It hooks `connect(2)` funciton via `ptrace(2)` and redirects the connection through SOCKS5 proxies.
+It hooks `connect(2)` function via `ptrace(2)` and redirects the connection through SOCKS5 proxies.
 -->
 # graftcp
 
@@ -14,7 +14,7 @@ It hooks `connect(2)` funciton via `ptrace(2)` and redirects the connection thro
 
 `graftcp` can redirect the TCP connection made by the given program \[application, script, shell, etc.\] to SOCKS5 or HTTP proxy.
 
-Compared with [tsocks](https://linux.die.net/man/8/tsocks), [proxychains](http://proxychains.sourceforge.net/) or [proxyChains-ng](https://github.com/rofl0r/proxychains-ng), `graftcp` is not using the [LD_PRELOAD trick](https://stackoverflow.com/questions/426230/what-is-the-ld-preload-trick) which only work for dynamically linked programs, e.g., [applications builded by Go can not be hook by proxychains-ng](https://github.com/rofl0r/proxychains-ng/issues/199). `graftcp` can trace or modify any
+Compared with [tsocks](https://linux.die.net/man/8/tsocks), [proxychains](http://proxychains.sourceforge.net/) or [proxychains-ng](https://github.com/rofl0r/proxychains-ng), `graftcp` is not using the [LD_PRELOAD trick](https://stackoverflow.com/questions/426230/what-is-the-ld-preload-trick) which only work for dynamically linked programs, e.g., [applications built by Go can not be hook by proxychains-ng](https://github.com/rofl0r/proxychains-ng/issues/199). `graftcp` can trace or modify any
 given program's connect by [`ptrace(2)`](https://en.wikipedia.org/wiki/Ptrace), so it is workable for any program. The principle will be explained in this paragraph of [how does it work](#principles).
 
 ## Installation 
@@ -124,7 +124,7 @@ $ wget https://www.google.com
 To achieve the goal of redirecting the TCP connection of a app to another destination address and the app itself is not aware of it, these conditions are probably required:
 
 - `fork(2)` a new process and trace it using `ptrace(2)`, `execve(2)` to run the app. Every `connect(2)` syscall will be intercepted, then get the destination address argument and send it to `graftcp-local` via `pipe`.
-- Modify the destination address argument of `connect(2)` to `graftcp-local`'s address, and restart the stoped syscall. After the syscall returns successfully, the app thought it has connected the original destination address, but in face it connected the `graftcp-local`, so we named it "graft".
+- Modify the destination address argument of `connect(2)` to `graftcp-local`'s address, and restart the stopped syscall. After the syscall returns successfully, the app thought it has connected the original destination address, but in face it connected the `graftcp-local`, so we named it "graft".
 - `graftcp-local` establish a SOCKS5 connection based on the information of app's original destination address, then redirect the requests from the app to the SOCKS5 proxy.
 
 Someone may have a question here: since we can modify the arguments of a syscall, modify the app's `write(2)` / `send(2)` buf argument, attach the original destination information to the `write` buffer, isn't it simpler? The answer is that cannot be done. Because attach data to the buffer of the tracked child process, it may case a buffer overflow, causing crash or overwrite other data.  
@@ -163,7 +163,7 @@ Global way: e.g., use `iptables` + `RedSocks` to convert the system's traffic th
 Environment variable setting: some programs will read the proxy-related environment variables to determine whether to convert their own traffic to the corresponding proxy protocol traffic, such as `curl` will [read `http_proxy`, `ftp_proxy`, `all_proxy ` Environment variables and decide which proxy traffic to convert based on the request URL scheme](https://curl.haxx.se/libcurl/c/CURLOPT_PROXY.html). This way is effective only if the program itself implements the traffic conversion function, so
 it is very limited.
 
-programs selection way: this way can only perform redirection for specified programs, such as `tsocks` or `proxychains`. As mentioned earlier, they were using the `LD_PRELOAD` hijacking dynamic library funciton, and the default static link compiled program such as `Go` is invalid. `graftcp` improves this by being able to redirect TCP connections from any program.
+programs selection way: this way can only perform redirection for specified programs, such as `tsocks` or `proxychains`. As mentioned earlier, they were using the `LD_PRELOAD` hijacking dynamic library function, and the default static link compiled program such as `Go` is invalid. `graftcp` improves this by being able to redirect TCP connections from any program.
 
 ### Will `graftcp` redirect the connection to the SOCKS5 proxy if the target address is localhost?
 
@@ -181,7 +181,7 @@ Linux provides a way to limit the `ptrace(2)`: set the value of [`/proc/sys/kern
 
 ### Does it support macOS?
 
-No. macOS's [`ptrace(2)`](http://polarhome.com/service/man/?qf=ptrace&af=0&sf=0&of=Darwin&tf=2) is useless. However, it can also be achieved theoretically by referringin `DTrace`. Anyone try it? :grin:
+No. macOS's [`ptrace(2)`](http://polarhome.com/service/man/?qf=ptrace&af=0&sf=0&of=Darwin&tf=2) is useless. ~~However, it can also be achieved theoretically by referring to `DTrace`~~. See [issue 12](https://github.com/hmgle/graftcp/issues/12). Anyone try it? :grin:
 
 ## TODO
 
@@ -190,8 +190,8 @@ No. macOS's [`ptrace(2)`](http://polarhome.com/service/man/?qf=ptrace&af=0&sf=0&
 
 ## Acknowledgements and References
 
-- [maybe](https://github.com/p-e-w/maybe), [proxychains](http://proxychains.sourceforge.net/) and [proxyChains-ng](https://github.com/rofl0r/proxychains-ng) for inspiration.
-- [strace](https://strace.io/).
+- [maybe](https://github.com/p-e-w/maybe), [proxychains](http://proxychains.sourceforge.net/) and [proxychains-ng](https://github.com/rofl0r/proxychains-ng) for inspiration
+- [strace](https://strace.io/)
 - [uthash](https://troydhanson.github.io/uthash/)
 - [service](https://github.com/kardianos/service)
 - [dlog](https://github.com/jedisct1/dlog)

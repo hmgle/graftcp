@@ -86,11 +86,13 @@ func getInode(localAddrHex, remoteAddrHex string) (inode string) {
 
 	// skip the first header line
 	for _, line := range lines[1:] {
-		if strings.Contains(line, localAddrHex) && strings.Contains(line, remoteAddrHex) {
-			fields := strings.Fields(line)
-			if len(fields) > 9 {
-				return fields[9] // fields[9] is inode
-			}
+		fields := strings.Fields(line)
+		if len(fields) < 10 {
+			continue
+		}
+		if strings.Contains(fields[1] /* local address:port */, localAddrHex) &&
+			strings.Contains(fields[2] /* remote address:port */, remoteAddrHex) {
+			return fields[9] // fields[9] is inode
 		}
 	}
 	return ""

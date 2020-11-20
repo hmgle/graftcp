@@ -18,13 +18,13 @@ import (
 type modeT int
 
 const (
-	// AutoSelectMode: select socks5 if socks5 is reachable, else HTTP proxy
+	// AutoSelectMode select socks5 if socks5 is reachable, else HTTP proxy
 	AutoSelectMode modeT = iota
-	// RandomSelectMode: select the reachable proxy randomly
+	// RandomSelectMode select the reachable proxy randomly
 	RandomSelectMode
-	// OnlySocks5Mode: force use socks5
+	// OnlySocks5Mode force use socks5
 	OnlySocks5Mode
-	// OnlyHttpProxyMode: force use HTTP proxy
+	// OnlyHttpProxyMode force use HTTP proxy
 	OnlyHttpProxyMode
 )
 
@@ -41,7 +41,7 @@ type Local struct {
 	selectMode modeT
 }
 
-func NewLocal(listenAddr, socks5Addr, httpProxyAddr string) *Local {
+func NewLocal(listenAddr, socks5Addr, socks5Username, socks5PassWord, httpProxyAddr string) *Local {
 	listenTCPAddr, err := net.ResolveTCPAddr("tcp", listenAddr)
 	if err != nil {
 		dlog.Fatalf("resolve frontend(%s) error: %s", listenAddr, err.Error())
@@ -59,7 +59,14 @@ func NewLocal(listenAddr, socks5Addr, httpProxyAddr string) *Local {
 			socks5Addr, httpProxyAddr, socks5Addr, err1, httpProxyAddr, err2)
 	}
 	if err1 == nil {
-		dialerSocks5, err := proxy.SOCKS5("tcp", socks5TCPAddr.String(), nil, proxy.Direct)
+		var auth *proxy.Auth
+		if socks5Username != "" {
+			auth = &proxy.Auth{
+				User:     socks5Username,
+				Password: socks5PassWord,
+			}
+		}
+		dialerSocks5, err := proxy.SOCKS5("tcp", socks5TCPAddr.String(), auth, proxy.Direct)
 		if err != nil {
 			dlog.Errorf("proxy.SOCKS5(%s) fail: %s", socks5TCPAddr.String(), err.Error())
 		} else {
@@ -127,7 +134,7 @@ func (l *Local) Start() {
 		dlog.Fatalf("net.ListenTCP(%s) err: %s", l.faddr.String(), err.Error())
 	}
 	defer ln.Close()
-	dlog.Infof("graft-local start listening %s...", l.faddr.String())
+	dlog.Infof("graftcp-local start listening %s...", l.faddr.String())
 
 	for {
 		conn, err := ln.AcceptTCP()
@@ -145,14 +152,20 @@ func (l *Local) getPidByAddr(localAddr string) (pid string, destAddr string) {
 		dlog.Errorf("getInodeByAddrs(%s, %s) err: %s", localAddr, l.faddrString, err.Error())
 		return "", ""
 	}
-	RangePidAddr(func(p, a string) bool {
-		if hasIncludeInode(p, inode) {
-			pid = p
-			destAddr = a
-			return false
+	for i := 0; i < 3; i++ { // try 3 times
+		RangePidAddr(func(p, a string) bool {
+			if hasIncludeInode(p, inode) {
+				pid = p
+				destAddr = a
+				return false
+			}
+			return true
+		})
+		if pid != "" {
+			break
 		}
-		return true
-	})
+		time.Sleep(20 * time.Millisecond)
+	}
 	if pid != "" {
 		DeletePidAddr(pid)
 	}
@@ -193,6 +206,9 @@ func (l *Local) HandleConn(conn net.Conn) error {
 
 func pipe(dst, src net.Conn, c chan int64) {
 	n, _ := io.Copy(dst, src)
+	now := time.Now()
+	dst.SetDeadline(now)
+	src.SetDeadline(now)
 	c <- n
 }
 
@@ -204,13 +220,14 @@ func (l *Local) UpdateProcessAddrInfo() {
 			dlog.Errorf("r.ReadLine err: %s", err.Error())
 			break
 		}
+		copyLine := string(line)
 		// dest_ipaddr:dest_port:pid
-		s := strings.Split(string(line), ":")
+		s := strings.Split(copyLine, ":")
 		if len(s) != 3 {
-			dlog.Errorf("r.ReadLine(): %d", string(line))
+			dlog.Errorf("r.ReadLine(): %s", copyLine)
 			continue
 		}
-		StorePidAddr(s[2], s[0]+":"+s[1])
+		go StorePidAddr(s[2], s[0]+":"+s[1])
 	}
 }
 

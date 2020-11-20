@@ -8,7 +8,7 @@
 
 `graftcp` 可以把任何指定程序（应用程序、脚本、shell 等）的 TCP 连接重定向到 SOCKS5 或 HTTP 代理。
 
-对比 [tsocks](https://linux.die.net/man/8/tsocks)、[proxychains](http://proxychains.sourceforge.net/) 或 [proxyChains-ng](https://github.com/rofl0r/proxychains-ng)，`graftcp` 并不使用 [LD_PRELOAD 技巧](https://stackoverflow.com/questions/426230/what-is-the-ld-preload-trick)来劫持共享库的 connect()、getaddrinfo()
+对比 [tsocks](https://linux.die.net/man/8/tsocks)、[proxychains](http://proxychains.sourceforge.net/) 或 [proxychains-ng](https://github.com/rofl0r/proxychains-ng)，`graftcp` 并不使用 [LD_PRELOAD 技巧](https://stackoverflow.com/questions/426230/what-is-the-ld-preload-trick)来劫持共享库的 connect()、getaddrinfo()
 等系列函数达到重定向目的，这种方法只对使用动态链接编译的程序有效，对于静态链接编译出来的程序，例如[默认选项编译的 Go 程序](https://golang.org/cmd/link/)，[proxychains-ng 就无效了](https://github.com/rofl0r/proxychains-ng/issues/199)。`graftcp` 使用 [`ptrace(2)`](https://en.wikipedia.org/wiki/Ptrace) 系统调用跟踪或修改任意指定程序的 connect 信息，对任何程序都有效。[工作原理](#principles)后面将会解释。
 
 ## 安装
@@ -175,7 +175,7 @@ Linux 提供了一种限制被 `ptrace(2)` 跟踪的方法：设置 [`/proc/sys/
 
 ### 支持 macOS 吗？
 
-不。macOS 的 [`ptrace(2)`](http://polarhome.com/service/man/?qf=ptrace&af=0&sf=0&of=Darwin&tf=2) 是个半残品。不过理论上参考 DTrace那一套也能实现，有兴趣的同学可以趟下这趟浑水 :grin:
+不。macOS 的 [`ptrace(2)`](http://polarhome.com/service/man/?qf=ptrace&af=0&sf=0&of=Darwin&tf=2) 是个半残品。~~不过理论上参考 DTrace那一套也能实现~~，见[issue 12](https://github.com/hmgle/graftcp/issues/12)。或许有兴趣的同学可以趟下这趟浑水 :grin:
 
 ## TODO
 
@@ -184,8 +184,8 @@ Linux 提供了一种限制被 `ptrace(2)` 跟踪的方法：设置 [`/proc/sys/
 
 ## 感谢及参考
 
-- [maybe](https://github.com/p-e-w/maybe), [proxychains](http://proxychains.sourceforge.net/) and [proxyChains-ng](https://github.com/rofl0r/proxychains-ng) for inspiration.
-- [strace](https://strace.io/).
+- [maybe](https://github.com/p-e-w/maybe), [proxychains](http://proxychains.sourceforge.net/) and [proxychains-ng](https://github.com/rofl0r/proxychains-ng) for inspiration
+- [strace](https://strace.io/)
 - [uthash](https://troydhanson.github.io/uthash/)
 - [service](https://github.com/kardianos/service)
 - [dlog](https://github.com/jedisct1/dlog)
