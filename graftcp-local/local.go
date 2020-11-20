@@ -223,11 +223,24 @@ func (l *Local) UpdateProcessAddrInfo() {
 		copyLine := string(line)
 		// dest_ipaddr:dest_port:pid
 		s := strings.Split(copyLine, ":")
-		if len(s) != 3 {
+		if len(s) < 3 {
 			dlog.Errorf("r.ReadLine(): %s", copyLine)
 			continue
 		}
-		go StorePidAddr(s[2], s[0]+":"+s[1])
+		var (
+			pid  string
+			addr string
+		)
+		if len(s) > 3 { // IPv6
+			pid = s[len(s)-1]
+			destPort := s[len(s)-2]
+			destIP := copyLine[:len(copyLine)-2-len(pid)-len(destPort)]
+			addr = "[" + destIP + "]:" + destPort
+		} else { // IPv4
+			pid = s[2]
+			addr = s[0] + ":" + s[1]
+		}
+		go StorePidAddr(pid, addr)
 	}
 }
 
