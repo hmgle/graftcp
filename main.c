@@ -19,6 +19,7 @@
 #include "string-set.h"
 
 struct sockaddr_in PROXY_SA;
+struct sockaddr_in6 PROXY_SA6;
 char *LOCAL_ADDR         = "127.0.0.1";
 char *LOCAL_DEFAULT_ADDR = "0.0.0.0";
 uint16_t LOCAL_PORT      = 2233;
@@ -96,8 +97,7 @@ void socket_pre_handle(struct proc_info *pinfp)
 void connect_pre_handle(struct proc_info *pinfp)
 {
 	int socket_fd = get_syscall_arg(pinfp->pid, 0);
-	struct socket_info *si =
-	    find_socket_info((socket_fd << 31) + pinfp->pid);
+	struct socket_info *si = find_socket_info((socket_fd << 31) + pinfp->pid);
 	if (si == NULL)
 		return;
 
@@ -126,17 +126,15 @@ void connect_pre_handle(struct proc_info *pinfp)
 	if (is_ignore(dest_ip_addr_str))
 		return;
 
-	putdata(pinfp->pid, addr, (char *)&PROXY_SA, sizeof(PROXY_SA));
+	if (dest_sa.sin_family == AF_INET) /* IPv4 */
+		putdata(pinfp->pid, addr, (char *)&PROXY_SA, sizeof(PROXY_SA));
+	else /* IPv6 */
+		putdata(pinfp->pid, addr, (char *)&PROXY_SA6, sizeof(PROXY_SA6));
 
 	char buf[1024] = { 0 };
-	char delimiter;
 	strcpy(buf, dest_ip_addr_str);
-	if (dest_sa.sin_family == AF_INET)		/* IPv4 */
-		delimiter = ':';
-	else if (dest_sa.sin_family == AF_INET6)	/* IPv6 */
-		delimiter = '@';
-	sprintf(&buf[strlen(buf)], "%c%d%c%d\n",
-		delimiter, ntohs(dest_ip_port), delimiter, pinfp->pid);
+	strcat(buf, ":");
+	sprintf(&buf[strlen(buf)], "%d:%d\n", ntohs(dest_ip_port), pinfp->pid);
 	if (write(LOCAL_PIPE_FD, buf, strlen(buf)) <= 0) {
 		if (errno)
 			perror("write");
@@ -425,6 +423,12 @@ int main(int argc, char **argv)
 			exit(errno);
 		}
 		memcpy(&PROXY_SA.sin_addr, he->h_addr, sizeof(struct in_addr));
+	}
+	PROXY_SA6.sin6_family = AF_INET6;
+	PROXY_SA6.sin6_port = htons(LOCAL_PORT);
+	if (inet_pton(AF_INET6, "::1", &PROXY_SA6.sin6_addr) < 0 ) {
+		perror("inet_pton");
+		exit(errno);
 	}
 
 	LOCAL_PIPE_FD = open(LOCAL_PIPE_PAHT, O_WRONLY);
