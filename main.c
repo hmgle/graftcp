@@ -19,6 +19,7 @@
 #include "string-set.h"
 
 struct sockaddr_in PROXY_SA;
+struct sockaddr_in6 PROXY_SA6;
 char *LOCAL_ADDR         = "127.0.0.1";
 char *LOCAL_DEFAULT_ADDR = "0.0.0.0";
 uint16_t LOCAL_PORT      = 2233;
@@ -83,7 +84,8 @@ void socket_pre_handle(struct proc_info *pinfp)
 	si->type = get_syscall_arg(pinfp->pid, 1);
 
 	/* If not TCP socket, ignore */
-	if ((si->type & SOCK_STREAM) < 1 || si->domain != AF_INET) {
+	if ((si->type & SOCK_STREAM) < 1
+	     || (si->domain != AF_INET && si->domain != AF_INET6)) {
 		free(si);
 		return;
 	}
@@ -95,26 +97,39 @@ void socket_pre_handle(struct proc_info *pinfp)
 void connect_pre_handle(struct proc_info *pinfp)
 {
 	int socket_fd = get_syscall_arg(pinfp->pid, 0);
-	struct socket_info *si =
-	    find_socket_info((socket_fd << 31) + pinfp->pid);
+	struct socket_info *si = find_socket_info((socket_fd << 31) + pinfp->pid);
 	if (si == NULL)
 		return;
 
 	long addr = get_syscall_arg(pinfp->pid, 1);
 	struct sockaddr_in dest_sa;
+	struct sockaddr_in6 dest_sa6;
+	unsigned short dest_ip_port;
+	struct in_addr dest_ip_addr;
+	char *dest_ip_addr_str;
+	char dest_str[INET6_ADDRSTRLEN];
 
 	getdata(pinfp->pid, addr, (char *)&dest_sa, sizeof(dest_sa));
 
-	unsigned short dest_ip_port = SOCKPORT(dest_sa);
-	struct in_addr dest_ip_addr;
-	char *dest_ip_addr_str;
-
-	dest_ip_addr.s_addr = SOCKADDR(dest_sa);
-	dest_ip_addr_str = inet_ntoa(dest_ip_addr);
+	if (dest_sa.sin_family == AF_INET) { /* IPv4 */
+		dest_ip_port = SOCKPORT(dest_sa);
+		dest_ip_addr.s_addr = SOCKADDR(dest_sa);
+		dest_ip_addr_str = inet_ntoa(dest_ip_addr);
+	} else if (dest_sa.sin_family == AF_INET6) { /* IPv6 */
+		getdata(pinfp->pid, addr, (char *)&dest_sa6, sizeof(dest_sa6));
+		dest_ip_port = SOCKPORT6(dest_sa6);
+		inet_ntop(AF_INET6, &dest_sa6.sin6_addr, dest_str, INET6_ADDRSTRLEN);
+		dest_ip_addr_str = dest_str;
+	} else {
+		return;
+	}
 	if (is_ignore(dest_ip_addr_str))
 		return;
 
-	putdata(pinfp->pid, addr, (char *)&PROXY_SA, sizeof(PROXY_SA));
+	if (dest_sa.sin_family == AF_INET) /* IPv4 */
+		putdata(pinfp->pid, addr, (char *)&PROXY_SA, sizeof(PROXY_SA));
+	else /* IPv6 */
+		putdata(pinfp->pid, addr, (char *)&PROXY_SA6, sizeof(PROXY_SA6));
 
 	char buf[1024] = { 0 };
 	strcpy(buf, dest_ip_addr_str);
@@ -408,6 +423,12 @@ int main(int argc, char **argv)
 			exit(errno);
 		}
 		memcpy(&PROXY_SA.sin_addr, he->h_addr, sizeof(struct in_addr));
+	}
+	PROXY_SA6.sin6_family = AF_INET6;
+	PROXY_SA6.sin6_port = htons(LOCAL_PORT);
+	if (inet_pton(AF_INET6, "::1", &PROXY_SA6.sin6_addr) < 0 ) {
+		perror("inet_pton");
+		exit(errno);
 	}
 
 	LOCAL_PIPE_FD = open(LOCAL_PIPE_PAHT, O_WRONLY);

@@ -19,8 +19,26 @@ func ip2int(ip net.IP) uint32 {
 }
 
 func ip2Hex(ip net.IP) string {
-	ipHex := fmt.Sprintf("%08X", ip2int(ip))
-	return ipHex[6:] + ipHex[4:6] + ipHex[2:4] + ipHex[:2]
+	if ip.To4() != nil { // IPv4
+		ipHex := fmt.Sprintf("%08X", ip2int(ip))
+		return ipHex[6:] + ipHex[4:6] + ipHex[2:4] + ipHex[:2]
+	}
+	// IPv6
+	var ipv6Hex string
+
+	ipHex := fmt.Sprintf("%08X", binary.BigEndian.Uint32(ip[:4]))
+	ipv6Hex += ipHex[6:] + ipHex[4:6] + ipHex[2:4] + ipHex[:2]
+
+	ipHex = fmt.Sprintf("%08X", binary.BigEndian.Uint32(ip[4:8]))
+	ipv6Hex += ipHex[6:] + ipHex[4:6] + ipHex[2:4] + ipHex[:2]
+
+	ipHex = fmt.Sprintf("%08X", binary.BigEndian.Uint32(ip[8:12]))
+	ipv6Hex += ipHex[6:] + ipHex[4:6] + ipHex[2:4] + ipHex[:2]
+
+	ipHex = fmt.Sprintf("%08X", binary.BigEndian.Uint32(ip[12:16]))
+	ipv6Hex += ipHex[6:] + ipHex[4:6] + ipHex[2:4] + ipHex[:2]
+
+	return ipv6Hex
 }
 
 func hexIPAddr(ipAddr string) string {
@@ -40,41 +58,78 @@ func hexPort(port string) (string, error) {
 }
 
 // getInodeByAddrs, localAddr format: 127.0.0.1:1234
-func getInodeByAddrs(localAddr, remoteAddr string) (inode string, err error) {
-	localAddrSplit := strings.Split(localAddr, ":")
-	if len(localAddrSplit) != 2 {
-		return "", fmt.Errorf("bad format of localAddr: %s", localAddr)
+func getInodeByAddrs(localAddr, remoteAddr string, isTCP6 bool) (inode string, err error) {
+	var (
+		localIP    string
+		localPort  string
+		remoteIP   string
+		remotePort string
+	)
+	if isTCP6 {
+		localIP, localPort, err = splitAddrIPv6(localAddr)
+	} else {
+		localIP, localPort, err = splitAddrIPv4(localAddr)
 	}
-	remoteAddrSplit := strings.Split(remoteAddr, ":")
-	if len(remoteAddrSplit) != 2 {
-		return "", fmt.Errorf("bad format of remoteAddr: %s", remoteAddr)
+	if err != nil {
+		return
 	}
-
-	localIP := localAddrSplit[0]
-	if len(localIP) == 0 {
-		localIP = "127.0.0.1"
+	if isTCP6 {
+		remoteIP, remotePort, err = splitAddrIPv6(remoteAddr)
+	} else {
+		remoteIP, remotePort, err = splitAddrIPv4(remoteAddr)
 	}
-	remoteIP := remoteAddrSplit[0]
-	if len(remoteIP) == 0 {
-		remoteIP = "127.0.0.1"
+	if err != nil {
+		return
 	}
 	localIPHex := hexIPAddr(localIP)
 	remoteIPHex := hexIPAddr(remoteIP)
-	localPortHex, err := hexPort(localAddrSplit[1])
+	localPortHex, err := hexPort(localPort)
 	if err != nil {
 		return "", err
 	}
-	remotePortHex, err := hexPort(remoteAddrSplit[1])
+	remotePortHex, err := hexPort(remotePort)
 	if err != nil {
 		return "", err
 	}
+	return getInode(localIPHex+":"+localPortHex, remoteIPHex+":"+remotePortHex, isTCP6), nil
+}
 
-	return getInode(localIPHex+":"+localPortHex, remoteIPHex+":"+remotePortHex), nil
+// addr format: "127.0.0.1:53816"
+func splitAddrIPv4(addr string) (ipv4 string, port string, err error) {
+	addrSplit := strings.Split(addr, ":")
+	if len(addrSplit) != 2 {
+		err = fmt.Errorf("bad format of ipv4 addr: %s", addr)
+		return
+	}
+	ipv4 = addrSplit[0]
+	if ipv4 == "" {
+		ipv4 = "127.0.0.1"
+	}
+	port = addrSplit[1]
+	return
+}
+
+// addr format: "[::1]:53816"
+func splitAddrIPv6(addr string) (ipv6 string, port string, err error) {
+	if !strings.HasPrefix(addr, "[") || !strings.Contains(addr, "]:") {
+		err = fmt.Errorf("bad format of ipv6 addr: %s", addr)
+		return
+	}
+	sep := strings.LastIndex(addr, "]")
+	ipv6 = addr[1:sep]
+	port = addr[sep+2:]
+	return
 }
 
 // getInode get the inode, localAddrHex format: 0100007F:04D2
-func getInode(localAddrHex, remoteAddrHex string) (inode string) {
-	data, err := ioutil.ReadFile("/proc/net/tcp")
+func getInode(localAddrHex, remoteAddrHex string, isTCP6 bool) (inode string) {
+	var path string
+	if isTCP6 {
+		path = "/proc/net/tcp6"
+	} else {
+		path = "/proc/net/tcp"
+	}
+	data, err := ioutil.ReadFile(path)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)

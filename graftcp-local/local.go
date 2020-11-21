@@ -146,10 +146,10 @@ func (l *Local) Start() {
 	}
 }
 
-func (l *Local) getPidByAddr(localAddr string) (pid string, destAddr string) {
-	inode, err := getInodeByAddrs(localAddr, l.faddrString)
+func getPidByAddr(localAddr, remoteAddr string, isTCP6 bool) (pid string, destAddr string) {
+	inode, err := getInodeByAddrs(localAddr, remoteAddr, isTCP6)
 	if err != nil {
-		dlog.Errorf("getInodeByAddrs(%s, %s) err: %s", localAddr, l.faddrString, err.Error())
+		dlog.Errorf("getInodeByAddrs(%s, %s) err: %s", localAddr, remoteAddr, err.Error())
 		return "", ""
 	}
 	for i := 0; i < 3; i++ { // try 3 times
@@ -174,9 +174,13 @@ func (l *Local) getPidByAddr(localAddr string) (pid string, destAddr string) {
 
 func (l *Local) HandleConn(conn net.Conn) error {
 	raddr := conn.RemoteAddr()
-	pid, destAddr := l.getPidByAddr(raddr.String())
+	var isTCP6 bool
+	if strings.Contains(conn.LocalAddr().String(), "[") {
+		isTCP6 = true
+	}
+	pid, destAddr := getPidByAddr(raddr.String(), conn.LocalAddr().String(), isTCP6)
 	if pid == "" || destAddr == "" {
-		dlog.Errorf("getPidByAddr(%s) failed", raddr.String())
+		dlog.Errorf("getPidByAddr(%s, %s) failed", raddr.String(), conn.LocalAddr().String())
 		conn.Close()
 		return fmt.Errorf("can't find the pid and destAddr for %s", raddr.String())
 	}
@@ -223,11 +227,24 @@ func (l *Local) UpdateProcessAddrInfo() {
 		copyLine := string(line)
 		// dest_ipaddr:dest_port:pid
 		s := strings.Split(copyLine, ":")
-		if len(s) != 3 {
+		if len(s) < 3 {
 			dlog.Errorf("r.ReadLine(): %s", copyLine)
 			continue
 		}
-		go StorePidAddr(s[2], s[0]+":"+s[1])
+		var (
+			pid  string
+			addr string
+		)
+		if len(s) > 3 { // IPv6
+			pid = s[len(s)-1]
+			destPort := s[len(s)-2]
+			destIP := copyLine[:len(copyLine)-2-len(pid)-len(destPort)]
+			addr = "[" + destIP + "]:" + destPort
+		} else { // IPv4
+			pid = s[2]
+			addr = s[0] + ":" + s[1]
+		}
+		go StorePidAddr(pid, addr)
 	}
 }
 
