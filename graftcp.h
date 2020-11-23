@@ -23,6 +23,7 @@
 #include <sys/ptrace.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <string.h>
@@ -43,12 +44,15 @@
 #define satosin6(x)  ((struct sockaddr_in6 *) &(x))
 #define SOCKPORT6(x) (satosin6(x)->sin6_port)
 
+#define MIN_CLOSE_MSEC 500
+
 struct socket_info {
 	pid_t pid;
 	int fd;
 	uint64_t magic_fd;
 	int domain;
 	int type;
+	struct timeval conn_ti;
 	UT_hash_handle hh;	/* makes this structure hashable */
 };
 
