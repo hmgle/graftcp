@@ -140,14 +140,23 @@ void connect_pre_handle(struct proc_info *pinfp)
 			perror("write");
 		fprintf(stderr, "write failed!\n");
 	}
+	gettimeofday(&si->conn_ti, NULL);
 }
 
 void close_pre_handle(struct proc_info *pinfp)
 {
 	int fd = get_syscall_arg(pinfp->pid, 0);
 	struct socket_info *si = find_socket_info((fd << 31) + pinfp->pid);
+	struct timeval now;
+	unsigned long delta_ms;
 
 	if (si) {
+		gettimeofday(&now, NULL);
+		delta_ms = (now.tv_sec - si->conn_ti.tv_sec) * 1000 +
+			(now.tv_usec - si->conn_ti.tv_usec) / 1000;
+		if (delta_ms < MIN_CLOSE_MSEC)
+			usleep((MIN_CLOSE_MSEC - delta_ms) * 1000);
+
 		del_socket_info(si);
 		free(si);
 	}
