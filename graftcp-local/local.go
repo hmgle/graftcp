@@ -24,8 +24,8 @@ const (
 	RandomSelectMode
 	// OnlySocks5Mode force use socks5
 	OnlySocks5Mode
-	// OnlyHttpProxyMode force use HTTP proxy
-	OnlyHttpProxyMode
+	// OnlyHTTPProxyMode force use HTTP proxy
+	OnlyHTTPProxyMode
 )
 
 type Local struct {
@@ -75,11 +75,11 @@ func NewLocal(listenAddr, socks5Addr, socks5Username, socks5PassWord, httpProxyA
 	}
 	if err2 == nil {
 		httpProxyURI, _ := url.Parse("http://" + httpProxyTCPAddr.String())
-		dialerHttpProxy, err := proxy.FromURL(httpProxyURI, proxy.Direct)
+		dialerHTTPProxy, err := proxy.FromURL(httpProxyURI, proxy.Direct)
 		if err != nil {
 			dlog.Errorf("proxy.FromURL(%v) err: %s", httpProxyURI, err.Error())
 		} else {
-			local.httpProxyDialer = dialerHttpProxy
+			local.httpProxyDialer = dialerHTTPProxy
 		}
 	}
 	return local
@@ -93,7 +93,7 @@ func (l *Local) SetSelectMode(mode string) {
 	case "random":
 		l.selectMode = RandomSelectMode
 	case "only_http_proxy":
-		l.selectMode = OnlyHttpProxyMode
+		l.selectMode = OnlyHTTPProxyMode
 	case "only_socks5":
 		l.selectMode = OnlySocks5Mode
 	}
@@ -121,7 +121,7 @@ func (l *Local) proxySelector() proxy.Dialer {
 		return l.httpProxyDialer
 	case OnlySocks5Mode:
 		return l.socks5Dialer
-	case OnlyHttpProxyMode:
+	case OnlyHTTPProxyMode:
 		return l.httpProxyDialer
 	default:
 		return l.socks5Dialer

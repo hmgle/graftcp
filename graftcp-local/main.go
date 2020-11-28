@@ -17,7 +17,7 @@ type App struct {
 	Socks5Addr     string
 	Socks5Username string
 	Socks5Password string
-	HttpProxyAddr  string
+	HTTPProxyAddr  string
 	PipePath       string
 }
 
@@ -35,7 +35,7 @@ func (app *App) Start(s service.Service) error {
 func (app *App) run() {
 	var err error
 
-	l := NewLocal(app.ListenAddr, app.Socks5Addr, app.Socks5Username, app.Socks5Password, app.HttpProxyAddr)
+	l := NewLocal(app.ListenAddr, app.Socks5Addr, app.Socks5Username, app.Socks5Password, app.HTTPProxyAddr)
 	dlog.Infof("select_proxy_mode: %s", selectProxyMode)
 	l.SetSelectMode(selectProxyMode)
 
@@ -81,7 +81,7 @@ func main() {
 	flag.StringVar(&app.Socks5Addr, "socks5", "127.0.0.1:1080", "SOCKS5 address")
 	flag.StringVar(&app.Socks5Username, "socks5_username", "", "SOCKS5 username")
 	flag.StringVar(&app.Socks5Password, "socks5_password", "", "SOCKS5 password")
-	flag.StringVar(&app.HttpProxyAddr, "http_proxy", "", "http proxy address, e.g.: 127.0.0.1:8080")
+	flag.StringVar(&app.HTTPProxyAddr, "http_proxy", "", "http proxy address, e.g.: 127.0.0.1:8080")
 	flag.StringVar(&selectProxyMode, "select_proxy_mode", "auto",
 		"Set the mode for select a proxy [auto | random | only_http_proxy | only_socks5]")
 	flag.StringVar(&configFile, "config", "", "Path to the configuration file")
