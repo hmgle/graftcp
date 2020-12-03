@@ -24,7 +24,7 @@ debug = 0
 PREFIX = /usr/local
 BINDIR = $(PREFIX)/bin
 
-INSTALL = install -c
+INSTALL = install -D
 
 CFLAGS += -Wall
 ifeq ($(debug), 1)
@@ -50,23 +50,23 @@ $(GRAFTCP_LOCAL_BIN)::
 	$(MAKE) -C graftcp-local
 
 install:: graftcp $(GRAFTCP_LOCAL_BIN)
-	$(INSTALL) $< $(BINDIR)
+	$(INSTALL) $< $(DESTDIR)$(BINDIR)/$<
 	$(MAKE) -C graftcp-local $@
 
 uninstall:: $(GRAFTCP_LOCAL_BIN)
-	-rm -f $(BINDIR)/graftcp
+	-rm -f $(DESTDIR)$(BINDIR)/graftcp
 	$(MAKE) -C graftcp-local $@
 
 install_graftcp:: graftcp 
-	$(INSTALL) $< $(BINDIR)
+	$(INSTALL) $< $(DESTDIR)$(BINDIR)/$<
 
 uninstall_graftcp::
-	-rm -f $(BINDIR)/graftcp
+	-rm -f $(DESTDIR)$(BINDIR)/graftcp
 
-install_graftcp_local:
+install_graftcp_local::
 	$(MAKE) -C graftcp-local install
 
-uninstall_graftcp_local:
+uninstall_graftcp_local::
 	$(MAKE) -C graftcp-local uninstall
 
 sinclude $(SRC:.c=.d)
