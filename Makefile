@@ -19,6 +19,8 @@ ifneq ($(KERNEL), Linux)
 $(error only support Linux now.)
 endif
 
+VERSION = $(shell git describe --tags)
+
 debug = 0
 
 PREFIX = /usr/local
@@ -31,6 +33,10 @@ ifeq ($(debug), 1)
 	CFLAGS += -O0 -g
 else
 	CFLAGS += -O2 -DNDEBUG
+endif
+
+ifeq ($(shell echo $(VERSION) | head -c 1), v)
+	CFLAGS += -DVERSION=$(VERSION)
 endif
 
 SRC := $(wildcard *.c)

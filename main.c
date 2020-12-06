@@ -18,6 +18,10 @@
 #include "graftcp.h"
 #include "string-set.h"
 
+#ifndef VERSION
+#define VERSION "v0.3"
+#endif
+
 struct sockaddr_in PROXY_SA;
 struct sockaddr_in6 PROXY_SA6;
 char *LOCAL_ADDR         = "127.0.0.1";
@@ -367,6 +371,8 @@ static void usage(char **argv)
 		"  -n --not-ignore-local\n"
 		"                    Connecting to local is not changed by default, this\n"
 		"                    option will redirect it to SOCKS5\n"
+		"  -V --version\n"
+		"                    Show version\n"
 		"  -h --help\n"
 		"                    Display this help and exit\n"
 		"\n", argv[0]);
@@ -378,6 +384,7 @@ int main(int argc, char **argv)
 	bool ignore_local = true;
 	struct option long_opts[] = {
 		{"help", no_argument, 0, 'h'},
+		{"version", no_argument, 0, 'V'},
 		{"local-addr", required_argument, 0, 'a'},
 		{"local-port", required_argument, 0, 'p'},
 		{"local-fifo", required_argument, 0, 'f'},
@@ -408,6 +415,9 @@ int main(int argc, char **argv)
 		case 'n':
 			ignore_local = false;
 			break;
+		case 'V':
+			fprintf(stderr, "graftcp %s\n", VERSION);
+			exit(0);
 		case 0:
 		case 'h':
 		default:
