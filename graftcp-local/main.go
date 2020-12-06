@@ -10,7 +10,10 @@ import (
 	"github.com/kardianos/service"
 )
 
-var selectProxyMode string
+var (
+	selectProxyMode string
+	version         = "v0.3"
+)
 
 type App struct {
 	ListenAddr     string
@@ -86,7 +89,12 @@ func main() {
 		"Set the mode for select a proxy [auto | random | only_http_proxy | only_socks5]")
 	flag.StringVar(&configFile, "config", "", "Path to the configuration file")
 	flag.StringVar(&app.PipePath, "pipepath", "/tmp/graftcplocal.fifo", "Pipe path for graftcp to send address info")
+	v := flag.Bool("version", false, "Print the graftcp-local version information")
 	flag.Parse()
+	if *v {
+		fmt.Printf("graftcp-local version %s\n", version)
+		os.Exit(0)
+	}
 	ParseConfigFile(configFile, app)
 	dlog.Noticef("graftcp-local start")
 

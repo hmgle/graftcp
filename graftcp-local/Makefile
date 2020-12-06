@@ -1,6 +1,10 @@
 export GOPATH := $(CURDIR)/.gopath
 export PATH := $(PATH):$(CURDIR)/.gopath/bin
 
+ifneq ($(shell echo $(VERSION) | head -c 1), v)
+	VERSION=v0.3
+endif
+
 PREFIX = /usr/local
 BINDIR = $(PREFIX)/bin
 
@@ -11,7 +15,7 @@ GO_IMPORT_PATH := github.com/hmgle/graftcp/graftcp-local
 all:: graftcp-local
 
 graftcp-local: .gopath/.created $(wildcard *.go)
-	go build -ldflags "-s -w" $(GO_IMPORT_PATH)
+	go build -ldflags "-s -w -X main.version=${VERSION}" $(GO_IMPORT_PATH)
 
 .gopath/.created:
 	rm -rf .gopath

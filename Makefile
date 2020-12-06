@@ -53,7 +53,7 @@ graftcp: main.o util.o string-set.o
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(GRAFTCP_LOCAL_BIN)::
-	$(MAKE) -C graftcp-local
+	$(MAKE) -C graftcp-local VERSION=$(VERSION)
 
 install:: graftcp $(GRAFTCP_LOCAL_BIN)
 	$(INSTALL) $< $(DESTDIR)$(BINDIR)/$<
