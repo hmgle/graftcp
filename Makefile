@@ -35,9 +35,10 @@ else
 	CFLAGS += -O2 -DNDEBUG
 endif
 
-ifeq ($(shell echo $(VERSION) | head -c 1), v)
-	CFLAGS += -DVERSION=\"$(VERSION)\"
+ifneq ($(shell echo $(VERSION) | head -c 1), v)
+	VERSION=v0.3
 endif
+CFLAGS += -DVERSION=\"$(VERSION)\"
 
 SRC := $(wildcard *.c)
 
