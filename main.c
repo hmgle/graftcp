@@ -394,7 +394,7 @@ int main(int argc, char **argv)
 		{0, 0, 0, 0}
 	};
 
-	while ((opt = getopt_long(argc, argv, "+ha:p:f:b:w:n", long_opts,
+	while ((opt = getopt_long(argc, argv, "+Vha:p:f:b:w:n", long_opts,
 			    	&index)) != -1) {
 		switch (opt) {
 		case 'a':

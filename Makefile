@@ -19,7 +19,7 @@ ifneq ($(KERNEL), Linux)
 $(error only support Linux now.)
 endif
 
-VERSION = $(shell git describe --tags)
+VERSION = $(shell git describe --tags --always)
 
 debug = 0
 
@@ -36,7 +36,7 @@ else
 endif
 
 ifeq ($(shell echo $(VERSION) | head -c 1), v)
-	CFLAGS += -DVERSION=$(VERSION)
+	CFLAGS += -DVERSION=\"$(VERSION)\"
 endif
 
 SRC := $(wildcard *.c)
