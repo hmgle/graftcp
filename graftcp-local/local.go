@@ -26,6 +26,8 @@ const (
 	OnlySocks5Mode
 	// OnlyHttpProxyMode force use HTTP proxy
 	OnlyHttpProxyMode
+	// DirectMode direct connect
+	DirectMode
 )
 
 type Local struct {
@@ -35,6 +37,7 @@ type Local struct {
 
 	socks5Dialer    proxy.Dialer
 	httpProxyDialer proxy.Dialer
+	directDialer    proxy.Dialer
 
 	FifoFd *os.File
 
@@ -50,6 +53,7 @@ func NewLocal(listenAddr, socks5Addr, socks5Username, socks5PassWord, httpProxyA
 		faddr:       listenTCPAddr,
 		faddrString: listenAddr,
 	}
+	local.directDialer = proxy.Direct
 
 	socks5TCPAddr, err1 := net.ResolveTCPAddr("tcp", socks5Addr)
 	httpProxyTCPAddr, err2 := net.ResolveTCPAddr("tcp", httpProxyAddr)
@@ -96,6 +100,8 @@ func (l *Local) SetSelectMode(mode string) {
 		l.selectMode = OnlyHttpProxyMode
 	case "only_socks5":
 		l.selectMode = OnlySocks5Mode
+	case "direct":
+		l.selectMode = DirectMode
 	}
 }
 
@@ -107,8 +113,10 @@ func (l *Local) proxySelector() proxy.Dialer {
 	case AutoSelectMode:
 		if l.socks5Dialer != nil {
 			return l.socks5Dialer
+		} else if l.httpProxyDialer != nil {
+			return l.httpProxyDialer
 		}
-		return l.httpProxyDialer
+		return l.directDialer
 	case RandomSelectMode:
 		if l.socks5Dialer != nil && l.httpProxyDialer != nil {
 			if rand.Intn(2) == 0 {
@@ -123,6 +131,8 @@ func (l *Local) proxySelector() proxy.Dialer {
 		return l.socks5Dialer
 	case OnlyHttpProxyMode:
 		return l.httpProxyDialer
+	case DirectMode:
+		return l.directDialer
 	default:
 		return l.socks5Dialer
 	}
@@ -193,6 +203,10 @@ func (l *Local) HandleConn(conn net.Conn) error {
 		return fmt.Errorf("bad dialer")
 	}
 	destConn, err := dialer.Dial("tcp", destAddr)
+	if err != nil && l.selectMode == AutoSelectMode { // AutoSelectMode try direct
+		dlog.Infof("dial %s direct", destAddr)
+		destConn, err = net.Dial("tcp", destAddr)
+	}
 	if err != nil {
 		dlog.Errorf("dialer.Dial(%s) err: %s", destAddr, err.Error())
 		conn.Close()
