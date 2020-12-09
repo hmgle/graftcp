@@ -203,6 +203,10 @@ func (l *Local) HandleConn(conn net.Conn) error {
 		return fmt.Errorf("bad dialer")
 	}
 	destConn, err := dialer.Dial("tcp", destAddr)
+	if err != nil && l.selectMode == AutoSelectMode { // AutoSelectMode try direct
+		dlog.Infof("dial %s direct", destAddr)
+		destConn, err = net.Dial("tcp", destAddr)
+	}
 	if err != nil {
 		dlog.Errorf("dialer.Dial(%s) err: %s", destAddr, err.Error())
 		conn.Close()
