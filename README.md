@@ -198,6 +198,6 @@ No. macOS's [`ptrace(2)`](http://polarhome.com/service/man/?qf=ptrace&af=0&sf=0&
 
 ## LICENSE
 
-Copyright &copy; 2016, 2018 Hmgle <dustgle@gmail.com>
+Copyright &copy; 2016, 2018, 2019, 2020 Hmgle <dustgle@gmail.com>
 
 Released under the terms of the [GNU General Public License, version 3](https://www.gnu.org/licenses/gpl-3.0.html)

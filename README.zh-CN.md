@@ -192,6 +192,6 @@ Linux 提供了一种限制被 `ptrace(2)` 跟踪的方法：设置 [`/proc/sys/
 
 ## License
 
-Copyright &copy; 2016, 2018 Hmgle <dustgle@gmail.com>
+Copyright &copy; 2016, 2018, 2019, 2020 Hmgle <dustgle@gmail.com>
 
 根据 [GPLv3 许可](https://www.gnu.org/licenses/gpl-3.0.html)发布。
