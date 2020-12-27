@@ -4,6 +4,7 @@ go:
         - "1.6"
         - "1.9"
         - "1.10"
+        - "1.15"
 
 compiler:
         - gcc
@@ -13,3 +14,4 @@ script:
         - go version
         - make
         - sudo make install
+        - sudo make install_systemd
