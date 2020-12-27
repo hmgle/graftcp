@@ -12,6 +12,7 @@ import (
 	"github.com/jedisct1/dlog"
 )
 
+// Config for graftcp-local.
 type Config struct {
 	Listen          string // Listen address
 	Logfile         string // Write logs to file
@@ -20,7 +21,7 @@ type Config struct {
 	Socks5          string // SOCKS5 address
 	Socks5Username  string // SOCKS5 proxy username
 	Socks5Password  string // SOCKS5 proxy password
-	HttpProxy       string // HTTP proxy address
+	HTTPProxy       string // HTTP proxy address
 	UseSyslog       bool   // Use the system logger
 	SelectProxyMode string // Set the mode for select a proxy (auto, random, only_http_proxy, only_socks5)
 }
@@ -47,7 +48,7 @@ func setCfg(key, val string) {
 	case "socks5_password":
 		Cfg.Socks5Password = val
 	case "http_proxy":
-		Cfg.HttpProxy = val
+		Cfg.HTTPProxy = val
 	case "usesyslog":
 		if strings.ToLower(val) == "true" {
 			Cfg.UseSyslog = true
@@ -119,8 +120,8 @@ func overrideConfig(app *App) {
 	if !flagset["socks5_password"] && Cfg.Socks5Password != "" {
 		app.Socks5Password = Cfg.Socks5Password
 	}
-	if !flagset["http_proxy"] && Cfg.HttpProxy != "" {
-		app.HttpProxyAddr = Cfg.HttpProxy
+	if !flagset["http_proxy"] && Cfg.HTTPProxy != "" {
+		app.HTTPProxyAddr = Cfg.HTTPProxy
 	}
 	if !flagset["pipepath"] && Cfg.PipePath != "" {
 		app.PipePath = Cfg.PipePath

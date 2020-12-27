@@ -13,6 +13,8 @@
 
 ## 安装
 
+### 源码安装
+
 `graftcp` 在 Linux 系统内运行。 `graftcp-local` 使用 Go 编写, [Go](https://golang.org/doc/install) 环境是必需的。
 
 ```
@@ -25,9 +27,13 @@ make 执行完后，即可运行 `graftcp-local/graftcp-local` 和 `./graftcp`�
 
 ```sh
 sudo make install
+# Enable and activate systemed unit 
+sudo make install_systemd
 ```
 
-之后 `graftcp-local` 会随着系统启动而自动运行。
+### 二进制包安装
+
+TODO
 
 ## 用法参数
 
@@ -192,6 +198,6 @@ Linux 提供了一种限制被 `ptrace(2)` 跟踪的方法：设置 [`/proc/sys/
 
 ## License
 
-Copyright &copy; 2016, 2018, 2019, 2020 Hmgle <dustgle@gmail.com>
+Copyright &copy; 2016, 2018-2020 Hmgle <dustgle@gmail.com>
 
 根据 [GPLv3 许可](https://www.gnu.org/licenses/gpl-3.0.html)发布。

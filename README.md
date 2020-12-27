@@ -19,6 +19,8 @@ given program's connect by [`ptrace(2)`](https://en.wikipedia.org/wiki/Ptrace), 
 
 ## Installation 
 
+### Install from source
+
 `graftcp` runs on Linux. Building `graftcp-local` requires [Go](https://golang.org/doc/install) installed.
 
 ```sh
@@ -31,9 +33,13 @@ Optionally, you can also install them to system:
 
 ```sh
 sudo make install
+# Enable and activate systemed unit 
+sudo make install_systemd
 ```
 
-Then `graftcp-local` will run automatically as the operating system starts.
+### Install from binary package
+
+TODO
 
 ## Usage
 
@@ -198,6 +204,6 @@ No. macOS's [`ptrace(2)`](http://polarhome.com/service/man/?qf=ptrace&af=0&sf=0&
 
 ## LICENSE
 
-Copyright &copy; 2016, 2018, 2019, 2020 Hmgle <dustgle@gmail.com>
+Copyright &copy; 2016, 2018-2020 Hmgle <dustgle@gmail.com>
 
 Released under the terms of the [GNU General Public License, version 3](https://www.gnu.org/licenses/gpl-3.0.html)

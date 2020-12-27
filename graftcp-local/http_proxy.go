@@ -58,7 +58,7 @@ func (h *httpDialer) Dial(network, addr string) (net.Conn, error) {
 	return conn, nil
 }
 
-func newHttpProxy(u *url.URL, forward proxy.Dialer) (proxy.Dialer, error) {
+func newHTTPProxy(u *url.URL, forward proxy.Dialer) (proxy.Dialer, error) {
 	httpProxy := &httpDialer{
 		host:    u.Host,
 		forward: forward,
@@ -72,6 +72,6 @@ func newHttpProxy(u *url.URL, forward proxy.Dialer) (proxy.Dialer, error) {
 }
 
 func init() {
-	proxy.RegisterDialerType("http", newHttpProxy)
-	proxy.RegisterDialerType("https", newHttpProxy)
+	proxy.RegisterDialerType("http", newHTTPProxy)
+	proxy.RegisterDialerType("https", newHTTPProxy)
 }
