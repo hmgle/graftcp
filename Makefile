@@ -1,5 +1,5 @@
 # "Makefile" for graftcp.
-# Copyright (C) 2016, 2018 Hmgle <dustgle@gmail.com>
+# Copyright (C) 2016, 2018, 2020 Hmgle <dustgle@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -69,6 +69,12 @@ install_graftcp:: graftcp
 
 uninstall_graftcp::
 	-rm -f $(DESTDIR)$(BINDIR)/graftcp
+
+install_systemd::
+	$(MAKE) -C graftcp-local install_systemd
+
+uninstall_systemd::
+	$(MAKE) -C graftcp-local uninstall_systemd
 
 install_graftcp_local::
 	$(MAKE) -C graftcp-local install

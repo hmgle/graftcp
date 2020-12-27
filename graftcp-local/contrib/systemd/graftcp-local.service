@@ -1,0 +1,15 @@
+[Unit]
+Description=Translate graftcp TCP to SOCKS5 or HTTP proxy
+After=network.target
+
+[Service]
+StartLimitInterval=5
+StartLimitBurst=10
+ExecStart=/usr/bin/graftcp-local -config /etc/graftcp-local/graftcp-local.conf
+
+
+Restart=always
+RestartSec=120
+
+[Install]
+WantedBy=multi-user.target

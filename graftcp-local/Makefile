@@ -27,6 +27,25 @@ graftcp-local: .gopath/.created $(wildcard *.go)
 install:: graftcp-local
 	$(INSTALL) $< $(DESTDIR)$(BINDIR)/$<
 
+SYSTEMD_UNIT_DIR:=$(shell pkg-config --variable=systemdsystemunitdir systemd 2>/dev/null)
+
+install_systemd:: install
+	$(if $(SYSTEMD_UNIT_DIR),,$(error SYSTEMD_UNIT_DIR is not defined))
+	test -f $(DESTDIR)/etc/graftcp-local/graftcp-local.conf || \
+		install -Dm644 example-graftcp-local.conf $(DESTDIR)/etc/graftcp-local/graftcp-local.conf
+	install -Dm644 contrib/systemd/graftcp-local.service ${DESTDIR}/${SYSTEMD_UNIT_DIR}/graftcp-local.service
+ifneq ($(PREFIX),/usr/)
+	sed -i -re 's#/usr/bin/graftcp-local#$(subst #,\#,${PREFIX})/bin/graftcp-local#g' ${DESTDIR}/${SYSTEMD_UNIT_DIR}/graftcp-local.service
+endif
+	@echo "Enable and start the graftcp-local systemd unit"
+	systemctl daemon-reload && systemctl --now enable graftcp-local.service
+
+uninstall_systemd::
+	$(if $(SYSTEMD_UNIT_DIR),,$(error SYSTEMD_UNIT_DIR is not defined))
+	@echo "Disable and stop the graftcp-local systemd unit"
+	systemctl disable --now graftcp-local.service
+	rm -f ${DESTDIR}/${SYSTEMD_UNIT_DIR}/graftcp-local.service
+
 uninstall:: graftcp-local
 	-rm -f $(DESTDIR)$(BINDIR)/$<
 
