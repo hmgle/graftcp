@@ -19,6 +19,8 @@ given program's connect by [`ptrace(2)`](https://en.wikipedia.org/wiki/Ptrace), 
 
 ## Installation 
 
+### Install from source
+
 `graftcp` runs on Linux. Building `graftcp-local` requires [Go](https://golang.org/doc/install) installed.
 
 ```sh
@@ -31,9 +33,13 @@ Optionally, you can also install them to system:
 
 ```sh
 sudo make install
+# Enable and activate systemed unit 
+sudo make install_systemd
 ```
 
-Then `graftcp-local` will run automatically as the operating system starts.
+### Install from binary package
+
+TODO
 
 ## Usage
 
