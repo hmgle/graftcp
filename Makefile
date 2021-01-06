@@ -60,7 +60,7 @@ install:: graftcp $(GRAFTCP_LOCAL_BIN)
 	$(INSTALL) $< $(DESTDIR)$(BINDIR)/$<
 	$(MAKE) -C graftcp-local $@
 
-uninstall:: $(GRAFTCP_LOCAL_BIN)
+uninstall::
 	-rm -f $(DESTDIR)$(BINDIR)/graftcp
 	$(MAKE) -C graftcp-local $@
 

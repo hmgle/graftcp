@@ -46,7 +46,7 @@ uninstall_systemd::
 	systemctl disable --now graftcp-local.service
 	rm -f ${DESTDIR}/${SYSTEMD_UNIT_DIR}/graftcp-local.service
 
-uninstall:: graftcp-local
+uninstall::
 	-rm -f $(DESTDIR)$(BINDIR)/$<
 
 install_service:: graftcp-local
