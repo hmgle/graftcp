@@ -33,7 +33,7 @@ sudo make install_systemd
 
 ### 二进制包安装
 
-TODO
+在 https://github.com/hmgle/graftcp/releases 下载 [Debian](https://github.com/hmgle/graftcp/releases/download/v0.3.1/graftcp_0.3.1-1_amd64.deb) 或者 [Arch Linux](https://github.com/hmgle/graftcp/releases/download/v0.3.1/graftcp-0.3.1-1-x86_64.pkg.tar.zst) 安装包并安装。
 
 ## 用法参数
 
