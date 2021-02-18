@@ -15,7 +15,7 @@ GO_IMPORT_PATH := github.com/hmgle/graftcp/graftcp-local
 all:: graftcp-local
 
 graftcp-local: .gopath/.created $(wildcard *.go)
-	go build -ldflags "-s -w -X main.version=${VERSION}" $(GO_IMPORT_PATH)
+	GO111MODULE=auto go build -ldflags "-s -w -X main.version=${VERSION}" $(GO_IMPORT_PATH)
 
 .gopath/.created:
 	rm -rf .gopath
