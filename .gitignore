@@ -1,0 +1,6 @@
+graftcp
+graftcp-local/graftcp-local
+graftcp-local/.gopath
+
+*.o
+*.d
