@@ -4,3 +4,4 @@ graftcp-local/.gopath
 
 *.o
 *.d
+*.a

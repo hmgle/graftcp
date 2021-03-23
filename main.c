@@ -378,7 +378,7 @@ static void usage(char **argv)
 		"\n", argv[0]);
 }
 
-int main(int argc, char **argv)
+int _main(int argc, char **argv)
 {
 	int opt, index;
 	bool ignore_local = true;

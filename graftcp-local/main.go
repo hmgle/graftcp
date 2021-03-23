@@ -1,11 +1,12 @@
 package main
 
 import (
-	"flag"
+	_flag "flag"
 	"fmt"
 	"os"
 	"syscall"
 
+	"context"
 	"github.com/jedisct1/dlog"
 	"github.com/kardianos/service"
 )
@@ -58,7 +59,9 @@ func (app *App) Stop(s service.Service) error {
 	return nil
 }
 
-func main() {
+func local_main(cmdName string, args []string, ctx... context.Context) {
+	flag := _flag.NewFlagSet(cmdName, _flag.ExitOnError)
+
 	var configFile string
 	dlog.Init("graftcp-local", dlog.SeverityInfo, "")
 
@@ -90,7 +93,10 @@ func main() {
 	flag.StringVar(&configFile, "config", "", "Path to the configuration file")
 	flag.StringVar(&app.PipePath, "pipepath", "/tmp/graftcplocal.fifo", "Pipe path for graftcp to send address info")
 	v := flag.Bool("version", false, "Print the graftcp-local version information")
-	flag.Parse()
+	if err := flag.Parse(args); err!= nil{
+		fmt.Printf("Wrong command line arguments for %s: %s\n", cmdName, err.Error())
+		os.Exit(1)
+	}
 	if *v {
 		fmt.Printf("graftcp-local version %s\n", version)
 		os.Exit(0)
@@ -126,4 +132,8 @@ func main() {
 	} else {
 		app.Start(nil)
 	}
+}
+
+func main(){
+	local_main(os.Args[0], os.Args[1:])
 }
