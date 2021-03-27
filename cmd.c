@@ -1,5 +1,5 @@
-int _main(int argc, char **argv);
+int client_main(int argc, char **argv);
 
 int main(int argc, char **argv){
-    return _main(argc, argv);
+    return client_main(argc, argv);
 }

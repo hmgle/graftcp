@@ -3,6 +3,7 @@ package main
 import (
 	_flag "flag"
 	"fmt"
+	"path/filepath"
 	"os"
 	"syscall"
 
@@ -59,7 +60,8 @@ func (app *App) Stop(s service.Service) error {
 	return nil
 }
 
-func local_main(cmdName string, args []string, ctx... context.Context) {
+func local_main(args []string, ctx... context.Context) {
+	cmdName := filepath.Base(args[0])
 	flag := _flag.NewFlagSet(cmdName, _flag.ExitOnError)
 
 	var configFile string
@@ -93,7 +95,7 @@ func local_main(cmdName string, args []string, ctx... context.Context) {
 	flag.StringVar(&configFile, "config", "", "Path to the configuration file")
 	flag.StringVar(&app.PipePath, "pipepath", "/tmp/graftcplocal.fifo", "Pipe path for graftcp to send address info")
 	v := flag.Bool("version", false, "Print the graftcp-local version information")
-	if err := flag.Parse(args); err!= nil{
+	if err := flag.Parse(args[1:]); err!= nil{
 		fmt.Printf("Wrong command line arguments for %s: %s\n", cmdName, err.Error())
 		os.Exit(1)
 	}
@@ -132,8 +134,4 @@ func local_main(cmdName string, args []string, ctx... context.Context) {
 	} else {
 		app.Start(nil)
 	}
-}
-
-func main(){
-	local_main(os.Args[0], os.Args[1:])
 }
