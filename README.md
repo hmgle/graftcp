@@ -96,6 +96,10 @@ Options:
                     Display this help and exit
 ```
 
+Combined `graftcp`:
+
+If one rename or link `graftcp-local` to be `graftcp`, it can automatically start a server and run the client. To use corresponding arguments, pre-append `--server` and `--client` for `graftcp-local` and `graftcp` respectively.
+
 ## Demo
 
 Assume you are running the SOCKS5 proxy with the default IP address: "localhost:1080". Start the `graftcp-local` first:
