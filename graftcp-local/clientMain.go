@@ -16,19 +16,19 @@ import (
 	log "github.com/jedisct1/dlog"
 )
 
-const(
+const (
 	maxArgsLen = 0xfff
 )
 
-func client_main(args []string) int{
-	argc:=C.int(len(args))
+func client_main(args []string) int {
+	argc := C.int(len(args))
 
 	log.Debugf("Got %v args: %v\n", argc, args)
 
-	argv:=(*[maxArgsLen]*C.char)(C.alloc_string_slice(argc))
+	argv := (*[maxArgsLen]*C.char)(C.alloc_string_slice(argc))
 	defer C.free(unsafe.Pointer(argv))
 
-	for i, arg := range args{
+	for i, arg := range args {
 		argv[i] = C.CString(arg)
 		defer C.free(unsafe.Pointer(argv[i]))
 	}
@@ -36,6 +36,3 @@ func client_main(args []string) int{
 	returnValue := C.client_main(argc, (**C.char)(unsafe.Pointer(argv)))
 	return int(returnValue)
 }
-
-
-
