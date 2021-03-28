@@ -47,8 +47,12 @@ TARGET = graftcp $(GRAFTCP_LOCAL_BIN)
 
 all:: $(TARGET)
 
-graftcp: main.o util.o string-set.o
+
+graftcp: cmd.o libgraftcp.a
 	$(CC) $^ -o $@
+
+libgraftcp.a: main.o util.o string-set.o
+	$(AR) rcs $@ $^
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
