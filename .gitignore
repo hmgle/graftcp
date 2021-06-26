@@ -1,6 +1,6 @@
 graftcp
-graftcp-local/graftcp-local
-graftcp-local/.gopath
+local/cmd/graftcp-local/graftcp-local
+local/cmd/mgraftcp/mgraftcp
 
 *.o
 *.d

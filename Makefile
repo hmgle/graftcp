@@ -95,5 +95,5 @@ sinclude $(SRC:.c=.d)
 		rm -f $@.$$$$
 
 clean::
-	-rm -f *.o graftcp *.d
+	-rm -f *.o *.a graftcp *.d
 	$(MAKE) -C local $@

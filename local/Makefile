@@ -14,8 +14,11 @@ all:: $(TARGET)
 cmd/graftcp-local/graftcp-local: $(wildcard *.go) $(wildcard cmd/graftcp-local/*.go)
 	cd cmd/graftcp-local && go build -ldflags "-s -w -X main.version=${VERSION}"
 
-cmd/mgraftcp/mgraftcp: $(wildcard *.go) $(wildcard cmd/mgraftcp/*.go)
+cmd/mgraftcp/mgraftcp: $(wildcard *.go) $(wildcard cmd/mgraftcp/*.go) ../libgraftcp.a
 	cd cmd/mgraftcp && go build -ldflags "-s -w -X main.version=${VERSION}"
+
+../libgraftcp.a:
+	$(MAKE) -C .. libgraftcp.a
 
 install:: cmd/graftcp-local/graftcp-local
 	$(INSTALL) $< $(DESTDIR)$(BINDIR)/$<
