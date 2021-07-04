@@ -11,6 +11,7 @@ package main
 // int client_main(int argc, char **argv);
 import "C"
 import (
+	"io/ioutil"
 	"log"
 	"os"
 	"strconv"
@@ -66,6 +67,8 @@ func constructArgs(args []string) ([]string, []string) {
 }
 
 func main() {
+	retCode := 0
+	defer func() { os.Exit(retCode) }()
 
 	// todo: we need special handle on args like '--help' which trigger os.Exit
 	// todo: randomly set and detect port number if no one specified
@@ -76,10 +79,14 @@ func main() {
 	// TODO: config args
 	l := local.NewLocal(":0", "127.0.0.1:1080", "", "", "")
 
-	pipePath := "/tmp/mgraftcp.fifo"
+	tmpDir, err := ioutil.TempDir("/tmp", "mgraftcp")
+	if err != nil {
+		log.Fatalf("ioutil.TempDir err: %s", err.Error())
+	}
+	defer os.RemoveAll(tmpDir)
+	pipePath := tmpDir + "/mgraftcp.fifo"
 	syscall.Mkfifo(pipePath, uint32(os.ModePerm))
-	os.Chmod(pipePath, 0666)
-	var err error
+
 	l.FifoFd, err = os.OpenFile(pipePath, os.O_RDWR, 0)
 	if err != nil {
 		log.Fatalf("os.OpenFile(%s) err: %s", pipePath, err.Error())
@@ -100,5 +107,5 @@ func main() {
 	fixArgs = append(fixArgs, "-p", strconv.Itoa(faddr.Port), "-f", pipePath)
 	fixArgs = append(fixArgs, clientArgs[1:]...)
 	log.Printf("serverArgs: %+v, fixArgs: %+v\n", serverArgs, fixArgs)
-	os.Exit(clientMain(fixArgs))
+	retCode = clientMain(fixArgs)
 }
