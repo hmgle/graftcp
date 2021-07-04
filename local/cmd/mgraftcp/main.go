@@ -20,6 +20,7 @@ import (
 	"unsafe"
 
 	"github.com/hmgle/graftcp/local"
+	"github.com/spf13/pflag"
 )
 
 const (
@@ -66,7 +67,45 @@ func constructArgs(args []string) ([]string, []string) {
 	return server, client
 }
 
+var (
+	confPath        string
+	httpProxyAddr   string
+	logFile         string
+	logLevel        int8
+	selectProxyMode string
+	socks5Addr      string
+	socks5User      string
+	socks5Pwd       string
+
+	blackIPFile    string
+	whiteIPFile    string
+	notIgnoreLocal bool
+)
+
+func init() {
+	pflag.StringVar(&confPath, "config", "", "Path to the configuration file")
+	pflag.StringVar(&httpProxyAddr, "http_proxy", "", "http proxy address, e.g.: 127.0.0.1:8080")
+	pflag.StringVar(&selectProxyMode, "select_proxy_mode", "auto", "Set the mode for select a proxy [auto | random | only_http_proxy | only_socks5 | direct]")
+	pflag.StringVar(&socks5Addr, "socks5", "127.0.0.1:1080", "SOCKS5 address")
+	pflag.StringVar(&socks5User, "socks5_username", "", "SOCKS5 username")
+	pflag.StringVar(&socks5Pwd, "socks5_password", "", "SOCKS5 password")
+
+	pflag.StringVarP(&blackIPFile, "blackip-file", "b", "", "The IP in black-ip-file will connect direct")
+	pflag.StringVarP(&blackIPFile, "whiteip-file", "w", "", "Only redirect the connect that destination ip in the white-ip-file to SOCKS5")
+	pflag.BoolVarP(&notIgnoreLocal, "not-ignore-local", "n", false, "Connecting to local is not changed by default, this option will redirect it to SOCKS5")
+}
+
+func usage() {
+	log.Fatalf("Usage: mgraftcp [options] prog [prog-args]\n%v", pflag.CommandLine.FlagUsages())
+}
+
 func main() {
+	pflag.Parse()
+	args := pflag.Args()
+	if len(args) == 0 {
+		usage()
+	}
+
 	retCode := 0
 	defer func() { os.Exit(retCode) }()
 
@@ -77,7 +116,7 @@ func main() {
 	clientArgs = append(os.Args[:1], clientArgs...)
 
 	// TODO: config args
-	l := local.NewLocal(":0", "127.0.0.1:1080", "", "", "")
+	l := local.NewLocal(":0", socks5Addr, socks5User, socks5Pwd, httpProxyAddr)
 
 	tmpDir, err := ioutil.TempDir("/tmp", "mgraftcp")
 	if err != nil {
