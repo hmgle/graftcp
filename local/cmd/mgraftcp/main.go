@@ -20,7 +20,7 @@ import (
 	"unsafe"
 
 	"github.com/hmgle/graftcp/local"
-	"github.com/spf13/pflag"
+	"github.com/pborman/getopt/v2"
 )
 
 const (
@@ -72,8 +72,8 @@ var (
 	httpProxyAddr   string
 	logFile         string
 	logLevel        int8
-	selectProxyMode string
-	socks5Addr      string
+	selectProxyMode string = "auto"
+	socks5Addr      string = "127.0.0.1:1080"
 	socks5User      string
 	socks5Pwd       string
 
@@ -83,25 +83,25 @@ var (
 )
 
 func init() {
-	pflag.StringVar(&confPath, "config", "", "Path to the configuration file")
-	pflag.StringVar(&httpProxyAddr, "http_proxy", "", "http proxy address, e.g.: 127.0.0.1:8080")
-	pflag.StringVar(&selectProxyMode, "select_proxy_mode", "auto", "Set the mode for select a proxy [auto | random | only_http_proxy | only_socks5 | direct]")
-	pflag.StringVar(&socks5Addr, "socks5", "127.0.0.1:1080", "SOCKS5 address")
-	pflag.StringVar(&socks5User, "socks5_username", "", "SOCKS5 username")
-	pflag.StringVar(&socks5Pwd, "socks5_password", "", "SOCKS5 password")
+	getopt.FlagLong(&confPath, "config", 0, "Path to the configuration file")
+	getopt.FlagLong(&httpProxyAddr, "http_proxy", 0, "http proxy address, e.g.: 127.0.0.1:8080")
+	getopt.FlagLong(&selectProxyMode, "select_proxy_mode", 0, "Set the mode for select a proxy [auto | random | only_http_proxy | only_socks5 | direct]")
+	getopt.FlagLong(&socks5Addr, "socks5", 0, "SOCKS5 address")
+	getopt.FlagLong(&socks5User, "socks5_username", 0, "SOCKS5 username")
+	getopt.FlagLong(&socks5Pwd, "socks5_password", 0, "SOCKS5 password")
 
-	pflag.StringVarP(&blackIPFile, "blackip-file", "b", "", "The IP in black-ip-file will connect direct")
-	pflag.StringVarP(&blackIPFile, "whiteip-file", "w", "", "Only redirect the connect that destination ip in the white-ip-file to SOCKS5")
-	pflag.BoolVarP(&notIgnoreLocal, "not-ignore-local", "n", false, "Connecting to local is not changed by default, this option will redirect it to SOCKS5")
+	getopt.FlagLong(&blackIPFile, "blackip-file", 'b', "The IP in black-ip-file will connect direct")
+	getopt.FlagLong(&whiteIPFile, "whiteip-file", 'w', "Only redirect the connect that destination ip in the white-ip-file to SOCKS5")
+	notIgnoreLocal = *(getopt.BoolLong("not-ignore-local", 'n', "Connecting to local is not changed by default, this option will redirect it to SOCKS5"))
 }
 
 func usage() {
-	log.Fatalf("Usage: mgraftcp [options] prog [prog-args]\n%v", pflag.CommandLine.FlagUsages())
+	log.Fatalf("Usage: mgraftcp [options] prog [prog-args]\n%v", getopt.CommandLine.UsageLine())
 }
 
 func main() {
-	pflag.Parse()
-	args := pflag.Args()
+	getopt.Parse()
+	args := getopt.Args()
 	if len(args) == 0 {
 		usage()
 	}
