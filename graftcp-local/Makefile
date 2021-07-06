@@ -47,7 +47,7 @@ uninstall_systemd::
 	rm -f ${DESTDIR}/${SYSTEMD_UNIT_DIR}/graftcp-local.service
 
 uninstall::
-	-rm -f $(DESTDIR)$(BINDIR)/$<
+	-rm -f $(DESTDIR)$(BINDIR)/graftcp-local
 
 install_service:: graftcp-local
 	./graftcp-local -service install && ./graftcp-local -service start
