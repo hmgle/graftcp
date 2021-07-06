@@ -7,21 +7,21 @@ BINDIR = $(PREFIX)/bin
 
 INSTALL = install -D
 
-TARGET = cmd/graftcp-local/graftcp-local cmd/mgraftcp/mgraftcp 
+TARGET = graftcp-local mgraftcp
 
 all:: $(TARGET)
 
-cmd/graftcp-local/graftcp-local: $(wildcard *.go) $(wildcard cmd/graftcp-local/*.go)
-	cd cmd/graftcp-local && go build -ldflags "-s -w -X main.version=${VERSION}"
+graftcp-local: $(wildcard *.go,cmd/graftcp-local/*.go)
+	go build -ldflags "-s -w -X main.version=${VERSION}" ./cmd/graftcp-local
 
-cmd/mgraftcp/mgraftcp: $(wildcard *.go) $(wildcard cmd/mgraftcp/*.go) ../libgraftcp.a
-	cd cmd/mgraftcp && go build -ldflags "-s -w -X main.version=${VERSION}"
+mgraftcp: $(wildcard *.go, cmd/mgraftcp/*.go) ../libgraftcp.a
+	go build -ldflags "-s -w -X main.version=${VERSION}" ./cmd/mgraftcp
 
 ../libgraftcp.a:
 	$(MAKE) -C .. libgraftcp.a
 
-install:: cmd/graftcp-local/graftcp-local
-	$(INSTALL) $< $(DESTDIR)$(BINDIR)/$<
+install:: $(TARGET)
+	$(INSTALL) $^ $(DESTDIR)$(BINDIR)/
 
 SYSTEMD_UNIT_DIR:=$(shell pkg-config --variable=systemdsystemunitdir systemd 2>/dev/null)
 
@@ -43,13 +43,13 @@ uninstall_systemd::
 	rm -f ${DESTDIR}/${SYSTEMD_UNIT_DIR}/graftcp-local.service
 
 uninstall::
-	-rm -f $(DESTDIR)$(BINDIR)/$<
+	-rm -f $(DESTDIR)$(BINDIR)/{mgraftcp,graftcp-local}
 
-install_service:: cmd/graftcp-local/graftcp-local
-	cmd/graftcp-local/graftcp-local -service install && cmd/graftcp-local/graftcp-local -service start
+install_service:: graftcp-local
+	graftcp-local -service install && graftcp-local -service start
 
-uninstall_service:: cmd/graftcp-local/graftcp-local
-	cmd/graftcp-local/graftcp-local -service stop && cmd/graftcp-local/graftcp-local -service uninstall
+uninstall_service:: graftcp-local
+	graftcp-local -service stop && graftcp-local -service uninstall
 
 clean::
 	-rm -rf $(TARGET)
