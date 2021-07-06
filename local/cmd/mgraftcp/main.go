@@ -44,10 +44,7 @@ func clientMain(args []string) int {
 }
 
 var (
-	confPath        string
 	httpProxyAddr   string
-	logFile         string
-	logLevel        int8
 	selectProxyMode string = "auto"
 	socks5Addr      string = "127.0.0.1:1080"
 	socks5User      string
@@ -56,10 +53,11 @@ var (
 	blackIPFile    string
 	whiteIPFile    string
 	notIgnoreLocal bool
+
+	help bool
 )
 
 func init() {
-	getopt.FlagLong(&confPath, "config", 0, "Path to the configuration file")
 	getopt.FlagLong(&httpProxyAddr, "http_proxy", 0, "http proxy address, e.g.: 127.0.0.1:8080")
 	getopt.FlagLong(&selectProxyMode, "select_proxy_mode", 0, "Set the mode for select a proxy [auto | random | only_http_proxy | only_socks5 | direct]")
 	getopt.FlagLong(&socks5Addr, "socks5", 0, "SOCKS5 address")
@@ -69,17 +67,15 @@ func init() {
 	getopt.FlagLong(&blackIPFile, "blackip-file", 'b', "The IP in black-ip-file will connect direct")
 	getopt.FlagLong(&whiteIPFile, "whiteip-file", 'w', "Only redirect the connect that destination ip in the white-ip-file to SOCKS5")
 	notIgnoreLocal = *(getopt.BoolLong("not-ignore-local", 'n', "Connecting to local is not changed by default, this option will redirect it to SOCKS5"))
-}
-
-func usage() {
-	log.Fatalf("Usage: mgraftcp [options] prog [prog-args]\n%v", getopt.CommandLine.UsageLine())
+	help = *(getopt.BoolLong("help", 'h', "Display this help and exit"))
 }
 
 func main() {
 	getopt.Parse()
 	args := getopt.Args()
-	if len(args) == 0 {
-		usage()
+	if len(args) == 0 || help {
+		getopt.Usage()
+		return
 	}
 
 	retCode := 0
