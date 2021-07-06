@@ -11,6 +11,7 @@ package main
 // int client_main(int argc, char **argv);
 import "C"
 import (
+	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
@@ -54,7 +55,10 @@ var (
 	whiteIPFile    string
 	notIgnoreLocal bool
 
-	help bool
+	help        bool
+	showVersion bool
+
+	version = "v0.4"
 )
 
 func init() {
@@ -66,12 +70,17 @@ func init() {
 
 	getopt.FlagLong(&blackIPFile, "blackip-file", 'b', "The IP in black-ip-file will connect direct")
 	getopt.FlagLong(&whiteIPFile, "whiteip-file", 'w', "Only redirect the connect that destination ip in the white-ip-file to SOCKS5")
-	notIgnoreLocal = *(getopt.BoolLong("not-ignore-local", 'n', "Connecting to local is not changed by default, this option will redirect it to SOCKS5"))
-	help = *(getopt.BoolLong("help", 'h', "Display this help and exit"))
+	getopt.FlagLong(&notIgnoreLocal, "not-ignore-local", 'n', "Connecting to local is not changed by default, this option will redirect it to SOCKS5")
+	getopt.FlagLong(&help, "help", 'h', "Display this help and exit")
+	getopt.FlagLong(&showVersion, "version", 0, "Print the mgraftcp version information")
 }
 
 func main() {
 	getopt.Parse()
+	if showVersion {
+		fmt.Printf("mgraftcp version %s\n", version)
+		return
+	}
 	args := getopt.Args()
 	if len(args) == 0 || help {
 		getopt.Usage()
