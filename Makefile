@@ -42,7 +42,7 @@ CFLAGS += -DVERSION=\"$(VERSION)\"
 
 SRC := $(wildcard *.c)
 
-GRAFTCP_LOCAL_BIN = local/cmd/graftcp-local/graftcp-local local/cmd/mgraftcp/mgraftcp
+GRAFTCP_LOCAL_BIN = local/graftcp-local local/mgraftcp
 TARGET = graftcp $(GRAFTCP_LOCAL_BIN)
 
 all:: $(TARGET)

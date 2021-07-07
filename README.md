@@ -28,7 +28,7 @@ git clone https://github.com/hmgle/graftcp.git
 cd graftcp
 make
 ```
-After make finishes, you'll be able to use `graftcp-local/graftcp-local` and `./graftcp`.
+After make finishes, you'll be able to use `local/graftcp-local` and `./graftcp`.
 Optionally, you can also install them to system:
 
 ```sh
@@ -46,8 +46,8 @@ Download the [Debian](https://github.com/hmgle/graftcp/releases/download/v0.3.1/
 `graftcp-local`:
 
 ```console
-$ graftcp-local/graftcp-local -h
-Usage of graftcp-local/graftcp-local:
+$ local/graftcp-local -h
+Usage of local/graftcp-local:
   -config string
         Path to the configuration file
   -http_proxy string
@@ -96,16 +96,42 @@ Options:
                     Display this help and exit
 ```
 
-Combined `graftcp`:
+`mgraftcp`: Combined `graftcp-local` and `graftcp` (`mgraftcp` = `graftcp-local` + `graftcp`). 
+It can automatically start a temporary server and run the client application, the server will automatically exit when the client is finished.
 
-If one rename or link `graftcp-local` to be `graftcp`, it can automatically start a server and run the client. To use corresponding arguments, pre-append `--server` and `--client` for `graftcp-local` and `graftcp` respectively.
+```console
+$ mgraftcp -h
+Usage: mgraftcp [-hn] [-b value] [--http_proxy value] [--select_proxy_mode value] \
+      [--socks5 value] [--socks5_password value] [--socks5_username value] [--version] [-w value] prog [prog-args]
+ -b, --blackip-file=value
+                The IP in black-ip-file will connect direct
+ -h, --help     Display this help and exit
+     --http_proxy=value
+                http proxy address, e.g.: 127.0.0.1:8080
+ -n, --not-ignore-local
+                Connecting to local is not changed by default, this option
+                will redirect it to SOCKS5
+     --select_proxy_mode=value
+                Set the mode for select a proxy [auto | random |
+                only_http_proxy | only_socks5 | direct] [auto]
+     --socks5=value
+                SOCKS5 address [127.0.0.1:1080]
+     --socks5_password=value
+                SOCKS5 password
+     --socks5_username=value
+                SOCKS5 username
+     --version  Print the mgraftcp version information
+ -w, --whiteip-file=value
+                Only redirect the connect that destination ip in the
+                white-ip-file to SOCKS5
+```
 
 ## Demo
 
 Assume you are running the SOCKS5 proxy with the default IP address: "localhost:1080". Start the `graftcp-local` first:
 
 ```sh
-graftcp-local/graftcp-local
+local/graftcp-local
 ```
 
 Install the Go package from golang.org (now is blocked by the GFW) via `graftcp`:
