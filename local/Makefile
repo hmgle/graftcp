@@ -11,10 +11,10 @@ TARGET = graftcp-local mgraftcp
 
 all:: $(TARGET)
 
-graftcp-local: $(wildcard *.go,cmd/graftcp-local/*.go)
+graftcp-local: $(wildcard *.go cmd/graftcp-local/*.go)
 	go build -ldflags "-s -w -X main.version=${VERSION}" ./cmd/graftcp-local
 
-mgraftcp: $(wildcard *.go, cmd/mgraftcp/*.go) ../libgraftcp.a
+mgraftcp: $(wildcard *.go cmd/mgraftcp/*.go) ../libgraftcp.a
 	go build -ldflags "-s -w -X main.version=${VERSION}" ./cmd/mgraftcp
 
 ../libgraftcp.a:
