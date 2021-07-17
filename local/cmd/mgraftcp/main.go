@@ -20,6 +20,7 @@ import (
 	"unsafe"
 
 	"github.com/hmgle/graftcp/local"
+	"github.com/jedisct1/dlog"
 	"github.com/pborman/getopt/v2"
 )
 
@@ -54,6 +55,7 @@ var (
 	blackIPFile    string
 	whiteIPFile    string
 	notIgnoreLocal bool
+	enableDebugLog bool
 
 	help        bool
 	showVersion bool
@@ -67,6 +69,7 @@ func init() {
 	getopt.FlagLong(&socks5Addr, "socks5", 0, "SOCKS5 address")
 	getopt.FlagLong(&socks5User, "socks5_username", 0, "SOCKS5 username")
 	getopt.FlagLong(&socks5Pwd, "socks5_password", 0, "SOCKS5 password")
+	getopt.FlagLong(&enableDebugLog, "enable-debug-log", 0, "enable debug log")
 
 	getopt.FlagLong(&blackIPFile, "blackip-file", 'b', "The IP in black-ip-file will connect direct")
 	getopt.FlagLong(&whiteIPFile, "whiteip-file", 'w', "Only redirect the connect that destination ip in the white-ip-file to SOCKS5")
@@ -89,6 +92,12 @@ func main() {
 
 	retCode := 0
 	defer func() { os.Exit(retCode) }()
+
+	if enableDebugLog {
+		dlog.Init("mgraftcp", dlog.SeverityDebug, "")
+	} else {
+		local.SetLogger(noopLogger{})
+	}
 
 	l := local.NewLocal(":0", socks5Addr, socks5User, socks5Pwd, httpProxyAddr)
 	l.SetSelectMode(selectProxyMode)

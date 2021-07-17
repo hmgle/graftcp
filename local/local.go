@@ -168,7 +168,7 @@ func (l *Local) StartService(ln *net.TCPListener) {
 		conn, err := ln.AcceptTCP()
 		if err != nil {
 			log.Errorf("accept err: %s", err.Error())
-			continue
+			break
 		}
 		go l.HandleConn(conn)
 	}
