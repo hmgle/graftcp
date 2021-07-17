@@ -31,8 +31,6 @@ const (
 func clientMain(args []string) int {
 	argc := C.int(len(args))
 
-	log.Printf("Got %v args: %v\n", argc, args)
-
 	argv := (*[maxArgsLen]*C.char)(C.alloc_string_slice(argc))
 	defer C.free(unsafe.Pointer(argv))
 
@@ -128,7 +126,15 @@ func main() {
 	var fixArgs []string
 	fixArgs = append(fixArgs, os.Args[0])
 	fixArgs = append(fixArgs, "-p", strconv.Itoa(faddr.Port), "-f", pipePath)
+	if blackIPFile != "" {
+		fixArgs = append(fixArgs, "-b", blackIPFile)
+	}
+	if whiteIPFile != "" {
+		fixArgs = append(fixArgs, "-w", whiteIPFile)
+	}
+	if notIgnoreLocal {
+		fixArgs = append(fixArgs, "-n")
+	}
 	fixArgs = append(fixArgs, args[0:]...)
-	log.Printf("fixArgs: %+v\n", fixArgs)
 	retCode = clientMain(fixArgs)
 }
