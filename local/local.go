@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jedisct1/dlog"
 	"golang.org/x/net/proxy"
 )
 
@@ -54,7 +53,7 @@ func (l *Local) GetFAddr() (faddrString string, faddr *net.TCPAddr) {
 func NewLocal(listenAddr, socks5Addr, socks5Username, socks5PassWord, httpProxyAddr string) *Local {
 	listenTCPAddr, err := net.ResolveTCPAddr("tcp", listenAddr)
 	if err != nil {
-		dlog.Fatalf("resolve frontend(%s) error: %s", listenAddr, err.Error())
+		log.Fatalf("resolve frontend(%s) error: %s", listenAddr, err.Error())
 	}
 	local := &Local{
 		faddr:       listenTCPAddr,
@@ -65,7 +64,7 @@ func NewLocal(listenAddr, socks5Addr, socks5Username, socks5PassWord, httpProxyA
 	socks5TCPAddr, err1 := net.ResolveTCPAddr("tcp", socks5Addr)
 	httpProxyTCPAddr, err2 := net.ResolveTCPAddr("tcp", httpProxyAddr)
 	if err1 != nil && err2 != nil {
-		dlog.Fatalf(
+		log.Fatalf(
 			"neither %s nor %s can be resolved, resolve(%s): %v, resolve(%s): %v, please check the config for proxy",
 			socks5Addr, httpProxyAddr, socks5Addr, err1, httpProxyAddr, err2)
 	}
@@ -79,7 +78,7 @@ func NewLocal(listenAddr, socks5Addr, socks5Username, socks5PassWord, httpProxyA
 		}
 		dialerSocks5, err := proxy.SOCKS5("tcp", socks5TCPAddr.String(), auth, proxy.Direct)
 		if err != nil {
-			dlog.Errorf("proxy.SOCKS5(%s) fail: %s", socks5TCPAddr.String(), err.Error())
+			log.Errorf("proxy.SOCKS5(%s) fail: %s", socks5TCPAddr.String(), err.Error())
 		} else {
 			local.socks5Dialer = dialerSocks5
 		}
@@ -88,7 +87,7 @@ func NewLocal(listenAddr, socks5Addr, socks5Username, socks5PassWord, httpProxyA
 		httpProxyURI, _ := url.Parse("http://" + httpProxyTCPAddr.String())
 		dialerHTTPProxy, err := proxy.FromURL(httpProxyURI, proxy.Direct)
 		if err != nil {
-			dlog.Errorf("proxy.FromURL(%v) err: %s", httpProxyURI, err.Error())
+			log.Errorf("proxy.FromURL(%v) err: %s", httpProxyURI, err.Error())
 		} else {
 			local.httpProxyDialer = dialerHTTPProxy
 		}
@@ -149,15 +148,15 @@ func (l *Local) proxySelector() proxy.Dialer {
 func (l *Local) StartListen() (ln *net.TCPListener, err error) {
 	ln, err = net.ListenTCP("tcp", l.faddr)
 	if err != nil {
-		dlog.Fatalf("net.ListenTCP(%s) err: %s", l.faddr.String(), err.Error())
+		log.Fatalf("net.ListenTCP(%s) err: %s", l.faddr.String(), err.Error())
 		return
 	}
-	dlog.Infof("graftcp-local start listening %s...", l.faddr.String())
+	log.Infof("graftcp-local start listening %s...", l.faddr.String())
 	if l.faddr.Port == 0 {
 		l.faddrString = ln.Addr().String()
 		l.faddr, err = net.ResolveTCPAddr("tcp", l.faddrString)
 		if err != nil {
-			dlog.Errorf("net.ResolveTCPAddr err: %s", err.Error())
+			log.Errorf("net.ResolveTCPAddr err: %s", err.Error())
 		}
 	}
 	return
@@ -168,7 +167,7 @@ func (l *Local) StartService(ln *net.TCPListener) {
 	for {
 		conn, err := ln.AcceptTCP()
 		if err != nil {
-			dlog.Errorf("accept err: %s", err.Error())
+			log.Errorf("accept err: %s", err.Error())
 			continue
 		}
 		go l.HandleConn(conn)
@@ -179,7 +178,6 @@ func (l *Local) StartService(ln *net.TCPListener) {
 func (l *Local) Start() {
 	ln, _ := l.StartListen()
 	defer ln.Close()
-	dlog.Infof("graftcp-local start listening %s...", l.faddr.String())
 
 	l.StartService(ln)
 }
@@ -187,7 +185,7 @@ func (l *Local) Start() {
 func getPidByAddr(localAddr, remoteAddr string, isTCP6 bool) (pid string, destAddr string) {
 	inode, err := getInodeByAddrs(localAddr, remoteAddr, isTCP6)
 	if err != nil {
-		dlog.Errorf("getInodeByAddrs(%s, %s) err: %s", localAddr, remoteAddr, err.Error())
+		log.Errorf("getInodeByAddrs(%s, %s) err: %s", localAddr, remoteAddr, err.Error())
 		return "", ""
 	}
 	for i := 0; i < 3; i++ { // try 3 times
@@ -219,25 +217,25 @@ func (l *Local) HandleConn(conn net.Conn) error {
 	}
 	pid, destAddr := getPidByAddr(raddr.String(), conn.LocalAddr().String(), isTCP6)
 	if pid == "" || destAddr == "" {
-		dlog.Errorf("getPidByAddr(%s, %s) failed", raddr.String(), conn.LocalAddr().String())
+		log.Errorf("getPidByAddr(%s, %s) failed", raddr.String(), conn.LocalAddr().String())
 		conn.Close()
 		return fmt.Errorf("can't find the pid and destAddr for %s", raddr.String())
 	}
-	dlog.Infof("Request PID: %s, Source Addr: %s, Dest Addr: %s", pid, raddr.String(), destAddr)
+	log.Infof("Request PID: %s, Source Addr: %s, Dest Addr: %s", pid, raddr.String(), destAddr)
 
 	dialer := l.proxySelector()
 	if dialer == nil {
-		dlog.Errorf("bad dialer,  please check the config for proxy")
+		log.Errorf("bad dialer,  please check the config for proxy")
 		conn.Close()
 		return fmt.Errorf("bad dialer")
 	}
 	destConn, err := dialer.Dial("tcp", destAddr)
 	if err != nil && l.selectMode == AutoSelectMode { // AutoSelectMode try direct
-		dlog.Infof("dial %s direct", destAddr)
+		log.Infof("dial %s direct", destAddr)
 		destConn, err = net.Dial("tcp", destAddr)
 	}
 	if err != nil {
-		dlog.Errorf("dialer.Dial(%s) err: %s", destAddr, err.Error())
+		log.Errorf("dialer.Dial(%s) err: %s", destAddr, err.Error())
 		conn.Close()
 		return err
 	}
@@ -265,14 +263,14 @@ func (l *Local) UpdateProcessAddrInfo() {
 	for {
 		line, _, err := r.ReadLine()
 		if err != nil {
-			dlog.Errorf("r.ReadLine err: %s", err.Error())
+			log.Errorf("r.ReadLine err: %s", err.Error())
 			break
 		}
 		copyLine := string(line)
 		// dest_ipaddr:dest_port:pid
 		s := strings.Split(copyLine, ":")
 		if len(s) < 3 {
-			dlog.Errorf("r.ReadLine(): %s", copyLine)
+			log.Errorf("r.ReadLine(): %s", copyLine)
 			continue
 		}
 		var (
