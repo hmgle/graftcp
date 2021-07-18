@@ -90,6 +90,35 @@ Options:
                     Display this help and exit
 ```
 
+`mgraftcp`: 是 `graftcp-local` 和 `graftcp` 的结合(`mgraftcp` = `graftcp-local` + `graftcp`)，可以用 `mgraftcp` 来代替 `graftcp` 而无需启动 `graftcp-local`。
+
+```console
+$ mgraftcp -h
+Usage: mgraftcp [-hn] [-b value] [--http_proxy value] [--select_proxy_mode value] \
+      [--socks5 value] [--socks5_password value] [--socks5_username value] [--version] [-w value] prog [prog-args]
+ -b, --blackip-file=value
+                The IP in black-ip-file will connect direct
+ -h, --help     Display this help and exit
+     --http_proxy=value
+                http proxy address, e.g.: 127.0.0.1:8080
+ -n, --not-ignore-local
+                Connecting to local is not changed by default, this option
+                will redirect it to SOCKS5
+     --select_proxy_mode=value
+                Set the mode for select a proxy [auto | random |
+                only_http_proxy | only_socks5 | direct] [auto]
+     --socks5=value
+                SOCKS5 address [127.0.0.1:1080]
+     --socks5_password=value
+                SOCKS5 password
+     --socks5_username=value
+                SOCKS5 username
+     --version  Print the mgraftcp version information
+ -w, --whiteip-file=value
+                Only redirect the connect that destination ip in the
+                white-ip-file to SOCKS5
+```
+
 ## 使用示例
 
 假设你正在运行默认地址 "localhost:1080" 的 SOCKS5 代理，首先启动 `graftcp-local`：

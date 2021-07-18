@@ -97,7 +97,7 @@ Options:
 ```
 
 `mgraftcp`: Combined `graftcp-local` and `graftcp` (`mgraftcp` = `graftcp-local` + `graftcp`). 
-It can automatically start a temporary server and run the client application, the server will automatically exit when the client is finished.
+`mgraftcp` can be used to replace `graftcp` without running `graftcp-local`.
 
 ```console
 $ mgraftcp -h
