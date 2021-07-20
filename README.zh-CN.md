@@ -93,11 +93,12 @@ Options:
 `mgraftcp`: 是 `graftcp-local` 和 `graftcp` 的结合(`mgraftcp` = `graftcp-local` + `graftcp`)，可以用 `mgraftcp` 来代替 `graftcp` 而无需启动 `graftcp-local`。
 
 ```console
-$ mgraftcp -h
-Usage: mgraftcp [-hn] [-b value] [--http_proxy value] [--select_proxy_mode value] \
-      [--socks5 value] [--socks5_password value] [--socks5_username value] [--version] [-w value] prog [prog-args]
+Usage: mgraftcp [-hn] [-b value] [--enable-debug-log] [--http_proxy value] [--select_proxy_mode value] \
+    [--socks5 value] [--socks5_password value] [--socks5_username value] [--version] [-w value] prog [prog-args]
  -b, --blackip-file=value
                 The IP in black-ip-file will connect direct
+     --enable-debug-log
+                enable debug log
  -h, --help     Display this help and exit
      --http_proxy=value
                 http proxy address, e.g.: 127.0.0.1:8080
