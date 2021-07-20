@@ -1,5 +1,5 @@
 # "Makefile" for graftcp.
-# Copyright (C) 2016, 2018, 2020 Hmgle <dustgle@gmail.com>
+# Copyright (C) 2016, 2018, 2020, 2021 Hmgle <dustgle@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -36,7 +36,7 @@ else
 endif
 
 ifneq ($(shell echo $(VERSION) | head -c 1), v)
-	VERSION=v0.3
+	VERSION=v0.4
 endif
 CFLAGS += -DVERSION=\"$(VERSION)\"
 
