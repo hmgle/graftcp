@@ -27,41 +27,45 @@ type Config struct {
 	SelectProxyMode string // Set the mode for select a proxy (auto, random, only_http_proxy, only_socks5)
 }
 
-var Cfg = &Config{Loglevel: -1}
+var cfg = &Config{Loglevel: -1}
 
 func setCfg(key, val string) {
 	switch strings.ToLower(key) {
 	case "listen":
-		Cfg.Listen = val
+		cfg.Listen = val
 	case "logfile":
-		Cfg.Logfile = val
+		cfg.Logfile = val
 	case "loglevel":
 		loglevel, err := strconv.Atoi(val)
 		if err == nil {
-			Cfg.Loglevel = loglevel
+			cfg.Loglevel = loglevel
 		}
 	case "pipepath":
-		Cfg.PipePath = val
+		cfg.PipePath = val
 	case "socks5":
-		Cfg.Socks5 = val
+		cfg.Socks5 = val
 	case "socks5_username":
-		Cfg.Socks5Username = val
+		cfg.Socks5Username = val
 	case "socks5_password":
-		Cfg.Socks5Password = val
+		cfg.Socks5Password = val
 	case "http_proxy":
-		Cfg.HTTPProxy = val
+		cfg.HTTPProxy = val
 	case "usesyslog":
 		if strings.ToLower(val) == "true" {
-			Cfg.UseSyslog = true
+			cfg.UseSyslog = true
 		} else {
-			Cfg.UseSyslog = false
+			cfg.UseSyslog = false
 		}
 	case "select_proxy_mode":
-		Cfg.SelectProxyMode = val
+		cfg.SelectProxyMode = val
 	}
 }
 
 func parseLine(line string) (key, val string) {
+	line = strings.TrimSpace(line)
+	if strings.HasPrefix(line, "#") {
+		return
+	}
 	items := strings.SplitN(line, "=", 2)
 	if len(items) < 2 {
 		return "", ""
@@ -69,7 +73,7 @@ func parseLine(line string) (key, val string) {
 	return strings.TrimSpace(items[0]), strings.TrimSpace(items[1])
 }
 
-func ParseConfigFile(path string, app *App) error {
+func parseConfigFile(path string, app *App) error {
 	if path == "" {
 		// try default config file "graftcp-local.conf"
 		exePath := local.GetExePath()
@@ -109,34 +113,34 @@ func ParseConfigFile(path string, app *App) error {
 func overrideConfig(app *App) {
 	flagset := make(map[string]bool)
 	flag.Visit(func(f *flag.Flag) { flagset[f.Name] = true })
-	if !flagset["listen"] && Cfg.Listen != "" {
-		app.ListenAddr = Cfg.Listen
+	if !flagset["listen"] && cfg.Listen != "" {
+		app.ListenAddr = cfg.Listen
 	}
-	if !flagset["socks5"] && Cfg.Socks5 != "" {
-		app.Socks5Addr = Cfg.Socks5
+	if !flagset["socks5"] && cfg.Socks5 != "" {
+		app.Socks5Addr = cfg.Socks5
 	}
-	if !flagset["socks5_username"] && Cfg.Socks5Username != "" {
-		app.Socks5Username = Cfg.Socks5Username
+	if !flagset["socks5_username"] && cfg.Socks5Username != "" {
+		app.Socks5Username = cfg.Socks5Username
 	}
-	if !flagset["socks5_password"] && Cfg.Socks5Password != "" {
-		app.Socks5Password = Cfg.Socks5Password
+	if !flagset["socks5_password"] && cfg.Socks5Password != "" {
+		app.Socks5Password = cfg.Socks5Password
 	}
-	if !flagset["http_proxy"] && Cfg.HTTPProxy != "" {
-		app.HTTPProxyAddr = Cfg.HTTPProxy
+	if !flagset["http_proxy"] && cfg.HTTPProxy != "" {
+		app.HTTPProxyAddr = cfg.HTTPProxy
 	}
-	if !flagset["pipepath"] && Cfg.PipePath != "" {
-		app.PipePath = Cfg.PipePath
+	if !flagset["pipepath"] && cfg.PipePath != "" {
+		app.PipePath = cfg.PipePath
 	}
-	if !flagset["logfile"] && Cfg.Logfile != "" {
-		dlog.UseLogFile(Cfg.Logfile)
+	if !flagset["logfile"] && cfg.Logfile != "" {
+		dlog.UseLogFile(cfg.Logfile)
 	}
-	if !flagset["loglevel"] && Cfg.Loglevel >= 0 && Cfg.Loglevel <= 6 {
-		dlog.SetLogLevel(dlog.Severity(Cfg.Loglevel))
+	if !flagset["loglevel"] && cfg.Loglevel >= 0 && cfg.Loglevel <= 6 {
+		dlog.SetLogLevel(dlog.Severity(cfg.Loglevel))
 	}
 	if !flagset["syslog"] {
-		dlog.UseSyslog(Cfg.UseSyslog)
+		dlog.UseSyslog(cfg.UseSyslog)
 	}
-	if !flagset["select_proxy_mode"] && Cfg.SelectProxyMode != "" {
-		selectProxyMode = Cfg.SelectProxyMode
+	if !flagset["select_proxy_mode"] && cfg.SelectProxyMode != "" {
+		selectProxyMode = cfg.SelectProxyMode
 	}
 }

@@ -99,7 +99,7 @@ func main() {
 		fmt.Printf("graftcp-local version %s\n", version)
 		os.Exit(0)
 	}
-	ParseConfigFile(configFile, app)
+	parseConfigFile(configFile, app)
 	dlog.Noticef("graftcp-local start")
 
 	if *svcFlag != "" {
