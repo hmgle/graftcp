@@ -81,8 +81,14 @@ func parseConfigFile(path string, app *App) error {
 		if _, err := os.Stat(defaultConf); err == nil {
 			dlog.Infof("find config: %s", defaultConf)
 			path = defaultConf
-		} else {
-			return nil
+		} else { // try "/etc/graftcp-local/graftcp-local.conf"
+			etcConf := "/etc/graftcp-local/graftcp-local.conf"
+			if _, err := os.Stat(etcConf); err == nil {
+				dlog.Infof("find config: %s", etcConf)
+				path = etcConf
+			} else {
+				return nil
+			}
 		}
 	}
 
