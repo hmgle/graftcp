@@ -1,5 +1,5 @@
 # "Makefile" for graftcp.
-# Copyright (C) 2016, 2018, 2020 Hmgle <dustgle@gmail.com>
+# Copyright (C) 2016, 2018, 2020, 2021 Hmgle <dustgle@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -36,33 +36,37 @@ else
 endif
 
 ifneq ($(shell echo $(VERSION) | head -c 1), v)
-	VERSION=v0.3
+	VERSION=v0.4
 endif
 CFLAGS += -DVERSION=\"$(VERSION)\"
 
 SRC := $(wildcard *.c)
 
-GRAFTCP_LOCAL_BIN = graftcp-local/graftcp-local
+GRAFTCP_LOCAL_BIN = local/graftcp-local local/mgraftcp
 TARGET = graftcp $(GRAFTCP_LOCAL_BIN)
 
 all:: $(TARGET)
 
-graftcp: main.o util.o string-set.o
+
+graftcp: main.o graftcp.o util.o string-set.o
 	$(CC) $^ -o $@
+
+libgraftcp.a: graftcp.o util.o string-set.o
+	$(AR) rcs $@ $^
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(GRAFTCP_LOCAL_BIN)::
-	$(MAKE) -C graftcp-local VERSION=$(VERSION)
+	$(MAKE) -C local VERSION=$(VERSION)
 
 install:: graftcp $(GRAFTCP_LOCAL_BIN)
 	$(INSTALL) $< $(DESTDIR)$(BINDIR)/$<
-	$(MAKE) -C graftcp-local $@
+	$(MAKE) -C local $@
 
 uninstall::
 	-rm -f $(DESTDIR)$(BINDIR)/graftcp
-	$(MAKE) -C graftcp-local $@
+	$(MAKE) -C local $@
 
 install_graftcp:: graftcp 
 	$(INSTALL) $< $(DESTDIR)$(BINDIR)/$<
@@ -71,16 +75,16 @@ uninstall_graftcp::
 	-rm -f $(DESTDIR)$(BINDIR)/graftcp
 
 install_systemd::
-	$(MAKE) -C graftcp-local install_systemd
+	$(MAKE) -C local install_systemd
 
 uninstall_systemd::
-	$(MAKE) -C graftcp-local uninstall_systemd
+	$(MAKE) -C local uninstall_systemd
 
 install_graftcp_local::
-	$(MAKE) -C graftcp-local install
+	$(MAKE) -C local install
 
 uninstall_graftcp_local::
-	$(MAKE) -C graftcp-local uninstall
+	$(MAKE) -C local uninstall
 
 sinclude $(SRC:.c=.d)
 
@@ -91,5 +95,5 @@ sinclude $(SRC:.c=.d)
 		rm -f $@.$$$$
 
 clean::
-	-rm -f *.o graftcp *.d
-	$(MAKE) -C graftcp-local $@
+	-rm -f *.o *.a graftcp *.d
+	$(MAKE) -C local $@

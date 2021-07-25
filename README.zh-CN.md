@@ -90,6 +90,44 @@ Options:
                     Display this help and exit
 ```
 
+`mgraftcp`: 是 `graftcp-local` 和 `graftcp` 的结合(`mgraftcp` = `graftcp-local` + `graftcp`)，可以用 `mgraftcp` 来代替 `graftcp` 而无需启动 `graftcp-local`。
+
+```console
+Usage: mgraftcp [-hn] [-b value] [--enable-debug-log] [--http_proxy value] [--select_proxy_mode value] \
+    [--socks5 value] [--socks5_password value] [--socks5_username value] [--version] [-w value] prog [prog-args]
+ -b, --blackip-file=value
+                The IP in black-ip-file will connect direct
+     --enable-debug-log
+                enable debug log
+ -h, --help     Display this help and exit
+     --http_proxy=value
+                http proxy address, e.g.: 127.0.0.1:8080
+ -n, --not-ignore-local
+                Connecting to local is not changed by default, this option
+                will redirect it to SOCKS5
+     --select_proxy_mode=value
+                Set the mode for select a proxy [auto | random |
+                only_http_proxy | only_socks5 | direct] [auto]
+     --socks5=value
+                SOCKS5 address [127.0.0.1:1080]
+     --socks5_password=value
+                SOCKS5 password
+     --socks5_username=value
+                SOCKS5 username
+     --version  Print the mgraftcp version information
+ -w, --whiteip-file=value
+                Only redirect the connect that destination ip in the
+                white-ip-file to SOCKS5
+```
+
+### 配置文件
+
+`graftcp-local` 和 `mgraftcp` 按下面的顺序查找配置文件：
+
+1. 参数 `--config` 指定的文件
+2. `$(可执行文件所在的目录)/graftcp-local.conf`
+3. `/etc/graftcp-local/graftcp-local.conf`
+
 ## 使用示例
 
 假设你正在运行默认地址 "localhost:1080" 的 SOCKS5 代理，首先启动 `graftcp-local`：
@@ -198,6 +236,6 @@ Linux 提供了一种限制被 `ptrace(2)` 跟踪的方法：设置 [`/proc/sys/
 
 ## License
 
-Copyright &copy; 2016, 2018-2020 Hmgle <dustgle@gmail.com>
+Copyright &copy; 2016, 2018-2021 Hmgle <dustgle@gmail.com>
 
 根据 [GPLv3 许可](https://www.gnu.org/licenses/gpl-3.0.html)发布。

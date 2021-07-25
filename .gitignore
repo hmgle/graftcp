@@ -1,0 +1,7 @@
+graftcp
+local/cmd/graftcp-local/graftcp-local
+local/cmd/mgraftcp/mgraftcp
+
+*.o
+*.d
+*.a
