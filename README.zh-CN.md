@@ -120,6 +120,14 @@ Usage: mgraftcp [-hn] [-b value] [--enable-debug-log] [--http_proxy value] [--se
                 white-ip-file to SOCKS5
 ```
 
+### 配置文件
+
+`graftcp-local` 和 `mgraftcp` 按下面的顺序查找配置文件：
+
+1. 参数 `--config` 指定的文件
+2. `$(可执行文件所在的目录)/graftcp-local.conf`
+3. `/etc/graftcp-local/graftcp-local.conf`
+
 ## 使用示例
 
 假设你正在运行默认地址 "localhost:1080" 的 SOCKS5 代理，首先启动 `graftcp-local`：

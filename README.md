@@ -127,6 +127,14 @@ Usage: mgraftcp [-hn] [-b value] [--enable-debug-log] [--http_proxy value] [--se
                 white-ip-file to SOCKS5
 ```
 
+### Configuration
+
+`graftcp-local` and `mgraftcp` look for config file in following order:
+
+1. File provided as a `--config` argument
+2. `$(the path of the executeable)/graftcp-local.conf`
+3. `/etc/graftcp-local/graftcp-local.conf`
+
 ## Demo
 
 Assume you are running the SOCKS5 proxy with the default IP address: "localhost:1080". Start the `graftcp-local` first:
