@@ -39,7 +39,7 @@ sudo make install_systemd
 
 ### Install from binary package
 
-Download the [Debian](https://github.com/hmgle/graftcp/releases/download/v0.3.1/graftcp_0.3.1-1_amd64.deb) or [Arch Linux](https://github.com/hmgle/graftcp/releases/download/v0.3.1/graftcp-0.3.1-1-x86_64.pkg.tar.zst) package from https://github.com/hmgle/graftcp/releases and install.
+Download the [Debian](https://github.com/hmgle/graftcp/releases/download/v0.4.0/graftcp_0.4.0-1_amd64.deb) or [Arch Linux](https://github.com/hmgle/graftcp/releases/download/v0.4.0/graftcp-0.4.0-1-x86_64.pkg.tar.zst) package from https://github.com/hmgle/graftcp/releases and install.
 
 ## Usage
 
