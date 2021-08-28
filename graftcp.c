@@ -16,6 +16,7 @@
 #include <getopt.h>
 
 #include "graftcp.h"
+#include "conf.h"
 #include "string-set.h"
 
 #ifndef VERSION
@@ -356,6 +357,8 @@ static void usage(char **argv)
 {
 	fprintf(stderr, "Usage: %s [options] prog [prog-args]\n\n"
 		"Options:\n"
+		"  -c --conf-file=<config-file-path>\n"
+		"                    Specify configuration file\n"
 		"  -a --local-addr=<graftcp-local-IP-addr>\n"
 		"                    graftcp-local's IP address. Default: localhost\n"
 		"  -p --local-port=<graftcp-local-port>\n"
@@ -385,6 +388,7 @@ int client_main(int argc, char **argv)
 	struct option long_opts[] = {
 		{"help", no_argument, 0, 'h'},
 		{"version", no_argument, 0, 'V'},
+		{"conf-file", required_argument, 0, 'c'},
 		{"local-addr", required_argument, 0, 'a'},
 		{"local-port", required_argument, 0, 'p'},
 		{"local-fifo", required_argument, 0, 'f'},
@@ -393,12 +397,18 @@ int client_main(int argc, char **argv)
 		{"not-ignore-local", no_argument, 0, 'n'},
 		{0, 0, 0, 0}
 	};
+	struct graftcp_conf file_conf;
+	conf_init(&file_conf);
 
-	while ((opt = getopt_long(argc, argv, "+Vha:p:f:b:w:n", long_opts,
+	while ((opt = getopt_long(argc, argv, "+Vhc:a:p:f:b:w:n", long_opts,
 			    	&index)) != -1) {
 		switch (opt) {
 		case 'a':
 			LOCAL_ADDR = optarg;
+			break;
+		case 'c':
+			// TODO
+			conf_read(optarg, &file_conf);
 			break;
 		case 'p':
 			LOCAL_PORT = atoi(optarg);
