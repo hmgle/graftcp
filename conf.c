@@ -27,7 +27,7 @@ static int config_blackip_file_path(const char *, const char *, struct graftcp_c
 static int config_whiteip_file_path(const char *, const char *, struct graftcp_conf *);
 static int config_ignore_local(const char *, const char *, struct graftcp_conf *);
 
-static struct graftcp_config_t config[] = {
+static const struct graftcp_config_t config[] = {
 	{ "local_addr",        config_local_addr        },
 	{ "local_port",        config_local_port        },
 	{ "pipepath",          config_pipe_path         },
@@ -46,7 +46,7 @@ static int config_local_addr(const char *key, const char *value, struct graftcp_
 static int config_local_port(const char *key, const char *value, struct graftcp_conf *conf)
 {
 	// TODO: check value
-	conf->local_port = malloc(*conf->local_port);
+	conf->local_port = malloc(sizeof(*conf->local_port));
 	*conf->local_port = atoi(value);
 	return 0;
 }
@@ -74,7 +74,7 @@ static int config_whiteip_file_path(const char *key, const char *value, struct g
 
 static int config_ignore_local(const char *key, const char *value, struct graftcp_conf *conf)
 {
-	conf->ignore_local = malloc(*conf->ignore_local);
+	conf->ignore_local = malloc(sizeof(*conf->ignore_local));
 	// TODO: check value
 	if (strcmp(value, "true") || strcmp(value, "1")) {
 		*conf->ignore_local = true;
@@ -86,7 +86,7 @@ static int config_ignore_local(const char *key, const char *value, struct graftc
 
 static const size_t config_size = sizeof(config) / sizeof(struct graftcp_config_t);
 
-static struct graftcp_config_t *graftcp_getconfig(const char *key)
+static const struct graftcp_config_t *graftcp_getconfig(const char *key)
 {
 	int i;
 
@@ -130,7 +130,6 @@ static int parse_line(char *buf, struct graftcp_conf *conf)
 	char *key;
 	char *value;
 	char *fs;
-	struct graftcp_config_t *config;
 
 	if (is_line_empty(buf))
 		return 0;
@@ -151,7 +150,7 @@ static int parse_line(char *buf, struct graftcp_conf *conf)
 	value += left_space(value, strlen(value));
 	value[right_space(value, strlen(value))] = '\0';
 
-	config = graftcp_getconfig(key);
+	const struct graftcp_config_t *config = graftcp_getconfig(key);
 	if (!config) {
 		fprintf(stderr, "unknown key %s", key);
 		return -1;
@@ -169,6 +168,22 @@ int conf_init(struct graftcp_conf *conf)
 	conf->whiteip_file_path = NULL;
 	conf->ignore_local = NULL;
 	return 0;
+}
+
+void conf_free(struct graftcp_conf *conf)
+{
+	if (conf->local_addr)
+		free(conf->local_addr);
+	if (conf->local_port)
+		free(conf->local_port);
+	if (conf->pipe_path)
+		free(conf->pipe_path);
+	if (conf->blackip_file_path)
+		free(conf->blackip_file_path);
+	if (conf->whiteip_file_path)
+		free(conf->whiteip_file_path);
+	if (conf->ignore_local)
+		free(conf->ignore_local);
 }
 
 int conf_read(const char *path, struct graftcp_conf *conf)
@@ -194,4 +209,20 @@ int conf_read(const char *path, struct graftcp_conf *conf)
 	free(line);
 	fclose(f);
 	return err;
+}
+
+void conf_override(struct graftcp_conf *w, const struct graftcp_conf *r)
+{
+	if (r->local_addr)
+		w->local_addr = r->local_addr;
+	if (r->local_port)
+		w->local_port = r->local_port;
+	if (r->pipe_path)
+		w->pipe_path = r->pipe_path;
+	if (r->blackip_file_path)
+		w->blackip_file_path = r->blackip_file_path;
+	if (r->whiteip_file_path)
+		w->whiteip_file_path = r->whiteip_file_path;
+	if (r->ignore_local)
+		w->ignore_local = r->ignore_local;
 }

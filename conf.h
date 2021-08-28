@@ -35,6 +35,8 @@ struct graftcp_config_t {
 };
 
 int conf_init(struct graftcp_conf *conf);
+void conf_free(struct graftcp_conf *conf);
 int conf_read(const char *path, struct graftcp_conf *conf);
+void conf_override(struct graftcp_conf *w, const struct graftcp_conf *r);
 
 #endif
