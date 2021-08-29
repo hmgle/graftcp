@@ -488,9 +488,10 @@ int client_main(int argc, char **argv)
 		exit(errno);
 	}
 
-	conf_free(&file_conf);
-	conf_free(&cmd_conf);
 
 	init(argc - optind, argv + optind);
-	return do_trace();
+	int ret = do_trace();
+	conf_free(&file_conf);
+	conf_free(&cmd_conf);
+	return ret;
 }
