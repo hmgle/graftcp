@@ -16,18 +16,21 @@
 #include <getopt.h>
 
 #include "graftcp.h"
+#include "conf.h"
 #include "string-set.h"
 
 #ifndef VERSION
-#define VERSION "v0.3"
+#define VERSION "v0.4"
 #endif
 
 struct sockaddr_in PROXY_SA;
 struct sockaddr_in6 PROXY_SA6;
-char *LOCAL_ADDR         = "127.0.0.1";
-char *LOCAL_DEFAULT_ADDR = "0.0.0.0";
-uint16_t LOCAL_PORT      = 2233;
-char *LOCAL_PIPE_PAHT    = "/tmp/graftcplocal.fifo";
+
+char *DEFAULT_LOCAL_ADDR         = "127.0.0.1";
+char *LOCAL_DEFAULT_ADDR         = "0.0.0.0";
+uint16_t DEFAULT_LOCAL_PORT      = 2233;
+char *DEFAULT_LOCAL_PIPE_PAHT    = "/tmp/graftcplocal.fifo";
+bool DEFAULT_IGNORE_LOCAL        = true;
 int LOCAL_PIPE_FD;
 
 struct str_set *BLACKLIST_IP     = NULL;
@@ -356,6 +359,8 @@ static void usage(char **argv)
 {
 	fprintf(stderr, "Usage: %s [options] prog [prog-args]\n\n"
 		"Options:\n"
+		"  -c --conf-file=<config-file-path>\n"
+		"                    Specify configuration file\n"
 		"  -a --local-addr=<graftcp-local-IP-addr>\n"
 		"                    graftcp-local's IP address. Default: localhost\n"
 		"  -p --local-port=<graftcp-local-port>\n"
@@ -381,10 +386,10 @@ static void usage(char **argv)
 int client_main(int argc, char **argv)
 {
 	int opt, index;
-	bool ignore_local = true;
 	struct option long_opts[] = {
 		{"help", no_argument, 0, 'h'},
 		{"version", no_argument, 0, 'V'},
+		{"conf-file", required_argument, 0, 'c'},
 		{"local-addr", required_argument, 0, 'a'},
 		{"local-port", required_argument, 0, 'p'},
 		{"local-fifo", required_argument, 0, 'f'},
@@ -394,26 +399,45 @@ int client_main(int argc, char **argv)
 		{0, 0, 0, 0}
 	};
 
-	while ((opt = getopt_long(argc, argv, "+Vha:p:f:b:w:n", long_opts,
+	struct graftcp_conf conf = {
+		.local_addr             = DEFAULT_LOCAL_ADDR,
+		.local_port             = &DEFAULT_LOCAL_PORT,
+		.pipe_path              = DEFAULT_LOCAL_PIPE_PAHT,
+		.blackip_file_path      = NULL,
+		.whiteip_file_path      = NULL,
+		.ignore_local           = &DEFAULT_IGNORE_LOCAL,
+	};
+
+	__defer_conf_free struct graftcp_conf file_conf;
+	__defer_conf_free struct graftcp_conf cmd_conf;
+	conf_init(&file_conf);
+	conf_init(&cmd_conf);
+
+	while ((opt = getopt_long(argc, argv, "+Vha:p:f:b:w:c:n", long_opts,
 			    	&index)) != -1) {
 		switch (opt) {
 		case 'a':
-			LOCAL_ADDR = optarg;
+			cmd_conf.local_addr = strdup(optarg);
 			break;
 		case 'p':
-			LOCAL_PORT = atoi(optarg);
+			cmd_conf.local_port = malloc(sizeof(*cmd_conf.local_port));
+			*cmd_conf.local_port = atoi(optarg);
 			break;
 		case 'f':
-			LOCAL_PIPE_PAHT = optarg;
+			cmd_conf.pipe_path = strdup(optarg);
 			break;
 		case 'b':
-			load_blackip_file(optarg);
+			cmd_conf.blackip_file_path = strdup(optarg);
 			break;
 		case 'w':
-			load_whiteip_file(optarg);
+			cmd_conf.whiteip_file_path = strdup(optarg);
 			break;
 		case 'n':
-			ignore_local = false;
+			cmd_conf.ignore_local = malloc(sizeof(*cmd_conf.ignore_local));
+			*cmd_conf.ignore_local = false;
+			break;
+		case 'c':
+			conf_read(optarg, &file_conf);
 			break;
 		case 'V':
 			fprintf(stderr, "graftcp %s\n", VERSION);
@@ -425,18 +449,25 @@ int client_main(int argc, char **argv)
 			exit(0);
 		}
 	}
-	if (ignore_local) {
+	conf_override(&conf, &file_conf);
+	conf_override(&conf, &cmd_conf);
+
+	if (conf.blackip_file_path)
+		load_blackip_file(conf.blackip_file_path);
+	if (conf.whiteip_file_path)
+		load_whiteip_file(conf.whiteip_file_path);
+	if (*conf.ignore_local) {
 		if (BLACKLIST_IP == NULL)
 			BLACKLIST_IP = str_set_new();
-		str_set_put(BLACKLIST_IP, LOCAL_ADDR);
+		str_set_put(BLACKLIST_IP, conf.local_addr);
 		str_set_put(BLACKLIST_IP, LOCAL_DEFAULT_ADDR);
 	}
 	PROXY_SA.sin_family = AF_INET;
-	PROXY_SA.sin_port = htons(LOCAL_PORT);
-	if (inet_aton(LOCAL_ADDR, &PROXY_SA.sin_addr) == 0) {
+	PROXY_SA.sin_port = htons(*conf.local_port);
+	if (inet_aton(conf.local_addr, &PROXY_SA.sin_addr) == 0) {
 		struct hostent *he;
 
-		he = gethostbyname(LOCAL_ADDR);
+		he = gethostbyname(conf.local_addr);
 		if (he == NULL) {
 			perror("gethostbyname");
 			exit(errno);
@@ -444,13 +475,13 @@ int client_main(int argc, char **argv)
 		memcpy(&PROXY_SA.sin_addr, he->h_addr, sizeof(struct in_addr));
 	}
 	PROXY_SA6.sin6_family = AF_INET6;
-	PROXY_SA6.sin6_port = htons(LOCAL_PORT);
+	PROXY_SA6.sin6_port = htons(*conf.local_port);
 	if (inet_pton(AF_INET6, "::1", &PROXY_SA6.sin6_addr) < 0 ) {
 		perror("inet_pton");
 		exit(errno);
 	}
 
-	LOCAL_PIPE_FD = open(LOCAL_PIPE_PAHT, O_WRONLY);
+	LOCAL_PIPE_FD = open(conf.pipe_path, O_WRONLY);
 	if (LOCAL_PIPE_FD < 0) {
 		perror("open fifo");
 		fprintf(stderr, "It seems that graftcp-local is not running, should start graftcp-local first.\n");
