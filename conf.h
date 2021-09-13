@@ -15,6 +15,7 @@
 #ifndef CONF_H
 #define CONF_H
 
+#include <stdlib.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -38,5 +39,23 @@ int conf_init(struct graftcp_conf *conf);
 void conf_free(struct graftcp_conf *conf);
 int conf_read(const char *path, struct graftcp_conf *conf);
 void conf_override(struct graftcp_conf *w, const struct graftcp_conf *r);
+
+static inline void __free_func(char **p)
+{
+	if (*p) {
+		free(*p);
+		*p = NULL;
+	}
+}
+
+static inline void __conf_free_func(struct graftcp_conf *pconf)
+{
+	if (pconf)
+		conf_free(pconf);
+}
+
+#define __defer_free __attribute__((cleanup(__free_func)))
+
+#define __defer_conf_free __attribute__((cleanup(__conf_free_func)))
 
 #endif

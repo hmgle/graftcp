@@ -408,8 +408,8 @@ int client_main(int argc, char **argv)
 		.ignore_local           = &DEFAULT_IGNORE_LOCAL,
 	};
 
-	struct graftcp_conf file_conf;
-	struct graftcp_conf cmd_conf;
+	__defer_conf_free struct graftcp_conf file_conf;
+	__defer_conf_free struct graftcp_conf cmd_conf;
 	conf_init(&file_conf);
 	conf_init(&cmd_conf);
 
@@ -488,10 +488,6 @@ int client_main(int argc, char **argv)
 		exit(errno);
 	}
 
-
 	init(argc - optind, argv + optind);
-	int ret = do_trace();
-	conf_free(&file_conf);
-	conf_free(&cmd_conf);
-	return ret;
+	return do_trace();
 }
