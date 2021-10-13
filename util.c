@@ -68,6 +68,7 @@ struct proc_info *alloc_proc_info(pid_t pid)
 
 int get_syscall_number(pid_t pid)
 {
+#if defined(__x86_64__)
 #if 1
 	errno = 0;
 	int offset = offsetof(struct user, regs.orig_rax);
@@ -80,10 +81,18 @@ int get_syscall_number(pid_t pid)
 	assert(errno == 0);
 	return regs.orig_rax;
 #endif
+#elif defined(__arm__)
+	errno = 0;
+	struct pt_regs regs;
+	ptrace(PTRACE_GETREGS, pid, 0, &regs);
+	assert(errno == 0);
+	return regs.ARM_r7;
+#endif
 }
 
 int get_retval(pid_t pid)
 {
+#if defined(__x86_64__)
 #if 1
 	errno = 0;
 	int offset = offsetof(struct user, regs.rax);
@@ -94,10 +103,17 @@ int get_retval(pid_t pid)
 	ptrace(PTRACE_GETREGS, pid, 0, &regs);
 	return regs.rax;
 #endif
+#elif defined(__arm__)
+	errno = 0;
+	struct pt_regs regs;
+	ptrace(PTRACE_GETREGS, pid, 0, &regs);
+	return regs.ARM_r0;
+#endif
 }
 
 void set_retval(pid_t pid, long new_val)
 {
+#if defined(__x86_64__)
 	struct user_regs_struct regs;
 	ptrace(PTRACE_GETREGS, pid, 0, &regs);
 	assert(errno == 0);
@@ -106,12 +122,23 @@ void set_retval(pid_t pid, long new_val)
 	regs.rax = new_val;
 	ptrace(PTRACE_SETREGS, pid, 0, &regs);
 	assert(errno == 0);
+#elif defined(__arm__)
+	struct pt_regs regs;
+	ptrace(PTRACE_GETREGS, pid, 0, &regs);
+	assert(errno == 0);
+	if ((long)regs.ARM_r0 == new_val)
+		return;
+	regs.ARM_r0 = new_val;
+	ptrace(PTRACE_SETREGS, pid, 0, &regs);
+	assert(errno == 0);
+#endif
 }
 
 long get_syscall_arg(pid_t pid, int order)
 {
-	int offset;
 	long val;
+#if defined(__x86_64__)
+	int offset;
 
 	switch (order) {
 	case 0:
@@ -138,6 +165,32 @@ long get_syscall_arg(pid_t pid, int order)
 	errno = 0;
 	val = ptrace(PTRACE_PEEKUSER, pid, offset);
 	assert(errno == 0);
+#elif defined(__arm__)
+	struct pt_regs regs;
+	ptrace(PTRACE_GETREGS, pid, 0, &regs);
+	switch (order) {
+	case 0:
+		val = regs.ARM_ORIG_r0;
+		break;
+	case 1:
+		val = regs.ARM_r1;
+		break;
+	case 2:
+		val = regs.ARM_r2;
+		break;
+	case 3:
+		val = regs.ARM_r3;
+		break;
+	case 4:
+		val = regs.ARM_r4;
+		break;
+	case 5:
+		val = regs.ARM_r5;
+		break;
+	default:
+		return -1;
+	}
+#endif
 	return val;
 }
 

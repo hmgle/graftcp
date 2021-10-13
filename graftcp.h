@@ -29,13 +29,45 @@
 #include <string.h>
 #include <sys/wait.h>
 #include <sys/user.h>
+#if defined(__x86_64__)
 #include <sys/reg.h>
+#elif defined(__arm__)
+#include <asm/ptrace.h>
+#endif
 #include <sys/syscall.h>
 #include <fcntl.h>
 #include <linux/sched.h>
 #include <assert.h>
 
 #include "uthash.h"
+
+#ifdef __arm__
+
+#ifndef SYS_socket
+#define SYS_socket __NR_socket
+#endif
+
+#ifndef SYS_connect
+#define SYS_connect __NR_connect
+#endif
+
+#ifndef SYS_close
+#define SYS_close __NR_close
+#endif
+
+#ifndef SYS_clone
+#define SYS_clone __NR_clone
+#endif
+
+#ifndef SYS_exit
+#define SYS_exit __NR_exit
+#endif
+
+#ifndef SYS_exit_group
+#define SYS_exit_group __NR_exit_group
+#endif
+
+#endif
 
 #define satosin(x)  ((struct sockaddr_in *) &(x))
 #define SOCKADDR(x) (satosin(x)->sin_addr.s_addr)
