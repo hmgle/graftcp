@@ -2,7 +2,7 @@ ifneq ($(shell echo $(VERSION) | head -c 1), v)
 	VERSION=v0.4
 endif
 
-ifneq (,$(findstring arm,$(CC)))
+ifeq (,$(findstring arm,$(CC)))
 	GO_BUILD_PREFIX_FLAGS :=
 	CGO_FLAGS :=
 else
