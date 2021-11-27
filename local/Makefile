@@ -2,10 +2,12 @@ ifneq ($(shell echo $(VERSION) | head -c 1), v)
 	VERSION=v0.4
 endif
 
-ifeq (,$(findstring arm,$(CC)))
-	GO_BUILD_PREFIX_FLAGS :=
-	CGO_FLAGS :=
-else
+GO_BUILD_PREFIX_FLAGS :=
+CGO_FLAGS :=
+ifneq ($(shell $(CC) -E -dM -xc /dev/null | grep __aarch64__),)
+	GO_BUILD_PREFIX_FLAGS := GOOS=linux GOARCH=arm64
+	CGO_FLAGS := CGO_ENABLED=1 CC=$(CC) CXX=$(CXX) AR=$(AR)
+else ifneq  ($(shell $(CC) -E -dM -xc /dev/null | grep __arm__),)
 	GO_BUILD_PREFIX_FLAGS := GOOS=linux GOARCH=arm
 	CGO_FLAGS := CGO_ENABLED=1 CC=$(CC) CXX=$(CXX) AR=$(AR)
 endif

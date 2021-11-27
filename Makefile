@@ -28,7 +28,7 @@ VERSION = $(shell git describe --tags --always)
 CROSS_COMPILE ?=
 
 CC		= $(CROSS_COMPILE)gcc
-CXX 		= $(CROSS_COMPILE)g++
+CXX		= $(CROSS_COMPILE)g++
 AR		= $(CROSS_COMPILE)ar
 
 debug = 0
