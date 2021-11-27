@@ -31,17 +31,20 @@
 #include <sys/user.h>
 #if defined(__x86_64__)
 #include <sys/reg.h>
+#include <linux/sched.h>
 #elif defined(__arm__)
 #include <asm/ptrace.h>
+#elif defined(__arm64__) || defined(__aarch64__)
+#include <asm/ptrace.h>
+#include <linux/elf.h>
 #endif
 #include <sys/syscall.h>
 #include <fcntl.h>
-#include <linux/sched.h>
 #include <assert.h>
 
 #include "uthash.h"
 
-#ifdef __arm__
+#if defined(__arm__) || defined(__arm64__) || defined(__aarch64__)
 
 #ifndef SYS_socket
 #define SYS_socket __NR_socket

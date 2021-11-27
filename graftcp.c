@@ -176,7 +176,7 @@ void clone_pre_handle(struct proc_info *pinfp)
 
 	flags &= ~CLONE_UNTRACED;
 	ptrace(PTRACE_POKEUSER, pinfp->pid, sizeof(long) * RDI, flags);
-#elif defined(__arm__) || defined(__aarch64__)
+#elif defined(__arm__) || defined(__arm64__) || defined(__aarch64__)
 	/* Do not know how to handle this */
 #endif
 }
