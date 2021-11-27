@@ -25,7 +25,7 @@ graftcp-local: $(wildcard *.go cmd/graftcp-local/*.go)
 	${GO_BUILD_PREFIX_FLAGS} go build -ldflags "-s -w -X main.version=${VERSION}" ./cmd/graftcp-local
 
 mgraftcp: $(wildcard *.go cmd/mgraftcp/*.go) ../libgraftcp.a
-	${GO_BUILD_PREFIX_FLAGS} ${CGO_FLAGS} go build -ldflags "-s -w -X main.version=${VERSION}" ./cmd/mgraftcp
+	${GO_BUILD_PREFIX_FLAGS} ${CGO_FLAGS} go build -ldflags "-s -w -X main.version=${VERSION}" -ldflags '-linkmode "external" -extldflags "-static"' ./cmd/mgraftcp
 
 ../libgraftcp.a:
 	$(MAKE) -C .. libgraftcp.a
