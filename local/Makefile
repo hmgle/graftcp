@@ -10,6 +10,9 @@ ifneq ($(shell $(CC) -E -dM -xc /dev/null | grep __aarch64__),)
 else ifneq  ($(shell $(CC) -E -dM -xc /dev/null | grep __arm__),)
 	GO_BUILD_PREFIX_FLAGS := GOOS=linux GOARCH=arm
 	CGO_FLAGS := CGO_ENABLED=1 CC=$(CC) CXX=$(CXX) AR=$(AR)
+else ifneq  ($(shell $(CC) -E -dM -xc /dev/null | grep __i386__),)
+	GO_BUILD_PREFIX_FLAGS := GOOS=linux GOARCH=386
+	CGO_FLAGS := CGO_ENABLED=1 CC=$(CC) CXX=$(CXX) AR=$(AR)
 endif
 
 PREFIX = /usr/local
@@ -25,7 +28,7 @@ graftcp-local: $(wildcard *.go cmd/graftcp-local/*.go)
 	${GO_BUILD_PREFIX_FLAGS} go build -ldflags "-s -w -X main.version=${VERSION}" ./cmd/graftcp-local
 
 mgraftcp: $(wildcard *.go cmd/mgraftcp/*.go) ../libgraftcp.a
-	${GO_BUILD_PREFIX_FLAGS} ${CGO_FLAGS} go build -ldflags "-s -w -X main.version=${VERSION}" -ldflags '-linkmode "external" -extldflags "-static"' ./cmd/mgraftcp
+	${GO_BUILD_PREFIX_FLAGS} ${CGO_FLAGS} go build -ldflags "-s -w -X main.version=${VERSION}" ./cmd/mgraftcp
 
 ../libgraftcp.a:
 	$(MAKE) -C .. libgraftcp.a
