@@ -110,6 +110,11 @@ int get_syscall_number(pid_t pid)
 	assert(errno == 0);
 	return regs.orig_rax;
 #endif
+#elif defined(__i386__)
+	struct user_regs_struct regs;
+	ptrace(PTRACE_GETREGS, pid, 0, &regs);
+	assert(errno == 0);
+	return regs.orig_eax;
 #elif defined(__arm__)
 	errno = 0;
 	struct pt_regs regs;
@@ -146,6 +151,11 @@ int get_retval(pid_t pid)
 	ptrace(PTRACE_GETREGS, pid, 0, &regs);
 	return regs.rax;
 #endif
+#elif defined(__i386__)
+	errno = 0;
+	struct user_regs_struct regs;
+	ptrace(PTRACE_GETREGS, pid, 0, &regs);
+	return regs.eax;
 #elif defined(__arm__)
 	errno = 0;
 	struct pt_regs regs;
@@ -179,6 +189,8 @@ void set_retval(pid_t pid, long new_val)
 	regs.rax = new_val;
 	ptrace(PTRACE_SETREGS, pid, 0, &regs);
 	assert(errno == 0);
+#elif defined(__i386__)
+	/* TODO */
 #elif defined(__arm__)
 	struct pt_regs regs;
 	ptrace(PTRACE_GETREGS, pid, 0, &regs);
@@ -224,6 +236,31 @@ long get_syscall_arg(pid_t pid, int order)
 	errno = 0;
 	val = ptrace(PTRACE_PEEKUSER, pid, offset);
 	assert(errno == 0);
+#elif defined(__i386__)
+	struct user_regs_struct regs;
+	ptrace(PTRACE_GETREGS, pid, 0, &regs);
+	switch (order) {
+	case 0:
+		val = regs.ebx;
+		break;
+	case 1:
+		val = regs.ecx;
+		break;
+	case 2:
+		val = regs.edx;
+		break;
+	case 3:
+		val = regs.esi;
+		break;
+	case 4:
+		val = regs.edi;
+		break;
+	case 5:
+		val = regs.ebp;
+		break;
+	default:
+		return -1;
+	}
 #elif defined(__arm__)
 	struct pt_regs regs;
 	ptrace(PTRACE_GETREGS, pid, 0, &regs);
