@@ -190,7 +190,14 @@ void set_retval(pid_t pid, long new_val)
 	ptrace(PTRACE_SETREGS, pid, 0, &regs);
 	assert(errno == 0);
 #elif defined(__i386__)
-	/* TODO */
+	struct user_regs_struct regs;
+	ptrace(PTRACE_GETREGS, pid, 0, &regs);
+	assert(errno == 0);
+	if ((long)regs.eax == new_val)
+		return;
+	regs.eax = new_val;
+	ptrace(PTRACE_SETREGS, pid, 0, &regs);
+	assert(errno == 0);
 #elif defined(__arm__)
 	struct pt_regs regs;
 	ptrace(PTRACE_GETREGS, pid, 0, &regs);
