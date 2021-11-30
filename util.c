@@ -208,7 +208,20 @@ void set_retval(pid_t pid, long new_val)
 	ptrace(PTRACE_SETREGS, pid, 0, &regs);
 	assert(errno == 0);
 #elif defined(__arm64__) || defined(__aarch64__)
-	/* TODO */
+	struct iovec iov = {
+		.iov_base = &arm_regs_union,
+		.iov_len = sizeof(struct user_pt_regs)
+	};
+	ptrace(PTRACE_GETREGSET, pid, NT_PRSTATUS, &iov);
+	assert(errno == 0);
+	switch (iov.iov_len) {
+	case sizeof(struct user_pt_regs):
+		arm_regs_union.aarch64_r.regs[0] = new_val;
+	case sizeof(struct arm_pt_regs):
+		arm_regs_union.arm_r.ARM_r0 = new_val;
+	}
+	ptrace(PTRACE_SETREGSET, pid, NT_PRSTATUS, &iov);
+	assert(errno == 0);
 #endif
 }
 
