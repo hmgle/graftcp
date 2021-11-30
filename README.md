@@ -234,8 +234,8 @@ No. macOS's [`ptrace(2)`](http://polarhome.com/service/man/?qf=ptrace&af=0&sf=0&
 
 ## TODO
 
-- [ ] ARM/Linux Support
-- [ ] i386/Linux Support
+- [x] ARM/Linux Support
+- [x] i386/Linux Support
 
 ## Acknowledgements and References
 
