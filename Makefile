@@ -21,6 +21,16 @@ endif
 
 VERSION = $(shell git describe --tags --always)
 
+# CROSS_COMPILE can be set on the command line
+# make CROSS_COMPILE=arm-linux-gnueabi-
+# Default value for CROSS_COMPILE is not to prefix executables
+
+CROSS_COMPILE ?=
+
+CC		= $(CROSS_COMPILE)gcc
+CXX		= $(CROSS_COMPILE)g++
+AR		= $(CROSS_COMPILE)ar
+
 debug = 0
 
 PREFIX = /usr/local
@@ -58,7 +68,7 @@ libgraftcp.a: graftcp.o util.o string-set.o conf.o
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(GRAFTCP_LOCAL_BIN)::
-	$(MAKE) -C local VERSION=$(VERSION)
+	$(MAKE) -C local VERSION=$(VERSION) CC=$(CC) CXX=$(CXX) AR=$(AR)
 
 install:: graftcp $(GRAFTCP_LOCAL_BIN)
 	$(INSTALL) $< $(DESTDIR)$(BINDIR)/$<

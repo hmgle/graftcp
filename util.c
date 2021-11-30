@@ -66,38 +66,121 @@ struct proc_info *alloc_proc_info(pid_t pid)
 #define offsetof(a, b) __builtin_offsetof(a,b)
 #endif
 
+#if defined(__arm64__) || defined(__aarch64__)
+struct arm_pt_regs {
+	uint32_t uregs[18];
+};
+#define ARM_cpsr	uregs[16]
+#define ARM_pc		uregs[15]
+#define ARM_lr		uregs[14]
+#define ARM_sp		uregs[13]
+#define ARM_ip		uregs[12]
+#define ARM_fp		uregs[11]
+#define ARM_r10		uregs[10]
+#define ARM_r9		uregs[9]
+#define ARM_r8		uregs[8]
+#define ARM_r7		uregs[7]
+#define ARM_r6		uregs[6]
+#define ARM_r5		uregs[5]
+#define ARM_r4		uregs[4]
+#define ARM_r3		uregs[3]
+#define ARM_r2		uregs[2]
+#define ARM_r1		uregs[1]
+#define ARM_r0		uregs[0]
+#define ARM_ORIG_r0	uregs[17]
+
+static union {
+	struct user_pt_regs aarch64_r;
+	struct arm_pt_regs  arm_r;
+} arm_regs_union;
+#endif
+
 int get_syscall_number(pid_t pid)
 {
+#if defined(__x86_64__)
 #if 1
 	errno = 0;
 	int offset = offsetof(struct user, regs.orig_rax);
 	long val = ptrace(PTRACE_PEEKUSER, pid, offset);
 	assert(errno == 0);
 	return (int)val;
-#else				/* another way */
+#else			/* another way */
 	struct user_regs_struct regs;
 	ptrace(PTRACE_GETREGS, pid, 0, &regs);
 	assert(errno == 0);
 	return regs.orig_rax;
 #endif
+#elif defined(__i386__)
+	struct user_regs_struct regs;
+	ptrace(PTRACE_GETREGS, pid, 0, &regs);
+	assert(errno == 0);
+	return regs.orig_eax;
+#elif defined(__arm__)
+	errno = 0;
+	struct pt_regs regs;
+	ptrace(PTRACE_GETREGS, pid, 0, &regs);
+	assert(errno == 0);
+	return regs.ARM_r7;
+#elif defined(__arm64__) || defined(__aarch64__)
+	struct iovec iov = {
+		.iov_base = &arm_regs_union,
+		.iov_len = sizeof(struct user_pt_regs)
+	};
+	ptrace(PTRACE_GETREGSET, pid, NT_PRSTATUS, &iov);
+	assert(errno == 0);
+	switch (iov.iov_len) {
+	case sizeof(struct user_pt_regs):
+		return arm_regs_union.aarch64_r.regs[8];
+	case sizeof(struct arm_pt_regs):
+		return arm_regs_union.arm_r.ARM_r7;
+	}
+	return -1;
+#endif
 }
 
 int get_retval(pid_t pid)
 {
+#if defined(__x86_64__)
 #if 1
 	errno = 0;
 	int offset = offsetof(struct user, regs.rax);
 	long val = ptrace(PTRACE_PEEKUSER, pid, offset);
 	return (int)val;
-#else				/* another way */
+#else			/* another way */
 	struct user_regs_struct regs;
 	ptrace(PTRACE_GETREGS, pid, 0, &regs);
 	return regs.rax;
+#endif
+#elif defined(__i386__)
+	errno = 0;
+	struct user_regs_struct regs;
+	ptrace(PTRACE_GETREGS, pid, 0, &regs);
+	return regs.eax;
+#elif defined(__arm__)
+	errno = 0;
+	struct pt_regs regs;
+	ptrace(PTRACE_GETREGS, pid, 0, &regs);
+	return regs.ARM_r0;
+#elif defined(__arm64__) || defined(__aarch64__)
+	struct iovec iov = {
+		.iov_base = &arm_regs_union,
+		.iov_len = sizeof(struct user_pt_regs)
+	};
+	ptrace(PTRACE_GETREGSET, pid, NT_PRSTATUS, &iov);
+	assert(errno == 0);
+	switch (iov.iov_len) {
+	case sizeof(struct user_pt_regs):
+		return arm_regs_union.aarch64_r.regs[0];
+	case sizeof(struct arm_pt_regs):
+		return arm_regs_union.arm_r.ARM_r0;
+	}
+	return -1;
 #endif
 }
 
 void set_retval(pid_t pid, long new_val)
 {
+#if defined(__x86_64__)
 	struct user_regs_struct regs;
 	ptrace(PTRACE_GETREGS, pid, 0, &regs);
 	assert(errno == 0);
@@ -106,12 +189,47 @@ void set_retval(pid_t pid, long new_val)
 	regs.rax = new_val;
 	ptrace(PTRACE_SETREGS, pid, 0, &regs);
 	assert(errno == 0);
+#elif defined(__i386__)
+	struct user_regs_struct regs;
+	ptrace(PTRACE_GETREGS, pid, 0, &regs);
+	assert(errno == 0);
+	if ((long)regs.eax == new_val)
+		return;
+	regs.eax = new_val;
+	ptrace(PTRACE_SETREGS, pid, 0, &regs);
+	assert(errno == 0);
+#elif defined(__arm__)
+	struct pt_regs regs;
+	ptrace(PTRACE_GETREGS, pid, 0, &regs);
+	assert(errno == 0);
+	if ((long)regs.ARM_r0 == new_val)
+		return;
+	regs.ARM_r0 = new_val;
+	ptrace(PTRACE_SETREGS, pid, 0, &regs);
+	assert(errno == 0);
+#elif defined(__arm64__) || defined(__aarch64__)
+	struct iovec iov = {
+		.iov_base = &arm_regs_union,
+		.iov_len = sizeof(struct user_pt_regs)
+	};
+	ptrace(PTRACE_GETREGSET, pid, NT_PRSTATUS, &iov);
+	assert(errno == 0);
+	switch (iov.iov_len) {
+	case sizeof(struct user_pt_regs):
+		arm_regs_union.aarch64_r.regs[0] = new_val;
+	case sizeof(struct arm_pt_regs):
+		arm_regs_union.arm_r.ARM_r0 = new_val;
+	}
+	ptrace(PTRACE_SETREGSET, pid, NT_PRSTATUS, &iov);
+	assert(errno == 0);
+#endif
 }
 
 long get_syscall_arg(pid_t pid, int order)
 {
-	int offset;
 	long val;
+#if defined(__x86_64__)
+	int offset;
 
 	switch (order) {
 	case 0:
@@ -138,6 +256,80 @@ long get_syscall_arg(pid_t pid, int order)
 	errno = 0;
 	val = ptrace(PTRACE_PEEKUSER, pid, offset);
 	assert(errno == 0);
+#elif defined(__i386__)
+	struct user_regs_struct regs;
+	ptrace(PTRACE_GETREGS, pid, 0, &regs);
+	switch (order) {
+	case 0:
+		val = regs.ebx;
+		break;
+	case 1:
+		val = regs.ecx;
+		break;
+	case 2:
+		val = regs.edx;
+		break;
+	case 3:
+		val = regs.esi;
+		break;
+	case 4:
+		val = regs.edi;
+		break;
+	case 5:
+		val = regs.ebp;
+		break;
+	default:
+		return -1;
+	}
+#elif defined(__arm__)
+	struct pt_regs regs;
+	ptrace(PTRACE_GETREGS, pid, 0, &regs);
+	switch (order) {
+	case 0:
+		val = regs.ARM_ORIG_r0;
+		break;
+	case 1:
+		val = regs.ARM_r1;
+		break;
+	case 2:
+		val = regs.ARM_r2;
+		break;
+	case 3:
+		val = regs.ARM_r3;
+		break;
+	case 4:
+		val = regs.ARM_r4;
+		break;
+	case 5:
+		val = regs.ARM_r5;
+		break;
+	default:
+		return -1;
+	}
+#elif defined(__arm64__) || defined(__aarch64__)
+	switch (order) {
+	case 0:
+		val = arm_regs_union.aarch64_r.regs[0];
+		break;
+	case 1:
+		val = arm_regs_union.aarch64_r.regs[1];
+		break;
+	case 2:
+		val = arm_regs_union.aarch64_r.regs[2];
+		break;
+	case 3:
+		val = arm_regs_union.aarch64_r.regs[3];
+		break;
+	case 4:
+		val = arm_regs_union.aarch64_r.regs[4];
+		break;
+	case 5:
+		val = arm_regs_union.aarch64_r.regs[5];
+		break;
+	default:
+		return -1;
+	}
+#endif
 	return val;
 }
 

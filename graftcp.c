@@ -171,10 +171,14 @@ void close_pre_handle(struct proc_info *pinfp)
 
 void clone_pre_handle(struct proc_info *pinfp)
 {
+#if defined(__x86_64__)
 	long flags = get_syscall_arg(pinfp->pid, 0);
 
 	flags &= ~CLONE_UNTRACED;
 	ptrace(PTRACE_POKEUSER, pinfp->pid, sizeof(long) * RDI, flags);
+#elif defined(__arm__) || defined(__arm64__) || defined(__aarch64__)
+	/* Do not know how to handle this */
+#endif
 }
 
 void socket_exiting_handle(struct proc_info *pinfp, int fd)

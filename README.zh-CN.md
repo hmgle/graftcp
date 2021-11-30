@@ -227,8 +227,8 @@ Linux 提供了一种限制被 `ptrace(2)` 跟踪的方法：设置 [`/proc/sys/
 
 ## TODO
 
-- [ ] ARM/Linux 支持
-- [ ] i386/Linux 支持
+- [x] ARM/Linux 支持
+- [x] i386/Linux 支持
 
 ## 感谢及参考
 
