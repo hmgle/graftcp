@@ -36,6 +36,8 @@ int LOCAL_PIPE_FD;
 struct str_set *BLACKLIST_IP     = NULL;
 struct str_set *WHITELACKLIST_IP = NULL;
 
+static int exit_code = 0;
+
 static void load_ip_file(char *path, struct str_set **set)
 {
 	FILE *f;
@@ -323,6 +325,7 @@ int do_trace()
 		}
 		if (WIFSIGNALED(status) || WIFEXITED(status)
 		    || !WIFSTOPPED(status)) {
+			exit_code = WEXITSTATUS(status);
 			/* TODO free pinfp */
 			continue;
 		}
@@ -493,5 +496,7 @@ int client_main(int argc, char **argv)
 	}
 
 	init(argc - optind, argv + optind);
-	return do_trace();
+	if (do_trace() < 0)
+		return -1;
+	return exit_code;
 }
