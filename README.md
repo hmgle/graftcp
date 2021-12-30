@@ -173,7 +173,7 @@ $ wget https://www.google.com
 To achieve the goal of redirecting the TCP connection of a app to another destination address and the app itself is not aware of it, these conditions are probably required:
 
 - `fork(2)` a new process and trace it using `ptrace(2)`, `execve(2)` to run the app. Every `connect(2)` syscall will be intercepted, then get the destination address argument and send it to `graftcp-local` via `pipe`.
-- Modify the destination address argument of `connect(2)` to `graftcp-local`'s address, and restart the stopped syscall. After the syscall returns successfully, the app thought it has connected the original destination address, but in face it connected the `graftcp-local`, so we named it "graft".
+- Modify the destination address argument of `connect(2)` to `graftcp-local`'s address, and restart the stopped syscall. After the syscall returns successfully, the app thought it has connected the original destination address, but in fact it is connected to the `graftcp-local`, so we named it "graft".
 - `graftcp-local` establish a SOCKS5 connection based on the information of app's original destination address, then redirect the requests from the app to the SOCKS5 proxy.
 
 Someone may have a question here: since we can modify the arguments of a syscall, modify the app's `write(2)` / `send(2)` buf argument, attach the original destination information to the `write` buffer, isn't it simpler? The answer is that cannot be done. Because attach data to the buffer of the tracked child process, it may case a buffer overflow, causing crash or overwrite other data.  
