@@ -230,7 +230,7 @@ Linux provides a way to limit the `ptrace(2)`: set the value of [`/proc/sys/kern
 
 ### Does it support macOS?
 
-No. macOS's [`ptrace(2)`](http://polarhome.com/service/man/?qf=ptrace&af=0&sf=0&of=Darwin&tf=2) is useless. ~~However, it can also be achieved theoretically by referring to `DTrace`~~. See [issue 12](https://github.com/hmgle/graftcp/issues/12). Anyone try it? :grin:
+No. macOS's [`ptrace(2)`](http://polarhome.com/service/man/?qf=ptrace&af=0&sf=0&of=Darwin&tf=2) is useless. ~~However, it can also be achieved theoretically by referring to `DTrace`~~. See [issue 12](https://github.com/hmgle/graftcp/issues/12).
 
 ## TODO
 

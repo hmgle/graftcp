@@ -1,5 +1,5 @@
 ifneq ($(shell echo $(VERSION) | head -c 1), v)
-	VERSION=v0.4
+	VERSION=v0.5
 endif
 
 GO_BUILD_PREFIX_FLAGS :=

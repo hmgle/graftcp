@@ -20,7 +20,7 @@
 #include "string-set.h"
 
 #ifndef VERSION
-#define VERSION "v0.4"
+#define VERSION "v0.5"
 #endif
 
 struct sockaddr_in PROXY_SA;

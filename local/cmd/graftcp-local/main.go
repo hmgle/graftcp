@@ -13,7 +13,7 @@ import (
 
 var (
 	selectProxyMode string
-	version         = "v0.4"
+	version         = "v0.5"
 )
 
 // App for graftcp-local.
