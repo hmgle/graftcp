@@ -130,7 +130,8 @@ Usage: mgraftcp [-hn] [-b value] [--enable-debug-log] [--http_proxy value] [--se
 
 1. 参数 `--config` 指定的文件
 2. `$(可执行文件所在的目录)/graftcp-local.conf`
-3. `/etc/graftcp-local/graftcp-local.conf`
+3. `$(HOME)/.graftcp-local/graftcp-local.conf`
+4. `/etc/graftcp-local/graftcp-local.conf`
 
 ## 使用示例
 

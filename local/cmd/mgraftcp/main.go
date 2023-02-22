@@ -119,19 +119,32 @@ func parseConfigFile(path string) error {
 				dlog.Infof("find config: %s", defaultConf)
 			}
 			path = defaultConf
-		} else { // try "/etc/graftcp-local/graftcp-local.conf"
-			etcConf := "/etc/graftcp-local/graftcp-local.conf"
-			if _, err := os.Stat(etcConf); err == nil {
+			goto loadConf
+		}
+		// try $HOME/.graftcp-local/graftcp-local.conf
+		if homeDir, err := os.UserHomeDir(); err == nil {
+			dotConf := homeDir + "~/.graftcp-local/graftcp-local.conf"
+			if _, err = os.Stat(dotConf); err == nil {
 				if enableDebugLog {
-					dlog.Infof("find config: %s", etcConf)
+					dlog.Infof("find config: %s", dotConf)
 				}
-				path = etcConf
-			} else {
-				return nil
+				path = dotConf
+				goto loadConf
 			}
+		}
+		// try "/etc/graftcp-local/graftcp-local.conf"
+		etcConf := "/etc/graftcp-local/graftcp-local.conf"
+		if _, err := os.Stat(etcConf); err == nil {
+			if enableDebugLog {
+				dlog.Infof("find config: %s", etcConf)
+			}
+			path = etcConf
+		} else {
+			return nil
 		}
 	}
 
+loadConf:
 	file, err := os.Open(path)
 	if err != nil {
 		if enableDebugLog {
