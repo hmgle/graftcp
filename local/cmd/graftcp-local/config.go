@@ -85,7 +85,7 @@ func parseConfigFile(path string, app *App) error {
 		}
 		// try $HOME/.graftcp-local/graftcp-local.conf
 		if homeDir, err := os.UserHomeDir(); err == nil {
-			dotConf := homeDir + "~/.graftcp-local/graftcp-local.conf"
+			dotConf := homeDir + "/.graftcp-local/graftcp-local.conf"
 			if _, err = os.Stat(dotConf); err == nil {
 				dlog.Infof("find config: %s", dotConf)
 				path = dotConf
