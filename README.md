@@ -78,7 +78,8 @@ Usage: graftcp [options] prog [prog-args]
 
 Options:
   -c --conf-file=<config-file-path>
-                    Specify configuration file
+                    Specify configuration file.
+                    Default: $XDG_CONFIG_HOME/graftcp/graftcp.conf
   -a --local-addr=<graftcp-local-IP-addr>
                     graftcp-local's IP address. Default: localhost
   -p --local-port=<graftcp-local-port>

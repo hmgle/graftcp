@@ -16,6 +16,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 #include "conf.h"
 
@@ -197,12 +198,55 @@ void conf_free(struct graftcp_conf *conf)
 	}
 }
 
+static char *xdg_config_path_dup(void)
+{
+	const char *home, *config_home;
+	char *path = NULL;
+	const char *dotconf = ".config";
+	const char *subdir = "graftcp";
+	const char *confname = "graftcp.conf";
+
+	config_home = getenv("XDG_CONFIG_HOME");
+	if (config_home && *config_home) {
+		size_t size = 3 + strlen(config_home) + strlen(subdir) + strlen(confname);
+		path = calloc(size, sizeof(char));
+		snprintf(path, size, "%s/%s/%s", config_home, subdir, confname);
+		return path;
+	}
+
+	home = getenv("HOME");
+	if (home) {
+		size_t size = 4 + strlen(home) + strlen(dotconf) + strlen(subdir) + strlen(confname);
+		path = calloc(size, sizeof(char));
+		snprintf(path, size, "%s/%s/%s/%s", home, dotconf, subdir, confname);
+		return path;
+	}
+
+	return NULL;
+}
+
 int conf_read(const char *path, struct graftcp_conf *conf)
 {
 	FILE *f;
+	__defer_free char *xdg_config = NULL;
 	__defer_free char *line = NULL;
 	size_t len = 0;
 	int err = 0;
+
+	if (path == NULL) {
+		xdg_config = xdg_config_path_dup();
+		if (xdg_config == NULL)
+			return 0;
+
+		struct stat st;
+		if (stat(xdg_config, &st))
+			return 0;
+		if (S_ISDIR(st.st_mode)) {
+			fprintf(stderr, "%s is a directory not a config file\n", xdg_config);
+			return -1;
+		}
+		path = xdg_config;
+	}
 
 	f = fopen(path, "r");
 	if (!f) {
