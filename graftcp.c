@@ -367,7 +367,8 @@ static void usage(char **argv)
 	fprintf(stderr, "Usage: %s [options] prog [prog-args]\n\n"
 		"Options:\n"
 		"  -c --conf-file=<config-file-path>\n"
-		"                    Specify configuration file\n"
+		"                    Specify configuration file.\n"
+		"                    Default: $XDG_CONFIG_HOME/graftcp/graftcp.conf\n"
 		"  -a --local-addr=<graftcp-local-IP-addr>\n"
 		"                    graftcp-local's IP address. Default: localhost\n"
 		"  -p --local-port=<graftcp-local-port>\n"
@@ -415,6 +416,7 @@ int client_main(int argc, char **argv)
 		.ignore_local           = &DEFAULT_IGNORE_LOCAL,
 	};
 
+	__defer_free char *conf_file_path = NULL;
 	__defer_conf_free struct graftcp_conf file_conf;
 	__defer_conf_free struct graftcp_conf cmd_conf;
 	conf_init(&file_conf);
@@ -444,7 +446,7 @@ int client_main(int argc, char **argv)
 			*cmd_conf.ignore_local = false;
 			break;
 		case 'c':
-			conf_read(optarg, &file_conf);
+			conf_file_path = strdup(optarg);
 			break;
 		case 'V':
 			fprintf(stderr, "graftcp %s\n", VERSION);
@@ -456,6 +458,7 @@ int client_main(int argc, char **argv)
 			exit(0);
 		}
 	}
+	conf_read(conf_file_path, &file_conf);
 	conf_override(&conf, &file_conf);
 	conf_override(&conf, &cmd_conf);
 
