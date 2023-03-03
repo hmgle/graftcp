@@ -138,7 +138,7 @@ Usage: mgraftcp [-hn] [-b value] [--enable-debug-log] [--http_proxy value] [--se
 
 1. File provided as a `--config` argument
 2. `$(the path of the executeable)/graftcp-local.conf`
-3. `$(HOME)/.graftcp-local/graftcp-local.conf`
+3. `$(XDG_CONFIG_HOME)/graftcp-local/graftcp-local.conf`, If `$XDG_CONFIG_HOME` is either not set or empty, a default equal to `$HOME/.config` should be used.
 4. `/etc/graftcp-local/graftcp-local.conf`
 
 ## Demo
