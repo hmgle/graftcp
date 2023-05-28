@@ -1,7 +1,5 @@
 # graftcp
 
-[![Build Status](https://travis-ci.org/hmgle/graftcp.svg?branch=master)](https://travis-ci.org/hmgle/graftcp)
-
 [English](./README.md) | **简体中文**
 
 ## 简介
