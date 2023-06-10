@@ -14,6 +14,10 @@
  */
 #include <stdio.h>
 #include <getopt.h>
+#include <linux/version.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
+#include <seccomp.h>
+#endif
 
 #include "graftcp.h"
 #include "conf.h"
@@ -85,6 +89,41 @@ static bool is_ignore(const char *ip)
 	}
 	return false;
 }
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
+static void install_seccomp()
+{
+	scmp_filter_ctx ctx;
+	ctx = seccomp_init(SCMP_ACT_ALLOW);
+
+	if (ctx == NULL) {
+		fprintf(stderr, "seccomp_init failed\n");
+		exit(1);
+	}
+
+	if (seccomp_rule_add(ctx, SCMP_ACT_TRACE(1), SCMP_SYS(close), 0) < 0) {
+		perror("seccomp_rule_add");
+		exit(1);
+	}
+	if (seccomp_rule_add(ctx, SCMP_ACT_TRACE(1), SCMP_SYS(socket), 0) < 0) {
+		perror("seccomp_rule_add");
+		exit(1);
+	}
+	if (seccomp_rule_add(ctx, SCMP_ACT_TRACE(1), SCMP_SYS(connect), 0) < 0) {
+		perror("seccomp_rule_add");
+		exit(1);
+	}
+	if (seccomp_rule_add(ctx, SCMP_ACT_TRACE(1), SCMP_SYS(clone), 0) < 0) {
+		perror("seccomp_rule_add");
+		exit(1);
+	}
+	if (seccomp_load(ctx) < 0) {
+		perror("seccomp_load");
+		exit(1);
+	}
+	seccomp_release(ctx);
+}
+#endif
 
 void socket_pre_handle(struct proc_info *pinfp)
 {
@@ -229,6 +268,9 @@ void init(int argc, char **argv)
 		perror("fork");
 		exit(errno);
 	} else if (child == 0) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
+		install_seccomp();
+#endif
 		do_child(argc, argv);
 	}
 	pi = alloc_proc_info(child);
@@ -312,6 +354,9 @@ int do_trace()
 
 			if (ptrace(PTRACE_SETOPTIONS, child, 0,
 				   PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXEC |
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
+				   PTRACE_O_TRACESECCOMP |
+#endif
 				   PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK) <
 			    0) {
 				perror("ptrace");
@@ -319,10 +364,17 @@ int do_trace()
 			}
 		}
 		event = ((unsigned)status >> 16);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
+		if (event != 0 && event != PTRACE_EVENT_SECCOMP) {
+			sig = 0;
+			goto end;
+		}
+#else
 		if (event != 0) {
 			sig = 0;
 			goto end;
 		}
+#endif
 		if (WIFSIGNALED(status) || WIFEXITED(status)
 		    || !WIFSTOPPED(status)) {
 			exit_code = WEXITSTATUS(status);
@@ -353,11 +405,20 @@ end:
 		 * -1,  the  caller  must  clear  errno before the call of ptrace(2).
 		 */
 		errno = 0;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
+		if (ptrace(exiting(pinfp) ? PTRACE_SYSCALL : PTRACE_CONT,
+					pinfp->pid, 0, sig) < 0) {
+			if (errno == ESRCH)
+				continue;
+			return -1;
+		}
+#else
 		if (ptrace(PTRACE_SYSCALL, pinfp->pid, 0, sig) < 0) {
 			if (errno == ESRCH)
 				continue;
 			return -1;
 		}
+#endif
 	}
 	return 0;
 }
