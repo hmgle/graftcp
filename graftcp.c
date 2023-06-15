@@ -15,8 +15,11 @@
 #include <stdio.h>
 #include <getopt.h>
 #include <linux/version.h>
+#include <stdlib.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
-#include <seccomp.h>
+#include <linux/seccomp.h>
+#include <linux/filter.h>
+#include <sys/prctl.h>
 #endif
 
 #include "graftcp.h"
@@ -91,37 +94,38 @@ static bool is_ignore(const char *ip)
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
+
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
+#endif
+
 static void install_seccomp()
 {
-	scmp_filter_ctx ctx;
-	ctx = seccomp_init(SCMP_ACT_ALLOW);
-
-	if (ctx == NULL) {
-		fprintf(stderr, "seccomp_init failed\n");
-		exit(1);
+	struct sock_filter filter[] = {
+		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
+				(offsetof(struct seccomp_data, nr))),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_close, 0, 1),
+		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_socket, 0, 1),
+		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_connect, 0, 1),
+		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_clone, 0, 1),
+		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
+		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+	};
+	struct sock_fprog prog = {
+		.len = (unsigned short)ARRAY_SIZE(filter),
+		.filter = filter,
+	};
+	if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) {
+		perror("prctl(PR_SET_NO_NEW_PRIVS)");
+		exit(errno);
 	}
-
-	if (seccomp_rule_add(ctx, SCMP_ACT_TRACE(1), SCMP_SYS(close), 0) < 0) {
-		perror("seccomp_rule_add");
-		exit(1);
+	if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog)) {
+		perror("prctl(PR_SET_SECCOMP)");
+		exit(errno);
 	}
-	if (seccomp_rule_add(ctx, SCMP_ACT_TRACE(1), SCMP_SYS(socket), 0) < 0) {
-		perror("seccomp_rule_add");
-		exit(1);
-	}
-	if (seccomp_rule_add(ctx, SCMP_ACT_TRACE(1), SCMP_SYS(connect), 0) < 0) {
-		perror("seccomp_rule_add");
-		exit(1);
-	}
-	if (seccomp_rule_add(ctx, SCMP_ACT_TRACE(1), SCMP_SYS(clone), 0) < 0) {
-		perror("seccomp_rule_add");
-		exit(1);
-	}
-	if (seccomp_load(ctx) < 0) {
-		perror("seccomp_load");
-		exit(1);
-	}
-	seccomp_release(ctx);
 }
 #endif
 

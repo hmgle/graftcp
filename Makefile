@@ -50,8 +50,6 @@ ifneq ($(shell echo $(VERSION) | head -c 1), v)
 endif
 CFLAGS += -DVERSION=\"$(VERSION)\"
 
-LDFLAGS += -lseccomp
-
 SRC := $(wildcard *.c)
 
 GRAFTCP_LOCAL_BIN = local/graftcp-local local/mgraftcp
@@ -61,7 +59,7 @@ all:: $(TARGET)
 
 
 graftcp: main.o graftcp.o util.o string-set.o conf.o
-	$(CC) $^ -o $@ $(LDFLAGS)
+	$(CC) $^ -o $@
 
 libgraftcp.a: graftcp.o util.o string-set.o conf.o
 	$(AR) rcs $@ $^
