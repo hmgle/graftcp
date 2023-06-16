@@ -14,13 +14,16 @@
  */
 #include <stdio.h>
 #include <getopt.h>
-#include <linux/version.h>
 #include <stdlib.h>
+#include <linux/version.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
+#define ENABLE_SECCOMP_BPF
+#endif
+#ifdef ENABLE_SECCOMP_BPF
 #include <linux/seccomp.h>
 #include <linux/filter.h>
 #include <sys/prctl.h>
-#endif
+#endif /* ifdef ENABLE_SECCOMP_BPF */
 
 #include "graftcp.h"
 #include "conf.h"
@@ -93,12 +96,10 @@ static bool is_ignore(const char *ip)
 	return false;
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
-
+#ifdef ENABLE_SECCOMP_BPF
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 #endif
-
 static void install_seccomp()
 {
 	struct sock_filter filter[] = {
@@ -272,7 +273,7 @@ void init(int argc, char **argv)
 		perror("fork");
 		exit(errno);
 	} else if (child == 0) {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
+#ifdef ENABLE_SECCOMP_BPF
 		install_seccomp();
 #endif
 		do_child(argc, argv);
@@ -358,7 +359,7 @@ int do_trace()
 
 			if (ptrace(PTRACE_SETOPTIONS, child, 0,
 				   PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXEC |
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
+#ifdef ENABLE_SECCOMP_BPF
 				   PTRACE_O_TRACESECCOMP |
 #endif
 				   PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK) <
@@ -368,7 +369,7 @@ int do_trace()
 			}
 		}
 		event = ((unsigned)status >> 16);
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
+#ifdef ENABLE_SECCOMP_BPF
 		if (event != 0 && event != PTRACE_EVENT_SECCOMP) {
 			sig = 0;
 			goto end;
@@ -409,7 +410,7 @@ end:
 		 * -1,  the  caller  must  clear  errno before the call of ptrace(2).
 		 */
 		errno = 0;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
+#ifdef ENABLE_SECCOMP_BPF
 		if (ptrace(exiting(pinfp) ? PTRACE_SYSCALL : PTRACE_CONT,
 					pinfp->pid, 0, sig) < 0) {
 			if (errno == ESRCH)
