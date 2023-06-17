@@ -107,25 +107,38 @@ static void install_seccomp()
 	 *   close(...),
 	 *   socket([AF_INET | AF_INET6], SOCK_STREAM, ...),
 	 *   connect(...),
-	 *   clone([CLONE_UNTRACED], ...)
+	 *   clone([CLONE_UNTRACED], ...) (only for x86_64)
 	 */
 	struct sock_filter filter[] = {
 		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
 				(offsetof(struct seccomp_data, nr))),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_close, 10, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_socket, 0, 5),
-		BPF_STMT(BPF_LD + BPF_W + BPF_ABS,
+#if defined(__x86_64__)
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close, 10, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket, 0, 5),
+		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
 				offsetof(struct seccomp_data, args[0])),
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AF_INET, 1, 0),
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AF_INET6, 0, 7),
 		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
 				offsetof(struct seccomp_data, args[1])),
 		BPF_JUMP(BPF_JMP | BPF_JSET | BPF_K, SOCK_STREAM, 4, 5),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_connect, 3, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_clone, 0, 3),
-		BPF_STMT(BPF_LD + BPF_W + BPF_ABS,
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect, 3, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_clone, 0, 3),
+		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
 				offsetof(struct seccomp_data, args[0])),
 		BPF_JUMP(BPF_JMP | BPF_JSET | BPF_K, CLONE_UNTRACED, 0, 1),
+#else
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close, 7, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket, 0, 5),
+		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
+				offsetof(struct seccomp_data, args[0])),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AF_INET, 1, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AF_INET6, 0, 4),
+		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
+				offsetof(struct seccomp_data, args[1])),
+		BPF_JUMP(BPF_JMP | BPF_JSET | BPF_K, SOCK_STREAM, 1, 2),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect, 0, 1),
+#endif
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
 	};
