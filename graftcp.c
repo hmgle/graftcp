@@ -1,6 +1,6 @@
 /*
  * graftcp
- * Copyright (C) 2016, 2018-2021 Hmgle <dustgle@gmail.com>
+ * Copyright (C) 2016, 2018-2023 Hmgle <dustgle@gmail.com>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,13 +14,23 @@
  */
 #include <stdio.h>
 #include <getopt.h>
+#include <stdlib.h>
+#include <linux/version.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
+#define ENABLE_SECCOMP_BPF
+#endif
+#ifdef ENABLE_SECCOMP_BPF
+#include <linux/seccomp.h>
+#include <linux/filter.h>
+#include <sys/prctl.h>
+#endif /* ifdef ENABLE_SECCOMP_BPF */
 
 #include "graftcp.h"
 #include "conf.h"
 #include "string-set.h"
 
 #ifndef VERSION
-#define VERSION "v0.5"
+#define VERSION "v0.6"
 #endif
 
 struct sockaddr_in PROXY_SA;
@@ -86,18 +96,68 @@ static bool is_ignore(const char *ip)
 	return false;
 }
 
+#ifdef ENABLE_SECCOMP_BPF
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
+#endif
+static void install_seccomp()
+{
+	/*
+	 * syscalls to trace, sort by frequency in desc order for most cases:
+	 *   close(...),
+	 *   socket([AF_INET | AF_INET6], SOCK_STREAM, ...),
+	 *   connect(...),
+	 *   clone([CLONE_UNTRACED], ...)
+	 */
+	struct sock_filter filter[] = {
+		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
+				(offsetof(struct seccomp_data, nr))),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_close, 10, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_socket, 0, 5),
+		BPF_STMT(BPF_LD + BPF_W + BPF_ABS,
+				offsetof(struct seccomp_data, args[0])),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AF_INET, 1, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AF_INET6, 0, 7),
+		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
+				offsetof(struct seccomp_data, args[1])),
+		BPF_JUMP(BPF_JMP | BPF_JSET | BPF_K, SOCK_STREAM, 4, 5),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_connect, 3, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_clone, 0, 3),
+		BPF_STMT(BPF_LD + BPF_W + BPF_ABS,
+				offsetof(struct seccomp_data, args[0])),
+		BPF_JUMP(BPF_JMP | BPF_JSET | BPF_K, CLONE_UNTRACED, 0, 1),
+		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
+		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+	};
+	struct sock_fprog prog = {
+		.len = (unsigned short)ARRAY_SIZE(filter),
+		.filter = filter,
+	};
+	if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) {
+		perror("prctl(PR_SET_NO_NEW_PRIVS)");
+		exit(errno);
+	}
+	if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog)) {
+		perror("prctl(PR_SET_SECCOMP)");
+		exit(errno);
+	}
+}
+#endif
+
 void socket_pre_handle(struct proc_info *pinfp)
 {
 	struct socket_info *si = calloc(1, sizeof(*si));
 	si->domain = get_syscall_arg(pinfp->pid, 0);
 	si->type = get_syscall_arg(pinfp->pid, 1);
 
+#ifndef ENABLE_SECCOMP_BPF
 	/* If not TCP socket, ignore */
 	if ((si->type & SOCK_STREAM) < 1
 	     || (si->domain != AF_INET && si->domain != AF_INET6)) {
 		free(si);
 		return;
 	}
+#endif
 	si->fd = -1;
 	si->magic_fd = ((uint64_t)MAGIC_FD << 31) + pinfp->pid;
 	add_socket_info(si);
@@ -229,6 +289,9 @@ void init(int argc, char **argv)
 		perror("fork");
 		exit(errno);
 	} else if (child == 0) {
+#ifdef ENABLE_SECCOMP_BPF
+		install_seccomp();
+#endif
 		do_child(argc, argv);
 	}
 	pi = alloc_proc_info(child);
@@ -312,6 +375,9 @@ int do_trace()
 
 			if (ptrace(PTRACE_SETOPTIONS, child, 0,
 				   PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXEC |
+#ifdef ENABLE_SECCOMP_BPF
+				   PTRACE_O_TRACESECCOMP |
+#endif
 				   PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK) <
 			    0) {
 				perror("ptrace");
@@ -319,10 +385,17 @@ int do_trace()
 			}
 		}
 		event = ((unsigned)status >> 16);
+#ifdef ENABLE_SECCOMP_BPF
+		if (event != 0 && event != PTRACE_EVENT_SECCOMP) {
+			sig = 0;
+			goto end;
+		}
+#else
 		if (event != 0) {
 			sig = 0;
 			goto end;
 		}
+#endif
 		if (WIFSIGNALED(status) || WIFEXITED(status)
 		    || !WIFSTOPPED(status)) {
 			exit_code = WEXITSTATUS(status);
@@ -353,11 +426,20 @@ end:
 		 * -1,  the  caller  must  clear  errno before the call of ptrace(2).
 		 */
 		errno = 0;
+#ifdef ENABLE_SECCOMP_BPF
+		if (ptrace(exiting(pinfp) ? PTRACE_SYSCALL : PTRACE_CONT,
+					pinfp->pid, 0, sig) < 0) {
+			if (errno == ESRCH)
+				continue;
+			return -1;
+		}
+#else
 		if (ptrace(PTRACE_SYSCALL, pinfp->pid, 0, sig) < 0) {
 			if (errno == ESRCH)
 				continue;
 			return -1;
 		}
+#endif
 	}
 	return 0;
 }

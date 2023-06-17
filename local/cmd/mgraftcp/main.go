@@ -10,6 +10,7 @@ package main
 //
 // int client_main(int argc, char **argv);
 import "C"
+
 import (
 	"bufio"
 	"fmt"
@@ -63,7 +64,7 @@ var (
 	help        bool
 	showVersion bool
 
-	version = "v0.5"
+	version = "v0.6"
 )
 
 func init() {
