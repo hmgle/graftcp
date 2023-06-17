@@ -1,6 +1,6 @@
 /*
  * graftcp
- * Copyright (C) 2016, 2018-2021 Hmgle <dustgle@gmail.com>
+ * Copyright (C) 2016, 2018-2023 Hmgle <dustgle@gmail.com>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -102,16 +102,30 @@ static bool is_ignore(const char *ip)
 #endif
 static void install_seccomp()
 {
+	/*
+	 * syscalls to trace, sort by frequency in desc order for most cases:
+	 *   close(...),
+	 *   socket([AF_INET | AF_INET6], SOCK_STREAM, ...),
+	 *   connect(...),
+	 *   clone([CLONE_UNTRACED], ...)
+	 */
 	struct sock_filter filter[] = {
 		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
 				(offsetof(struct seccomp_data, nr))),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_close, 0, 1),
-		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_socket, 0, 1),
-		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_connect, 0, 1),
-		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_clone, 0, 1),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_close, 10, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_socket, 0, 5),
+		BPF_STMT(BPF_LD + BPF_W + BPF_ABS,
+				offsetof(struct seccomp_data, args[0])),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AF_INET, 1, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AF_INET6, 0, 7),
+		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
+				offsetof(struct seccomp_data, args[1])),
+		BPF_JUMP(BPF_JMP | BPF_JSET | BPF_K, SOCK_STREAM, 4, 5),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_connect, 3, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_clone, 0, 3),
+		BPF_STMT(BPF_LD + BPF_W + BPF_ABS,
+				offsetof(struct seccomp_data, args[0])),
+		BPF_JUMP(BPF_JMP | BPF_JSET | BPF_K, CLONE_UNTRACED, 0, 1),
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
 	};
@@ -136,12 +150,14 @@ void socket_pre_handle(struct proc_info *pinfp)
 	si->domain = get_syscall_arg(pinfp->pid, 0);
 	si->type = get_syscall_arg(pinfp->pid, 1);
 
+#ifndef ENABLE_SECCOMP_BPF
 	/* If not TCP socket, ignore */
 	if ((si->type & SOCK_STREAM) < 1
 	     || (si->domain != AF_INET && si->domain != AF_INET6)) {
 		free(si);
 		return;
 	}
+#endif
 	si->fd = -1;
 	si->magic_fd = ((uint64_t)MAGIC_FD << 31) + pinfp->pid;
 	add_socket_info(si);
