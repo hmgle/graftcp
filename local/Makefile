@@ -30,7 +30,7 @@ graftcp-local: $(wildcard *.go cmd/graftcp-local/*.go)
 mgraftcp: $(wildcard *.go cmd/mgraftcp/*.go) ../libgraftcp.a
 	${GO_BUILD_PREFIX_FLAGS} ${CGO_FLAGS} go build -ldflags "-s -w -X main.version=${VERSION}" ./cmd/mgraftcp
 
-../libgraftcp.a:
+../libgraftcp.a::
 	$(MAKE) -C .. libgraftcp.a
 
 install:: $(TARGET)
