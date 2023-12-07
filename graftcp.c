@@ -12,6 +12,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
+#include <netinet/in.h>
 #include <stdio.h>
 #include <getopt.h>
 #include <stdlib.h>
@@ -86,11 +87,11 @@ static void load_whiteip_file(char *path)
 static bool is_ignore(uint32_t ip)
 {
 	if (BLACKLIST_IP) {
-		if (trie32_lookup(BLACKLIST_IP, ip))
+		if (trie32_lookup(BLACKLIST_IP, ntohl(ip)))
 			return true;
 	}
 	if (WHITELACKLIST_IP) {
-		if (!trie32_lookup(WHITELACKLIST_IP, ip))
+		if (!trie32_lookup(WHITELACKLIST_IP, ntohl(ip)))
 			return true;
 	}
 	return false;
