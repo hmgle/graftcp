@@ -221,3 +221,40 @@ int trie128_lookup(trie_t *trie, uint8_t *ip)
 	}
 	return TRIE_NO_VALUE;
 }
+
+cidr_trie_t *cidr_trie_new()
+{
+	cidr_trie_t *cidr_trie = calloc(1, sizeof(*cidr_trie));
+	cidr_trie->cidr4_trie = NULL;
+	cidr_trie->cidr6_trie = NULL;
+	return cidr_trie;
+}
+
+void cidr_trie_insert_str(cidr_trie_t *cidr_trie, const char *ipstr, int value)
+{
+	char *p;
+	p = strchr(ipstr, ':');
+	if (p) {
+		if (cidr_trie->cidr6_trie == NULL)
+			cidr_trie->cidr6_trie = trie_new();
+		trie128_insert_str(cidr_trie->cidr6_trie, ipstr, value);
+	} else {
+		if (cidr_trie->cidr4_trie == NULL)
+			cidr_trie->cidr4_trie = trie_new();
+		trie32_insert_str(cidr_trie->cidr4_trie, ipstr, value);
+	}
+}
+
+int cidr4_trie_lookup(cidr_trie_t *cidr_trie, uint32_t ip)
+{
+	if (cidr_trie->cidr4_trie == NULL)
+		return TRIE_NO_VALUE;
+	return trie32_lookup(cidr_trie->cidr4_trie, ip);
+}
+
+int cidr6_trie_lookup(cidr_trie_t *cidr_trie, uint8_t *ip)
+{
+	if (cidr_trie->cidr6_trie == NULL)
+		return TRIE_NO_VALUE;
+	return trie128_lookup(cidr_trie->cidr6_trie, ip);
+}
