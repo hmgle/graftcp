@@ -58,10 +58,10 @@ TARGET = graftcp $(GRAFTCP_LOCAL_BIN)
 all:: $(TARGET)
 
 
-graftcp: main.o graftcp.o util.o string-set.o conf.o
+graftcp: main.o graftcp.o util.o cidr-trie.o conf.o
 	$(CC) $^ -o $@
 
-libgraftcp.a: graftcp.o util.o string-set.o conf.o
+libgraftcp.a: graftcp.o util.o cidr-trie.o conf.o
 	$(AR) rcs $@ $^
 
 %.o: %.c

@@ -12,6 +12,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
+#include <netinet/in.h>
 #include <stdio.h>
 #include <getopt.h>
 #include <stdlib.h>
@@ -27,7 +28,7 @@
 
 #include "graftcp.h"
 #include "conf.h"
-#include "string-set.h"
+#include "cidr-trie.h"
 
 #ifndef VERSION
 #define VERSION "v0.6"
@@ -43,12 +44,12 @@ char *DEFAULT_LOCAL_PIPE_PAHT    = "/tmp/graftcplocal.fifo";
 bool DEFAULT_IGNORE_LOCAL        = true;
 int LOCAL_PIPE_FD;
 
-struct str_set *BLACKLIST_IP     = NULL;
-struct str_set *WHITELACKLIST_IP = NULL;
+cidr_trie_t *BLACKLIST_IP     = NULL;
+cidr_trie_t *WHITELACKLIST_IP = NULL;
 
 static int exit_code = 0;
 
-static void load_ip_file(char *path, struct str_set **set)
+static void load_ip_file(char *path, cidr_trie_t **trie)
 {
 	FILE *f;
 	char *line = NULL;
@@ -60,14 +61,12 @@ static void load_ip_file(char *path, struct str_set **set)
 		perror("fopen");
 		exit(1);
 	}
-	if (*set == NULL)
-		*set = str_set_new();
 	while ((read = getline(&line, &len, f)) != -1) {
 		/* 7 is the shortest ip: (x.x.x.x) */
 		if (read < 7)
 			continue;
 		line[read - 1] = '\0';
-		str_set_put(*set, line);
+		cidr_trie_insert_str(*trie, line, 1);
 		line = NULL;
 	}
 	fclose(f);
@@ -83,14 +82,27 @@ static void load_whiteip_file(char *path)
 	load_ip_file(path, &WHITELACKLIST_IP);
 }
 
-static bool is_ignore(const char *ip)
+static bool ip4_is_ignore(uint32_t ip)
 {
 	if (BLACKLIST_IP) {
-		if (is_str_set_member(BLACKLIST_IP, ip))
+		if (cidr4_trie_lookup(BLACKLIST_IP, ntohl(ip)))
 			return true;
 	}
 	if (WHITELACKLIST_IP) {
-		if (!is_str_set_member(WHITELACKLIST_IP, ip))
+		if (!cidr4_trie_lookup(WHITELACKLIST_IP, ntohl(ip)))
+			return true;
+	}
+	return false;
+}
+
+static bool ip6_is_ignore(uint8_t *ip)
+{
+	if (BLACKLIST_IP) {
+		if (cidr6_trie_lookup(BLACKLIST_IP, ip))
+			return true;
+	}
+	if (WHITELACKLIST_IP) {
+		if (!cidr6_trie_lookup(WHITELACKLIST_IP, ip))
 			return true;
 	}
 	return false;
@@ -197,16 +209,18 @@ void connect_pre_handle(struct proc_info *pinfp)
 		dest_ip_port = SOCKPORT(dest_sa);
 		dest_ip_addr.s_addr = SOCKADDR(dest_sa);
 		dest_ip_addr_str = inet_ntoa(dest_ip_addr);
+		if (ip4_is_ignore(dest_ip_addr.s_addr))
+			return;
 	} else if (dest_sa.sin_family == AF_INET6) { /* IPv6 */
 		getdata(pinfp->pid, addr, (char *)&dest_sa6, sizeof(dest_sa6));
 		dest_ip_port = SOCKPORT6(dest_sa6);
+		if (ip6_is_ignore(dest_sa6.sin6_addr.s6_addr))
+			return;
 		inet_ntop(AF_INET6, &dest_sa6.sin6_addr, dest_str, INET6_ADDRSTRLEN);
 		dest_ip_addr_str = dest_str;
 	} else {
 		return;
 	}
-	if (is_ignore(dest_ip_addr_str))
-		return;
 
 	if (dest_sa.sin_family == AF_INET) /* IPv4 */
 		putdata(pinfp->pid, addr, (char *)&PROXY_SA, sizeof(PROXY_SA));
@@ -563,9 +577,9 @@ int client_main(int argc, char **argv)
 		load_whiteip_file(conf.whiteip_file_path);
 	if (*conf.ignore_local) {
 		if (BLACKLIST_IP == NULL)
-			BLACKLIST_IP = str_set_new();
-		str_set_put(BLACKLIST_IP, conf.local_addr);
-		str_set_put(BLACKLIST_IP, LOCAL_DEFAULT_ADDR);
+			BLACKLIST_IP = cidr_trie_new();
+		cidr_trie_insert_str(BLACKLIST_IP, conf.local_addr, 1);
+		cidr_trie_insert_str(BLACKLIST_IP, LOCAL_DEFAULT_ADDR, 1);
 	}
 	PROXY_SA.sin_family = AF_INET;
 	PROXY_SA.sin_port = htons(*conf.local_port);
