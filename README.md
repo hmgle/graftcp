@@ -86,10 +86,10 @@ Options:
                     Path of fifo to communicate with graftcp-local.
                     Default: /tmp/graftcplocal.fifo
   -b --blackip-file=<black-ip-file-path>
-                    The IP in black-ip-file will connect direct
+                    The IP/CIDR in black-ip-file will connect direct
   -w --whiteip-file=<white-ip-file-path>
-                    Only redirect the connect that destination ip in the
-                    white-ip-file to SOCKS5
+                    Only redirect the connect that destination IP/CIDR in
+                    the white-ip-file to SOCKS5
   -n --not-ignore-local
                     Connecting to local is not changed by default, this
                     option will redirect it to SOCKS5
@@ -106,7 +106,7 @@ Options:
 Usage: mgraftcp [-hn] [-b value] [--enable-debug-log] [--http_proxy value] [--select_proxy_mode value] \
     [--socks5 value] [--socks5_password value] [--socks5_username value] [--version] [-w value] prog [prog-args]
  -b, --blackip-file=value
-                The IP in black-ip-file will connect direct
+                The IP/CIDR in black-ip-file will connect direct
      --enable-debug-log
                 enable debug log
  -h, --help     Display this help and exit
@@ -126,7 +126,7 @@ Usage: mgraftcp [-hn] [-b value] [--enable-debug-log] [--http_proxy value] [--se
                 SOCKS5 username
      --version  Print the mgraftcp version information
  -w, --whiteip-file=value
-                Only redirect the connect that destination ip in the
+                Only redirect the connect that destination IP/CIDR in the
                 white-ip-file to SOCKS5
 ```
 
