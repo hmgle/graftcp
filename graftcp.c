@@ -66,6 +66,8 @@ static void load_ip_file(char *path, cidr_trie_t **trie)
 		if (read < 7)
 			continue;
 		line[read - 1] = '\0';
+		if (*trie == NULL)
+			*trie = cidr_trie_new();
 		cidr_trie_insert_str(*trie, line, 1);
 		line = NULL;
 	}
