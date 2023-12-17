@@ -46,7 +46,7 @@ else
 endif
 
 ifneq ($(shell echo $(VERSION) | head -c 1), v)
-	VERSION=v0.6
+	VERSION=v0.7
 endif
 CFLAGS += -DVERSION=\"$(VERSION)\"
 
