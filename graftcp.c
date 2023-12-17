@@ -31,7 +31,7 @@
 #include "cidr-trie.h"
 
 #ifndef VERSION
-#define VERSION "v0.6"
+#define VERSION "v0.7"
 #endif
 
 struct sockaddr_in PROXY_SA;

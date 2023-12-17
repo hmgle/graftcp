@@ -64,7 +64,7 @@ var (
 	help        bool
 	showVersion bool
 
-	version = "v0.6"
+	version = "v0.7"
 )
 
 func init() {
