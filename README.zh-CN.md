@@ -25,8 +25,10 @@ make 执行完后，即可运行 `graftcp-local/graftcp-local` 和 `./graftcp`�
 
 ```sh
 sudo make install
-# Enable and activate systemed unit 
+# Install systemed unit
 sudo make install_systemd
+# Activate systemd service
+sudo make enable_systemd
 ```
 
 ### 二进制包安装

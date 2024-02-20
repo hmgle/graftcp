@@ -31,8 +31,10 @@ Optionally, you can also install them to system:
 
 ```sh
 sudo make install
-# Enable and activate systemed unit 
+# Install systemed unit
 sudo make install_systemd
+# Activate systemd service
+sudo make enable_systemd
 ```
 
 ### Install from binary package
