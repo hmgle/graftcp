@@ -46,13 +46,17 @@ install_systemd:: install
 ifneq ($(PREFIX),/usr/)
 	sed -i -re 's#/usr/bin/graftcp-local#$(subst #,\#,${PREFIX})/bin/graftcp-local#g' ${DESTDIR}/${SYSTEMD_UNIT_DIR}/graftcp-local.service
 endif
+
+enable_systemd::
 	@echo "Enable and start the graftcp-local systemd unit"
 	systemctl daemon-reload && systemctl --now enable graftcp-local.service
 
-uninstall_systemd::
-	$(if $(SYSTEMD_UNIT_DIR),,$(error SYSTEMD_UNIT_DIR is not defined))
+disable_systemd::
 	@echo "Disable and stop the graftcp-local systemd unit"
 	systemctl disable --now graftcp-local.service
+
+uninstall_systemd:: disable_systemd
+	$(if $(SYSTEMD_UNIT_DIR),,$(error SYSTEMD_UNIT_DIR is not defined))
 	rm -f ${DESTDIR}/${SYSTEMD_UNIT_DIR}/graftcp-local.service
 
 uninstall::
