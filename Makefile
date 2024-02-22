@@ -67,8 +67,11 @@ libgraftcp.a: graftcp.o util.o cidr-trie.o conf.o
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(GRAFTCP_LOCAL_BIN)::
-	$(MAKE) -C local VERSION=$(VERSION) CC=$(CC) CXX=$(CXX) AR=$(AR)
+local/graftcp-local:
+	$(MAKE) -C $(dir $@) VERSION=$(VERSION) CC=$(CC) CXX=$(CXX) AR=$(AR) $(notdir $@)
+
+local/mgraftcp: libgraftcp.a
+	$(MAKE) -C $(dir $@) VERSION=$(VERSION) CC=$(CC) CXX=$(CXX) AR=$(AR) $(notdir $@)
 
 install:: graftcp $(GRAFTCP_LOCAL_BIN)
 	$(INSTALL) $< $(DESTDIR)$(BINDIR)/$<
