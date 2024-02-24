@@ -55,7 +55,8 @@ SRC := $(wildcard *.c)
 GRAFTCP_LOCAL_BIN = local/graftcp-local local/mgraftcp
 TARGET = graftcp $(GRAFTCP_LOCAL_BIN)
 
-all:: $(TARGET)
+.PHONY: all clean
+all: $(TARGET)
 
 
 graftcp: main.o graftcp.o util.o cidr-trie.o conf.o
@@ -73,30 +74,31 @@ local/graftcp-local:
 local/mgraftcp: libgraftcp.a
 	$(MAKE) -C $(dir $@) VERSION=$(VERSION) CC=$(CC) CXX=$(CXX) AR=$(AR) $(notdir $@)
 
-install:: graftcp $(GRAFTCP_LOCAL_BIN)
+.PHONY: install uninstall install_graftcp uninstall_graftcp install_graftcp_local uninstall_graftcp_local
+
+install: graftcp $(GRAFTCP_LOCAL_BIN)
 	$(INSTALL) $< $(DESTDIR)$(BINDIR)/$<
 	$(MAKE) -C local $@
 
-uninstall::
+uninstall:
 	-rm -f $(DESTDIR)$(BINDIR)/graftcp
 	$(MAKE) -C local $@
 
-install_graftcp:: graftcp
+install_graftcp: graftcp
 	$(INSTALL) $< $(DESTDIR)$(BINDIR)/$<
 
-uninstall_graftcp::
+uninstall_graftcp:
 	-rm -f $(DESTDIR)$(BINDIR)/graftcp
 
-install_systemd::
-	$(MAKE) -C local install_systemd
+.PHONY: install_systemd enable_systemd disable_systemd uninstall_systemd
 
-uninstall_systemd::
-	$(MAKE) -C local uninstall_systemd
+%_systemd:
+	$(MAKE) -C local $@
 
-install_graftcp_local::
+install_graftcp_local:
 	$(MAKE) -C local install
 
-uninstall_graftcp_local::
+uninstall_graftcp_local:
 	$(MAKE) -C local uninstall
 
 sinclude $(SRC:.c=.d)
@@ -107,6 +109,6 @@ sinclude $(SRC:.c=.d)
 		sed 's,\(.*\)\.o[:]*,\1.o $@:,' < $@.$$$$ > $@; \
 		rm -f $@.$$$$
 
-clean::
+clean:
 	-rm -f *.o *.a graftcp *.d
 	$(MAKE) -C local $@
