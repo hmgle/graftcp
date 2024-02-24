@@ -22,7 +22,7 @@ INSTALL = install -D
 
 TARGET = graftcp-local mgraftcp
 
-.PHONY: all clean ../libgraftcp.a install install_systemd enable_systemd disable_systemd uninstall_systemd uninstall install_service uninstall_service
+.PHONY: all clean install install_systemd enable_systemd disable_systemd uninstall_systemd uninstall install_service uninstall_service
 
 all: $(TARGET)
 
@@ -32,7 +32,7 @@ graftcp-local: $(wildcard *.go cmd/graftcp-local/*.go)
 mgraftcp: $(wildcard *.go cmd/mgraftcp/*.go) ../libgraftcp.a
 	${GO_BUILD_PREFIX_FLAGS} ${CGO_FLAGS} go build -ldflags "-s -w -X main.version=${VERSION}" ./cmd/mgraftcp
 
-../libgraftcp.a:
+../libgraftcp.a::
 	$(MAKE) -C .. libgraftcp.a
 
 install: $(TARGET)
