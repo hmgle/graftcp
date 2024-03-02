@@ -1,5 +1,5 @@
 # "Makefile" for graftcp.
-# Copyright (C) 2016, 2018, 2020, 2021, 2023 Hmgle <dustgle@gmail.com>
+# Copyright (C) 2016, 2018, 2020, 2021, 2023, 2024 Hmgle <dustgle@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,7 +19,8 @@ ifneq ($(KERNEL), Linux)
 $(error only support Linux now.)
 endif
 
-VERSION = $(shell git describe --tags --always)
+VERSION = $(shell git rev-parse --is-inside-work-tree 1>/dev/null 2>&1 && \
+             git describe --tags --always || echo "v0.7")
 
 # CROSS_COMPILE can be set on the command line
 # make CROSS_COMPILE=arm-linux-gnueabi-
@@ -45,9 +46,6 @@ else
 	CFLAGS += -O2 -DNDEBUG
 endif
 
-ifneq ($(shell echo $(VERSION) | head -c 1), v)
-	VERSION=v0.7
-endif
 CFLAGS += -DVERSION=\"$(VERSION)\"
 
 SRC := $(wildcard *.c)
