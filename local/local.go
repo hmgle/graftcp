@@ -2,6 +2,7 @@ package local
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -167,7 +168,9 @@ func (l *Local) StartService(ln *net.TCPListener) {
 	for {
 		conn, err := ln.AcceptTCP()
 		if err != nil {
-			log.Errorf("accept err: %s", err.Error())
+			if !errors.Is(err, net.ErrClosed) {
+				log.Errorf("accept err: %s", err.Error())
+			}
 			break
 		}
 		go l.HandleConn(conn)
