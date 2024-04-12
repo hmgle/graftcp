@@ -90,7 +90,7 @@ uninstall_graftcp:
 
 .PHONY: install_systemd enable_systemd disable_systemd uninstall_systemd
 
-%_systemd:
+install_systemd enable_systemd disable_systemd uninstall_systemd:
 	$(MAKE) -C local $@
 
 install_graftcp_local:
