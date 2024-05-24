@@ -91,7 +91,7 @@ func getInodeByAddrs(localAddr, remoteAddr string, isTCP6 bool) (inode string, e
 	if err != nil {
 		return "", err
 	}
-	return getInode(localIPHex+":"+localPortHex, remoteIPHex+":"+remotePortHex, isTCP6), nil
+	return getInode(localIPHex+":"+localPortHex, remoteIPHex+":"+remotePortHex, isTCP6)
 }
 
 // addr format: "127.0.0.1:53816"
@@ -122,7 +122,7 @@ func splitAddrIPv6(addr string) (ipv6 string, port string, err error) {
 }
 
 // getInode get the inode, localAddrHex format: 0100007F:04D2
-func getInode(localAddrHex, remoteAddrHex string, isTCP6 bool) (inode string) {
+func getInode(localAddrHex, remoteAddrHex string, isTCP6 bool) (inode string, err error) {
 	var path string
 	if isTCP6 {
 		path = "/proc/net/tcp6"
@@ -131,12 +131,11 @@ func getInode(localAddrHex, remoteAddrHex string, isTCP6 bool) (inode string) {
 	}
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		return "", fmt.Errorf("failed to read file: %w", err)
 	}
 	lines := strings.Split(string(data), "\n")
 	if len(lines) == 0 {
-		return ""
+		return "", fmt.Errorf("bad format: %s", data)
 	}
 
 	// skip the first header line
@@ -147,10 +146,10 @@ func getInode(localAddrHex, remoteAddrHex string, isTCP6 bool) (inode string) {
 		}
 		if strings.Contains(fields[1] /* local address:port */, localAddrHex) &&
 			strings.Contains(fields[2] /* remote address:port */, remoteAddrHex) {
-			return fields[9] // fields[9] is inode
+			return fields[9], nil // fields[9] is inode
 		}
 	}
-	return ""
+	return "", fmt.Errorf("no inode for [%s %s]", localAddrHex, remoteAddrHex)
 }
 
 func hasIncludeInode(pid, inode string) bool {

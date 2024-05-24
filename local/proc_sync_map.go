@@ -1,8 +1,13 @@
+//go:build go1.9
 // +build go1.9
 
 package local
 
-import "sync"
+import (
+	"fmt"
+	"strings"
+	"sync"
+)
 
 var pidAddrMap sync.Map
 
@@ -37,4 +42,15 @@ func RangePidAddr(f func(pid, addr string) bool) {
 		return f(p, a)
 	}
 	pidAddrMap.Range(f2)
+}
+
+func PidAddrMapToString() string {
+	var buf strings.Builder
+	buf.WriteString("pidAddrMap: {\n")
+	pidAddrMap.Range(func(k, v interface{}) bool {
+		buf.WriteString(fmt.Sprintf("\t%v: %v\n", k, v))
+		return true
+	})
+	buf.WriteString("}")
+	return buf.String()
 }

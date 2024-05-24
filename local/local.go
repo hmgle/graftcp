@@ -206,6 +206,7 @@ func getPidByAddr(localAddr, remoteAddr string, isTCP6 bool) (pid string, destAd
 		time.Sleep(20 * time.Millisecond)
 	}
 	if pid != "" {
+		log.Debugf("DeletePidAddr(%s)", pid)
 		DeletePidAddr(pid)
 	}
 	return
@@ -218,8 +219,10 @@ func (l *Local) HandleConn(conn net.Conn) error {
 	if strings.Contains(conn.LocalAddr().String(), "[") {
 		isTCP6 = true
 	}
+	log.Debugf("----- %s", PidAddrMapToString())
 	pid, destAddr := getPidByAddr(raddr.String(), conn.LocalAddr().String(), isTCP6)
 	if pid == "" || destAddr == "" {
+		log.Debugf("pidMap: %s", PidAddrMapToString())
 		log.Errorf("getPidByAddr(%s, %s) failed", raddr.String(), conn.LocalAddr().String())
 		conn.Close()
 		return fmt.Errorf("can't find the pid and destAddr for %s", raddr.String())
@@ -270,6 +273,7 @@ func (l *Local) UpdateProcessAddrInfo() {
 			break
 		}
 		copyLine := string(line)
+		log.Debugf("connect req[dest-addr:pid]: %s", line)
 		// dest_ipaddr:dest_port:pid
 		s := strings.Split(copyLine, ":")
 		if len(s) < 3 {
@@ -289,7 +293,10 @@ func (l *Local) UpdateProcessAddrInfo() {
 			pid = s[2]
 			addr = s[0] + ":" + s[1]
 		}
-		go StorePidAddr(pid, addr)
+		go func() {
+			StorePidAddr(pid, addr)
+			log.Debugf("StorePidAddr(%s, %s)", pid, addr)
+		}()
 	}
 }
 
