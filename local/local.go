@@ -289,7 +289,10 @@ func (l *Local) UpdateProcessAddrInfo() {
 			pid = s[2]
 			addr = s[0] + ":" + s[1]
 		}
-		go StorePidAddr(pid, addr)
+		go func() {
+			StorePidAddr(pid, addr)
+			log.Debugf("StorePidAddr(%s, %s)", pid, addr)
+		}()
 	}
 }
 
