@@ -90,9 +90,12 @@ static const struct graftcp_config_t *graftcp_getconfig(const char *key)
 {
 	int i;
 
-	for (i = 0; i < config_size; i++)
-		if (!strncmp(config[i].name, key, strlen(config[i].name)))
+#define MAX(a,b) (((a)>(b))?(a):(b))
+	for (i = 0; i < config_size; i++) {
+		if (!strncmp(config[i].name, key, MAX(strlen(config[i].name), strlen(key))))
 			return &config[i];
+	}
+#undef MAX
 	return NULL;
 }
 
@@ -120,8 +123,9 @@ static int right_space(char *buf, size_t len)
 {
 	int i;
 	for (i = len - 1; i >= 0; i--)
-		if (buf[i] != ' ' && buf[i] != '\t' && buf[i] != '\0')
-			return i;
+		if (buf[i] != ' ' && buf[i] != '\t' && buf[i] != '\0' &&
+		    buf[i] != '\n' && buf[i] != '\r')
+			return i + 1;
 	return 0;
 }
 
