@@ -241,10 +241,7 @@ func getPidByAddr(localAddr, remoteAddr string, isTCP6 bool) (pid string, destAd
 // HandleConn handle conn.
 func (l *Local) HandleConn(conn net.Conn) error {
 	raddr := conn.RemoteAddr()
-	var isTCP6 bool
-	if strings.Contains(conn.LocalAddr().String(), "[") {
-		isTCP6 = true
-	}
+	isTCP6 := strings.Contains(conn.LocalAddr().String(), "[")
 	pid, destAddr := getPidByAddr(raddr.String(), conn.LocalAddr().String(), isTCP6)
 	if pid == "" || destAddr == "" {
 		log.Errorf("getPidByAddr(%s, %s) failed", raddr.String(), conn.LocalAddr().String())
