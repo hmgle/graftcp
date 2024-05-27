@@ -185,7 +185,7 @@ func (l *Local) Start() {
 	l.StartService(ln)
 }
 
-func getPidByAddr(localAddr, remoteAddr string, isTCP6 bool) (pid string, destAddr string) {
+func _getPidByAddr(localAddr, remoteAddr string, isTCP6 bool) (pid string, destAddr string) {
 	inode, err := getInodeByAddrs(localAddr, remoteAddr, isTCP6)
 	if err != nil {
 		log.Errorf("getInodeByAddrs(%s, %s) err: %s", localAddr, remoteAddr, err.Error())
@@ -209,6 +209,33 @@ func getPidByAddr(localAddr, remoteAddr string, isTCP6 bool) (pid string, destAd
 		DeletePidAddr(pid)
 	}
 	return
+}
+
+func getPidByAddr(localAddr, remoteAddr string, isTCP6 bool) (pid string, destAddr string) {
+	pid, destAddr = _getPidByAddr(localAddr, remoteAddr, isTCP6)
+	if pid == "" || destAddr == "" {
+		// NOTE: There are some unusual cases that can cause the above _getPidByAddr
+		// to fail to obtain the pid and destAddr.
+		// For example: The Source IP Address field in the IP packet header has been
+		// rewritten (iptables, nftables, and eBPF can all do this).
+		// In this case, we try again using "127.0.0.1"(::1 for IPv6).
+		// However, if the client binds to another IP (which is also unusual) before
+		// the connect call, rather than "127.0.0.1", then the retrieval will also fail.
+		// Although the pidAddrMap does store the pid and destAddr information we're
+		// looking for, it cannot guarantee correctness in concurrent situations,
+		// so we're not planning to use the information in pidAddrMap directly for now.
+		var localIP string
+		if isTCP6 {
+			localIP = localIPv6
+		} else {
+			localIP = localIPv4
+		}
+		host, port, err := splitAddr(localAddr, isTCP6)
+		if err == nil && host != localIP {
+			pid, destAddr = _getPidByAddr(net.JoinHostPort(localIP, port), remoteAddr, isTCP6)
+		}
+	}
+	return pid, destAddr
 }
 
 // HandleConn handle conn.
