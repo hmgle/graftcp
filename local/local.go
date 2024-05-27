@@ -214,11 +214,11 @@ func _getPidByAddr(localAddr, remoteAddr string, isTCP6 bool) (pid string, destA
 func getPidByAddr(localAddr, remoteAddr string, isTCP6 bool) (pid string, destAddr string) {
 	pid, destAddr = _getPidByAddr(localAddr, remoteAddr, isTCP6)
 	if pid == "" || destAddr == "" {
-		// NOTE: There are some unusual cases that can cause the above getPidByAddr
+		// NOTE: There are some unusual cases that can cause the above _getPidByAddr
 		// to fail to obtain the pid and destAddr.
 		// For example: The Source IP Address field in the IP packet header has been
 		// rewritten (iptables, nftables, and eBPF can all do this).
-		// In this case, we try again using "127.0.0.1".
+		// In this case, we try again using "127.0.0.1"(::1 for IPv6).
 		// However, if the client binds to another IP (which is also unusual) before
 		// the connect call, rather than "127.0.0.1", then the retrieval will also fail.
 		// Although the pidAddrMap does store the pid and destAddr information we're
