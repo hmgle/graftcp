@@ -65,19 +65,11 @@ func getInodeByAddrs(localAddr, remoteAddr string, isTCP6 bool) (inode string, e
 		remoteIP   string
 		remotePort string
 	)
-	if isTCP6 {
-		localIP, localPort, err = splitAddrIPv6(localAddr)
-	} else {
-		localIP, localPort, err = splitAddrIPv4(localAddr)
-	}
+	localIP, localPort, err = splitAddr(localAddr, isTCP6)
 	if err != nil {
 		return
 	}
-	if isTCP6 {
-		remoteIP, remotePort, err = splitAddrIPv6(remoteAddr)
-	} else {
-		remoteIP, remotePort, err = splitAddrIPv4(remoteAddr)
-	}
+	remoteIP, remotePort, err = splitAddr(remoteAddr, isTCP6)
 	if err != nil {
 		return
 	}
@@ -94,6 +86,11 @@ func getInodeByAddrs(localAddr, remoteAddr string, isTCP6 bool) (inode string, e
 	return getInode(localIPHex+":"+localPortHex, remoteIPHex+":"+remotePortHex, isTCP6)
 }
 
+const (
+	localIPv4 = "127.0.0.1"
+	localIPv6 = "[::1]"
+)
+
 // addr format: "127.0.0.1:53816"
 func splitAddrIPv4(addr string) (ipv4 string, port string, err error) {
 	addrSplit := strings.Split(addr, ":")
@@ -103,7 +100,7 @@ func splitAddrIPv4(addr string) (ipv4 string, port string, err error) {
 	}
 	ipv4 = addrSplit[0]
 	if ipv4 == "" {
-		ipv4 = "127.0.0.1"
+		ipv4 = localIPv4
 	}
 	port = addrSplit[1]
 	return
@@ -119,6 +116,13 @@ func splitAddrIPv6(addr string) (ipv6 string, port string, err error) {
 	ipv6 = addr[1:sep]
 	port = addr[sep+2:]
 	return
+}
+
+func splitAddr(addr string, isTCP6 bool) (ip string, port string, err error) {
+	if isTCP6 {
+		return splitAddrIPv6(addr)
+	}
+	return splitAddrIPv4(addr)
 }
 
 // getInode get the inode, localAddrHex format: 0100007F:04D2
