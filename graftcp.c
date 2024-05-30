@@ -16,6 +16,8 @@
 #include <stdio.h>
 #include <getopt.h>
 #include <stdlib.h>
+#include <pwd.h>
+#include <grp.h>
 #include <linux/version.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
 #define ENABLE_SECCOMP_BPF
@@ -46,6 +48,10 @@ int LOCAL_PIPE_FD;
 
 cidr_trie_t *BLACKLIST_IP     = NULL;
 cidr_trie_t *WHITELACKLIST_IP = NULL;
+
+
+static uid_t run_uid;
+static gid_t run_gid;
 
 static int exit_code = 0;
 
@@ -308,7 +314,7 @@ void do_child(int argc, char **argv)
 	}
 }
 
-void init(int argc, char **argv)
+void init(struct graftcp_conf *conf, int argc, char **argv)
 {
 	pid_t child;
 	struct proc_info *pi;
@@ -318,6 +324,21 @@ void init(int argc, char **argv)
 		perror("fork");
 		exit(errno);
 	} else if (child == 0) {
+		if (conf->username) {
+			if (initgroups(conf->username, run_gid) < 0) {
+				perror("initgroups");
+				exit(errno);
+			}
+
+			if (setregid(run_gid, run_gid) < 0) {
+				perror("setregid");
+				exit(errno);
+			}
+			if (setreuid(run_uid, run_uid) < 0) {
+				perror("setreuid");
+				exit(errno);
+			}
+		}
 #ifdef ENABLE_SECCOMP_BPF
 		install_seccomp();
 #endif
@@ -495,6 +516,8 @@ static void usage(char **argv)
 		"  -n --not-ignore-local\n"
 		"                    Connecting to local is not changed by default, this\n"
 		"                    option will redirect it to SOCKS5\n"
+		"  -u --user=<username>\n"
+		"                    Run command as USERNAME handling setuid and/or setgid\n"
 		"  -V --version\n"
 		"                    Show version\n"
 		"  -h --help\n"
@@ -514,6 +537,7 @@ int client_main(int argc, char **argv)
 		{"local-fifo", required_argument, 0, 'f'},
 		{"blackip-file", required_argument, 0, 'b'},
 		{"whiteip-file", required_argument, 0, 'w'},
+		{"user", required_argument, 0, 'u'},
 		{"not-ignore-local", no_argument, 0, 'n'},
 		{0, 0, 0, 0}
 	};
@@ -525,6 +549,7 @@ int client_main(int argc, char **argv)
 		.blackip_file_path      = NULL,
 		.whiteip_file_path      = NULL,
 		.ignore_local           = &DEFAULT_IGNORE_LOCAL,
+		.username               = NULL,
 	};
 
 	__defer_free char *conf_file_path = NULL;
@@ -533,7 +558,7 @@ int client_main(int argc, char **argv)
 	conf_init(&file_conf);
 	conf_init(&cmd_conf);
 
-	while ((opt = getopt_long(argc, argv, "+Vha:p:f:b:w:c:n", long_opts,
+	while ((opt = getopt_long(argc, argv, "+Vha:p:f:b:w:c:u:n", long_opts,
 			    	&index)) != -1) {
 		switch (opt) {
 		case 'a':
@@ -558,6 +583,9 @@ int client_main(int argc, char **argv)
 			break;
 		case 'c':
 			conf_file_path = strdup(optarg);
+			break;
+		case 'u':
+			cmd_conf.username = strdup(optarg);
 			break;
 		case 'V':
 			fprintf(stderr, "graftcp %s\n", VERSION);
@@ -609,7 +637,23 @@ int client_main(int argc, char **argv)
 		exit(errno);
 	}
 
-	init(argc - optind, argv + optind);
+	if (conf.username) {
+		struct passwd *pent;
+
+		if (getuid() != 0 || geteuid() != 0) {
+			fprintf(stderr, "You must be root to use the -u option\n");
+			exit(1);
+		}
+		pent = getpwnam(conf.username);
+		if (pent == NULL) {
+			fprintf(stderr, "Cannot find user '%s'\n", conf.username);
+			exit(1);
+		}
+		run_gid = pent->pw_gid;
+		run_uid = pent->pw_uid;
+	}
+
+	init(&conf, argc - optind, argv + optind);
 	if (do_trace() < 0)
 		return -1;
 	return exit_code;
