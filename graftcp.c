@@ -291,7 +291,7 @@ void socket_exiting_handle(struct proc_info *pinfp, int fd)
 	add_socket_info(si);
 }
 
-void do_child(int argc, char **argv)
+void do_child(struct graftcp_conf *conf, int argc, char **argv)
 {
 	char *args[argc + 1];
 	int i;
@@ -301,6 +301,22 @@ void do_child(int argc, char **argv)
 		args[i] = argv[i];
 	args[argc] = NULL;
 	ptrace(PTRACE_TRACEME, 0, NULL, NULL);
+	if (conf->username) {
+		if (initgroups(conf->username, run_gid) < 0) {
+			perror("initgroups");
+			exit(errno);
+		}
+
+		if (setregid(run_gid, run_gid) < 0) {
+			perror("setregid");
+			exit(errno);
+		}
+		if (setreuid(run_uid, run_uid) < 0) {
+			perror("setreuid");
+			exit(errno);
+		}
+	}
+
 	pid = getpid();
 	/*
 	 * Induce a ptrace stop. Tracer (our parent)
@@ -324,25 +340,10 @@ void init(struct graftcp_conf *conf, int argc, char **argv)
 		perror("fork");
 		exit(errno);
 	} else if (child == 0) {
-		if (conf->username) {
-			if (initgroups(conf->username, run_gid) < 0) {
-				perror("initgroups");
-				exit(errno);
-			}
-
-			if (setregid(run_gid, run_gid) < 0) {
-				perror("setregid");
-				exit(errno);
-			}
-			if (setreuid(run_uid, run_uid) < 0) {
-				perror("setreuid");
-				exit(errno);
-			}
-		}
 #ifdef ENABLE_SECCOMP_BPF
 		install_seccomp();
 #endif
-		do_child(argc, argv);
+		do_child(conf, argc, argv);
 	}
 	pi = alloc_proc_info(child);
 	pi->flags |= FLAG_STARTUP;
