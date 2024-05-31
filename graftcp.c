@@ -166,14 +166,28 @@ static void install_seccomp()
 		.len = (unsigned short)ARRAY_SIZE(filter),
 		.filter = filter,
 	};
-	if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) {
-		perror("prctl(PR_SET_NO_NEW_PRIVS)");
-		exit(errno);
+	if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog) == 0)
+		return;
+	if (errno == EACCES) {
+		/*
+		 * https://www.kernel.org/doc/Documentation/prctl/no_new_privs.txt
+		 *  Filters installed for the seccomp mode 2 sandbox persist across
+		 *  execve and can change the behavior of newly-executed programs.
+		 *  Unprivileged users are therefore only allowed to install such filters
+		 *  if no_new_privs is set.
+		 */
+		if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) {
+			perror("prctl(PR_SET_NO_NEW_PRIVS)");
+			exit(errno);
+		}
+		if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog)) {
+			perror("prctl(PR_SET_SECCOMP)");
+			exit(errno);
+		}
+		return;
 	}
-	if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog)) {
-		perror("prctl(PR_SET_SECCOMP)");
-		exit(errno);
-	}
+	perror("prctl(PR_SET_SECCOMP)");
+	exit(errno);
 }
 #endif
 
