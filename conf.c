@@ -171,6 +171,7 @@ int conf_init(struct graftcp_conf *conf)
 	conf->blackip_file_path = NULL;
 	conf->whiteip_file_path = NULL;
 	conf->ignore_local = NULL;
+	conf->username = NULL;
 	return 0;
 }
 
@@ -199,6 +200,10 @@ void conf_free(struct graftcp_conf *conf)
 	if (conf->ignore_local) {
 		free(conf->ignore_local);
 		conf->ignore_local = NULL;
+	}
+	if (conf->username) {
+		free(conf->username);
+		conf->username = NULL;
 	}
 }
 
@@ -283,4 +288,6 @@ void conf_override(struct graftcp_conf *w, const struct graftcp_conf *r)
 		w->whiteip_file_path = r->whiteip_file_path;
 	if (r->ignore_local)
 		w->ignore_local = r->ignore_local;
+	if (r->username)
+		w->username = r->username;
 }

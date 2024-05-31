@@ -58,6 +58,7 @@ var (
 
 	blackIPFile    string
 	whiteIPFile    string
+	userName       string
 	notIgnoreLocal bool
 	enableDebugLog bool
 
@@ -79,6 +80,7 @@ func init() {
 	getopt.FlagLong(&blackIPFile, "blackip-file", 'b', "The IP in black-ip-file will connect direct")
 	getopt.FlagLong(&whiteIPFile, "whiteip-file", 'w', "Only redirect the connect that destination ip in the white-ip-file to SOCKS5")
 	getopt.FlagLong(&notIgnoreLocal, "not-ignore-local", 'n', "Connecting to local is not changed by default, this option will redirect it to SOCKS5")
+	getopt.FlagLong(&userName, "username", 'u', "Run command as USERNAME handling setuid and/or setgid")
 	getopt.FlagLong(&help, "help", 'h', "Display this help and exit")
 	getopt.FlagLong(&showVersion, "version", 0, "Print the mgraftcp version information")
 }
@@ -240,6 +242,9 @@ func main() {
 	}
 	if whiteIPFile != "" {
 		fixArgs = append(fixArgs, "-w", whiteIPFile)
+	}
+	if userName != "" {
+		fixArgs = append(fixArgs, "-u", userName)
 	}
 	if notIgnoreLocal {
 		fixArgs = append(fixArgs, "-n")
