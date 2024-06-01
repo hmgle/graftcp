@@ -1,6 +1,6 @@
 /*
  * graftcp
- * Copyright (C) 2016, 2018-2023 Hmgle <dustgle@gmail.com>
+ * Copyright (C) 2016, 2018-2024 Hmgle <dustgle@gmail.com>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -52,6 +52,7 @@ cidr_trie_t *WHITELACKLIST_IP = NULL;
 
 static uid_t run_uid;
 static gid_t run_gid;
+static char *run_home;
 
 static int exit_code = 0;
 
@@ -329,6 +330,8 @@ void do_child(struct graftcp_conf *conf, int argc, char **argv)
 			perror("setreuid");
 			exit(errno);
 		}
+		if (setenv("HOME", run_home, 1) < 0)
+			perror("setenv");
 	}
 
 	pid = getpid();
@@ -655,7 +658,7 @@ int client_main(int argc, char **argv)
 	if (conf.username) {
 		struct passwd *pent;
 
-		if (getuid() != 0 || geteuid() != 0) {
+		if (geteuid() != 0) {
 			fprintf(stderr, "You must be root to use the -u option\n");
 			exit(1);
 		}
@@ -666,6 +669,7 @@ int client_main(int argc, char **argv)
 		}
 		run_gid = pent->pw_gid;
 		run_uid = pent->pw_uid;
+		run_home = strdup(pent->pw_dir);
 	}
 
 	init(&conf, argc - optind, argv + optind);
