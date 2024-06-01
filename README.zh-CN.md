@@ -89,6 +89,8 @@ Options:
   -n --not-ignore-local
                     Connecting to local is not changed by default, this
                     option will redirect it to SOCKS5
+  -u --user=<username>
+                    Run command as USERNAME handling setuid and/or setgid
   -V --version
                     Show version
   -h --help
@@ -119,6 +121,8 @@ Usage: mgraftcp [-hn] [-b value] [--enable-debug-log] [--http_proxy value] [--se
                 SOCKS5 password
      --socks5_username=value
                 SOCKS5 username
+ -u, --username=value
+                Run command as USERNAME handling setuid and/or setgid
      --version  Print the mgraftcp version information
  -w, --whiteip-file=value
                 Only redirect the connect that destination IP/CIDR in the
@@ -164,6 +168,7 @@ $ wget https://www.google.com
 ![demo](demo.gif)
 
 <a id="principles"></a>
+
 ## 工作原理
 
 要达到重定向一个 app 发起的的 TCP 连接到其他目标地址并且该 app 本身对此毫无感知的目的，大概需要这些条件：
@@ -172,7 +177,7 @@ $ wget https://www.google.com
 - 修改这次 `connect(2)` 系统调用的目标地址参数为 `graftcp-local` 的地址，然后恢复执行被中断的系统调用。返回成功后，这个程序以为自己连的是原始的地址，但其实连的是 `graftcp-local` 的地址。这个就叫“移花接木”。
 - `graftcp-local` 根据连接信息和目标地址信息，与 SOCKS5 proxy 建立连接，把 app 的请求的数据重定向到 SOCKS5 proxy。
 
-这里可能有个疑问：既然可以修改任何系统调用的参数，那么通过修改 app 的 `write(2)` / `send(2)` 的参数，直接往 `buffer` 里面附加原始目标地址信息给 `graftcp-local` 不是更简单吗？答案是这无法做到。如果直接往运行在子进程的被跟踪程序的 `buffer` 添加信息，可能会造成缓冲区溢出，造成程序崩溃或者覆盖了其他数据。  
+这里可能有个疑问：既然可以修改任何系统调用的参数，那么通过修改 app 的 `write(2)` / `send(2)` 的参数，直接往 `buffer` 里面附加原始目标地址信息给 `graftcp-local` 不是更简单吗？答案是这无法做到。如果直接往运行在子进程的被跟踪程序的 `buffer` 添加信息，可能会造成缓冲区溢出，造成程序崩溃或者覆盖了其他数据。
 另外，[`execve(2)` 会分离所有的共享内存](http://man7.org/linux/man-pages/man2/execve.2.html)，所以也不能通过共享内存的方式让被跟踪的 app 的 `write` buffer 携带更多的数据，因此这里采用管道方式给 `graftcp-local` 传递原始的目标地址信息。
 
 简单的流程如下：
@@ -205,7 +210,7 @@ $ wget https://www.google.com
 
 全局式：比如使用 `iptables` + `RedSocks` 可以把系统符合一定规则的流量转换为 SOCKS5 流量。这种方式的优点是全局有效；缺点是所有满足该规则的流量都被重定向了，影响范围较大。
 
-设置环境变量方式：一些程序启动时会读取 proxy 相关的环境变量来决定是否将自己的数据转换为对应代理协议的流量，比如 `curl` 会[读取 `http_proxy`, `ftp_proxy`, `all_proxy` 环境变量并根据请求 scheme 来决定转换为哪种代理流量](https://curl.haxx.se/libcurl/c/CURLOPT_PROXY.html)。这种方法只有程序本身实现了转换的功能才有效，局限性较大。  
+设置环境变量方式：一些程序启动时会读取 proxy 相关的环境变量来决定是否将自己的数据转换为对应代理协议的流量，比如 `curl` 会[读取 `http_proxy`, `ftp_proxy`, `all_proxy` 环境变量并根据请求 scheme 来决定转换为哪种代理流量](https://curl.haxx.se/libcurl/c/CURLOPT_PROXY.html)。这种方法只有程序本身实现了转换的功能才有效，局限性较大。
 
 仅针对程序方式： 这种方式可以仅针对特定的程序执行重定向，比如 `tsocks` 或 `proxychains`。如前面提到，它们之前都是使用 `LD_PRELOAD` 劫持动态库方式实现，对 `Go` 之类默认静态链接编译的程序就无效了。`graftcp` 改进了这一点，能够重定向任何程序的 TCP 连接。
 
@@ -216,6 +221,25 @@ $ wget https://www.google.com
 ### 我的 DNS 请求受到污染，`graftcp` 会处理 DNS 请求吗？
 
 不会。`graftcp` 目前仅处理 TCP 连接。建议使用 `dnscrypt-proxy` 或 `ChinaDNS` 等方式解决 DNS 污染问题。
+
+### 运行 `[m]graftcp yay` 或者 `graftcp sudo ...` 报错并退出，该如何解决？
+
+Arch Linux 的 `yay` 实际也会调用 `sudo pacman ...`，这需要 tracer 具备 root 特权才能获取到跟踪子进程的权限。可以用 sudo 来启动 `[m]graftcp`，并指定当前用户运行后续命令：`sudo [m]graftcp sudo -u $USER yay`，或者 `sudo [m]graftcp -u $USER sudo ...`。
+如何觉得上面命令太长，可以复制一个带 setuid 位的 [m]graftcp 副本，并写一个包裹脚本来简化输入：
+
+```sh
+cp mgraftcp _sumgraftcp
+sudo chown root _sumgraftcp
+sudo u+s _sumgraftcp
+cat << 'EOF' > sumg
+#!/bin/sh
+
+./_sumgraftcp -u "$USER" "$@"
+EOF
+chmod +x sumg
+# sumg yay
+# sumg sudo ...
+```
 
 ### `clone(2)` 参数有个叫 `CLONE_UNTRACED` 的标志位，可以避免让父进程跟踪到自己，`graftcp` 是如何做到强制跟踪的？
 
@@ -231,6 +255,7 @@ Linux 提供了一种限制被 `ptrace(2)` 跟踪的方法：设置 [`/proc/sys/
 
 - [x] ARM/Linux 支持
 - [x] i386/Linux 支持
+- [ ] UDP 支持
 
 ## 感谢及参考
 
@@ -242,6 +267,6 @@ Linux 提供了一种限制被 `ptrace(2)` 跟踪的方法：设置 [`/proc/sys/
 
 ## License
 
-Copyright &copy; 2016, 2018-2021 Hmgle <dustgle@gmail.com>
+Copyright &copy; 2016, 2018-2024 Hmgle <dustgle@gmail.com>
 
 根据 [GPLv3 许可](https://www.gnu.org/licenses/gpl-3.0.html)发布。

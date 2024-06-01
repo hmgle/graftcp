@@ -4,18 +4,19 @@
 `graftcp` is a proxy tool inspiring by [maybe](https://github.com/p-e-w/maybe) and [proxychains](https://github.com/haad/proxychains).
 It hooks `connect(2)` function via `ptrace(2)` and redirects the connection through SOCKS5 proxies.
 -->
+
 # graftcp
 
 **English** | [简体中文](./README.zh-CN.md)
 
-## Introduction 
+## Introduction
 
 `graftcp` can redirect the TCP connection made by the given program \[application, script, shell, etc.\] to SOCKS5 or HTTP proxy.
 
 Compared with [tsocks](https://linux.die.net/man/8/tsocks), [proxychains](http://proxychains.sourceforge.net/) or [proxychains-ng](https://github.com/rofl0r/proxychains-ng), `graftcp` is not using the [LD_PRELOAD trick](https://stackoverflow.com/questions/426230/what-is-the-ld-preload-trick) which only work for dynamically linked programs, e.g., [applications built by Go can not be hook by proxychains-ng](https://github.com/rofl0r/proxychains-ng/issues/199). `graftcp` can trace or modify any
 given program's connect by [`ptrace(2)`](https://en.wikipedia.org/wiki/Ptrace), so it is workable for any program. The principle will be explained in this paragraph of [how does it work](#principles).
 
-## Installation 
+## Installation
 
 ### Install from source
 
@@ -26,6 +27,7 @@ git clone https://github.com/hmgle/graftcp.git
 cd graftcp
 make
 ```
+
 After make finishes, you'll be able to use `local/graftcp-local` and `./graftcp`.
 Optionally, you can also install them to system:
 
@@ -95,13 +97,15 @@ Options:
   -n --not-ignore-local
                     Connecting to local is not changed by default, this
                     option will redirect it to SOCKS5
+  -u --user=<username>
+                    Run command as USERNAME handling setuid and/or setgid
   -V --version
                     Show version
   -h --help
                     Display this help and exit
 ```
 
-`mgraftcp`: Combined `graftcp-local` and `graftcp` (`mgraftcp` = `graftcp-local` + `graftcp`). 
+`mgraftcp`: Combined `graftcp-local` and `graftcp` (`mgraftcp` = `graftcp-local` + `graftcp`).
 `mgraftcp` can be used to replace `graftcp` without running `graftcp-local`.
 
 ```console
@@ -126,6 +130,8 @@ Usage: mgraftcp [-hn] [-b value] [--enable-debug-log] [--http_proxy value] [--se
                 SOCKS5 password
      --socks5_username=value
                 SOCKS5 username
+ -u, --username=value
+                Run command as USERNAME handling setuid and/or setgid
      --version  Print the mgraftcp version information
  -w, --whiteip-file=value
                 Only redirect the connect that destination IP/CIDR in the
@@ -167,9 +173,11 @@ Launch `Bash` / `Zsh` / `Fish` via `graftcp`, then all the TCP traffic generated
 % ./graftcp bash
 $ wget https://www.google.com
 ```
+
 ![demo](demo.gif)
 
 <a id="principles"></a>
+
 ## How does it work?
 
 To achieve the goal of redirecting the TCP connection of a app to another destination address and the app itself is not aware of it, these conditions are probably required:
@@ -178,7 +186,7 @@ To achieve the goal of redirecting the TCP connection of a app to another destin
 - Modify the destination address argument of `connect(2)` to `graftcp-local`'s address, and restart the stopped syscall. After the syscall returns successfully, the app thought it has connected the original destination address, but in fact it is connected to the `graftcp-local`, so we named it "graft".
 - `graftcp-local` establish a SOCKS5 connection based on the information of app's original destination address, then redirect the requests from the app to the SOCKS5 proxy.
 
-Someone may have a question here: since we can modify the arguments of a syscall, modify the app's `write(2)` / `send(2)` buf argument, attach the original destination information to the `write` buffer, isn't it simpler? The answer is that cannot be done. Because attach data to the buffer of the tracked child process, it may case a buffer overflow, causing crash or overwrite other data.  
+Someone may have a question here: since we can modify the arguments of a syscall, modify the app's `write(2)` / `send(2)` buf argument, attach the original destination information to the `write` buffer, isn't it simpler? The answer is that cannot be done. Because attach data to the buffer of the tracked child process, it may case a buffer overflow, causing crash or overwrite other data.
 In addition, as the [`execve(2)` will detach and unmap all shared memory](http://man7.org/linux/man-pages/man2/execve.2.html), we also cannot add extra data to the `write` buffer of traced app by sharing memory, so we send the original destination address via `pipe`.
 
 The simple sketch is as follows:
@@ -220,9 +228,29 @@ programs selection way: this way can only perform redirection for specified prog
 
 No. By default, `graftcp` ignore the connections to localhost. If you want to redirect all addresses, you can use the `-n` option. If you want to ignore more addresses, you can add them to the blacklist IP file; if you want to redirect only certain IP addresses, you can add them to the whitelist IP file. Use `graftcp --help` to get more information.
 
-###  I am suffering a DNS cache poisoning attack, does `graftcp` handle DNS requests?
+### I am suffering a DNS cache poisoning attack, does `graftcp` handle DNS requests?
 
 No. `graftcp` currently only handles TCP connections. [`dnscrypt-proxy`](https://github.com/jedisct1/dnscrypt-proxy) or `ChinaDNS` may help you.
+
+### Running `[m]graftcp yay` or `graftcp sudo ...` results in an error and exit, how to solve this?
+
+The `yay` command on Arch Linux actually invokes `sudo pacman ...`, which requires the tracer to have root privileges to obtain permissions to trace the child process. You can start `[m]graftcp` with `sudo` and specify the current user to run the subsequent command: `sudo [m]graftcp sudo -u $USER yay`, or `sudo [m]graftcp -u $USER sudo ...`.
+
+If you find the above command too long, you can copy a `[m]graftcp` binary with the setuid bit set and create a wrapper script to simplify the input:
+
+```sh
+cp mgraftcp _sumgraftcp
+sudo chown root _sumgraftcp
+sudo u+s _sumgraftcp
+cat << 'EOF' > sumg
+#!/bin/sh
+
+./_sumgraftcp -u "$USER" "$@"
+EOF
+chmod +x sumg
+# sumg yay
+# sumg sudo ...
+```
 
 ### The `clone(2)`'s argument has a flag `CLONE_UNTRACED` to avoid being traced, how does `graftcp` do forced tracing?
 
@@ -238,6 +266,7 @@ No. macOS's [`ptrace(2)`](http://polarhome.com/service/man/?qf=ptrace&af=0&sf=0&
 
 - [x] ARM/Linux Support
 - [x] i386/Linux Support
+- [ ] UDP Support
 
 ## Acknowledgements and References
 
@@ -249,6 +278,6 @@ No. macOS's [`ptrace(2)`](http://polarhome.com/service/man/?qf=ptrace&af=0&sf=0&
 
 ## LICENSE
 
-Copyright &copy; 2016, 2018-2021 Hmgle <dustgle@gmail.com>
+Copyright &copy; 2016, 2018-2024 Hmgle <dustgle@gmail.com>
 
 Released under the terms of the [GNU General Public License, version 3](https://www.gnu.org/licenses/gpl-3.0.html)
