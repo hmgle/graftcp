@@ -658,7 +658,7 @@ int client_main(int argc, char **argv)
 	if (conf.username) {
 		struct passwd *pent;
 
-		if (getuid() != 0 || geteuid() != 0) {
+		if (geteuid() != 0) {
 			fprintf(stderr, "You must be root to use the -u option\n");
 			exit(1);
 		}
