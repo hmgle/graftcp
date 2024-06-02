@@ -236,20 +236,13 @@ No. `graftcp` currently only handles TCP connections. [`dnscrypt-proxy`](https:/
 
 The `yay` command on Arch Linux actually invokes `sudo pacman ...`, which requires the tracer to have root privileges to obtain permissions to trace the child process. You can start `[m]graftcp` with `sudo` and specify the current user to run the subsequent command: `sudo [m]graftcp sudo -u $USER yay`, or `sudo [m]graftcp -u $USER sudo ...`.
 
-If you find the above command too long, you can copy a `[m]graftcp` binary with the setuid bit set and create a wrapper script to simplify the input:
+If you feel the above command too long, you can copy a `[m]graftcp` binary with CAP_SYS_PTRACE and CAP_SYS_ADMIN capabilities:
 
 ```sh
-cp mgraftcp _sumgraftcp
-sudo chown root _sumgraftcp
-sudo u+s _sumgraftcp
-cat << 'EOF' > sumg
-#!/bin/sh
-
-./_sumgraftcp -u "$USER" "$@"
-EOF
-chmod +x sumg
-# sumg yay
-# sumg sudo ...
+cp mgraftcp sumg
+sudo setcap 'cap_sys_ptrace,cap_sys_admin+ep' ./sumg
+# ./sumg yay
+# ./sumg sudo ...
 ```
 
 ### The `clone(2)`'s argument has a flag `CLONE_UNTRACED` to avoid being traced, how does `graftcp` do forced tracing?

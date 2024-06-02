@@ -225,20 +225,13 @@ $ wget https://www.google.com
 ### 运行 `[m]graftcp yay` 或者 `graftcp sudo ...` 报错并退出，该如何解决？
 
 Arch Linux 的 `yay` 实际也会调用 `sudo pacman ...`，这需要 tracer 具备 root 特权才能获取到跟踪子进程的权限。可以用 sudo 来启动 `[m]graftcp`，并指定当前用户运行后续命令：`sudo [m]graftcp sudo -u $USER yay`，或者 `sudo [m]graftcp -u $USER sudo ...`。
-如何觉得上面命令太长，可以复制一个带 setuid 位的 [m]graftcp 副本，并写一个包裹脚本来简化输入：
+如何觉得上面命令太长，可以复制一个具有 CAP_SYS_PTRACE 和 CAP_SYS_ADMIN capabilities 的 [m]graftcp 副本：
 
 ```sh
-cp mgraftcp _sumgraftcp
-sudo chown root _sumgraftcp
-sudo u+s _sumgraftcp
-cat << 'EOF' > sumg
-#!/bin/sh
-
-./_sumgraftcp -u "$USER" "$@"
-EOF
-chmod +x sumg
-# sumg yay
-# sumg sudo ...
+cp mgraftcp sumg
+sudo setcap 'cap_sys_ptrace,cap_sys_admin+ep' ./sumg
+# ./sumg yay
+# ./sumg sudo ...
 ```
 
 ### `clone(2)` 参数有个叫 `CLONE_UNTRACED` 的标志位，可以避免让父进程跟踪到自己，`graftcp` 是如何做到强制跟踪的？
@@ -249,7 +242,7 @@ Linux 提供了一种限制被 `ptrace(2)` 跟踪的方法：设置 [`/proc/sys/
 
 ### 支持 macOS 吗？
 
-不。macOS 的 [`ptrace(2)`](http://polarhome.com/service/man/?qf=ptrace&af=0&sf=0&of=Darwin&tf=2) 是个半残品。~~不过理论上参考 DTrace那一套也能实现~~，见[issue 12](https://github.com/hmgle/graftcp/issues/12)。
+不。macOS 的 [`ptrace(2)`](http://polarhome.com/service/man/?qf=ptrace&af=0&sf=0&of=Darwin&tf=2) 是个半残品。~~不过理论上参考 DTrace 那一套也能实现~~，见[issue 12](https://github.com/hmgle/graftcp/issues/12)。
 
 ## TODO
 
