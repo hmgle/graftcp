@@ -185,7 +185,7 @@ func (l *Local) Start() {
 	l.StartService(ln)
 }
 
-func _getPidByAddr(localAddr, remoteAddr string, isTCP6 bool) (pid string, destAddr string) {
+func getPidByAddr(localAddr, remoteAddr *net.TCPAddr, isTCP6 bool) (pid string, destAddr string) {
 	inode, err := getInodeByAddrs(localAddr, remoteAddr, isTCP6)
 	if err != nil {
 		log.Errorf("getInodeByAddrs(%s, %s) err: %s", localAddr, remoteAddr, err.Error())
@@ -211,38 +211,11 @@ func _getPidByAddr(localAddr, remoteAddr string, isTCP6 bool) (pid string, destA
 	return
 }
 
-func getPidByAddr(localAddr, remoteAddr string, isTCP6 bool) (pid string, destAddr string) {
-	pid, destAddr = _getPidByAddr(localAddr, remoteAddr, isTCP6)
-	if pid == "" || destAddr == "" {
-		// NOTE: There are some unusual cases that can cause the above _getPidByAddr
-		// to fail to obtain the pid and destAddr.
-		// For example: The Source IP Address field in the IP packet header has been
-		// rewritten (iptables, nftables, and eBPF can all do this).
-		// In this case, we try again using "127.0.0.1"(::1 for IPv6).
-		// However, if the client binds to another IP (which is also unusual) before
-		// the connect call, rather than "127.0.0.1", then the retrieval will also fail.
-		// Although the pidAddrMap does store the pid and destAddr information we're
-		// looking for, it cannot guarantee correctness in concurrent situations,
-		// so we're not planning to use the information in pidAddrMap directly for now.
-		var localIP string
-		if isTCP6 {
-			localIP = localIPv6
-		} else {
-			localIP = localIPv4
-		}
-		host, port, err := splitAddr(localAddr, isTCP6)
-		if err == nil && host != localIP {
-			pid, destAddr = _getPidByAddr(net.JoinHostPort(localIP, port), remoteAddr, isTCP6)
-		}
-	}
-	return pid, destAddr
-}
-
 // HandleConn handle conn.
-func (l *Local) HandleConn(conn net.Conn) error {
-	raddr := conn.RemoteAddr()
+func (l *Local) HandleConn(conn *net.TCPConn) error {
+	raddr, laddr := conn.RemoteAddr().(*net.TCPAddr), conn.LocalAddr().(*net.TCPAddr)
 	isTCP6 := strings.Contains(conn.LocalAddr().String(), "[")
-	pid, destAddr := getPidByAddr(raddr.String(), conn.LocalAddr().String(), isTCP6)
+	pid, destAddr := getPidByAddr(raddr, laddr, isTCP6)
 	if pid == "" || destAddr == "" {
 		log.Errorf("getPidByAddr(%s, %s) failed", raddr.String(), conn.LocalAddr().String())
 		conn.Close()

@@ -3,157 +3,186 @@ package local
 import (
 	"encoding/binary"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
+	"unsafe"
+
+	"github.com/mdlayher/netlink"
+	"github.com/mdlayher/netlink/nlenc"
 )
 
-func ip2int(ip net.IP) uint32 {
-	if len(ip) == 16 {
-		return binary.BigEndian.Uint32(ip[12:16])
+// See https://man7.org/linux/man-pages/man7/sock_diag.7.html
+// IPv4 and IPv6 sockets
+//
+//	For IPv4 and IPv6 sockets, the request is represented in the
+//	following structure:
+//
+//	    struct inet_diag_req_v2 {
+//	        __u8    sdiag_family;
+//	        __u8    sdiag_protocol;
+//	        __u8    idiag_ext;
+//	        __u8    pad;
+//	        __u32   idiag_states;
+//	        struct inet_diag_sockid id;
+//	    };
+//
+//	where struct inet_diag_sockid is defined as follows:
+//
+//	    struct inet_diag_sockid {
+//	        __be16  idiag_sport;
+//	        __be16  idiag_dport;
+//	        __be32  idiag_src[4];
+//	        __be32  idiag_dst[4];
+//	        __u32   idiag_if;
+//	        __u32   idiag_cookie[2];
+//	    };
+//
+//	The response to a query for IPv4 or IPv6 sockets is represented
+//	as an array of
+//
+//	    struct inet_diag_msg {
+//	        __u8    idiag_family;
+//	        __u8    idiag_state;
+//	        __u8    idiag_timer;
+//	        __u8    idiag_retrans;
+//
+//	        struct inet_diag_sockid id;
+//
+//	        __u32   idiag_expires;
+//	        __u32   idiag_rqueue;
+//	        __u32   idiag_wqueue;
+//	        __u32   idiag_uid;
+//	        __u32   idiag_inode;
+//	    };
+type (
+	inetDiagReqV2 struct {
+		SdiagFamily   uint8
+		SdiagProtocol uint8
+		IdiagExt      uint8
+		Pad           uint8
+		IdiagStates   uint32
+
+		IdiagSport  uint16
+		IdiagDport  uint16
+		IdiagSrc    net.IP
+		IdiagDst    net.IP
+		IdiagIf     uint32
+		IdiagCookie [2]uint32
 	}
-	return binary.BigEndian.Uint32(ip)
-}
+	inetDiagMSG struct {
+		Family  byte
+		State   byte
+		Timer   byte
+		ReTrans byte
 
-func ip2Hex(ip net.IP) string {
-	if ip.To4() != nil { // IPv4
-		ipHex := fmt.Sprintf("%08X", ip2int(ip))
-		return ipHex[6:] + ipHex[4:6] + ipHex[2:4] + ipHex[:2]
+		SrcPort [2]byte
+		DstPort [2]byte
+		Src     [16]byte
+		Dst     [16]byte
+		If      uint32
+		Cookie  [2]uint32
+
+		Expires uint32
+		RQueue  uint32
+		WQueue  uint32
+		UID     uint32
+		INode   uint32
 	}
-	// IPv6
-	var ipv6Hex string
+)
 
-	ipHex := fmt.Sprintf("%08X", binary.BigEndian.Uint32(ip[:4]))
-	ipv6Hex += ipHex[6:] + ipHex[4:6] + ipHex[2:4] + ipHex[:2]
-
-	ipHex = fmt.Sprintf("%08X", binary.BigEndian.Uint32(ip[4:8]))
-	ipv6Hex += ipHex[6:] + ipHex[4:6] + ipHex[2:4] + ipHex[:2]
-
-	ipHex = fmt.Sprintf("%08X", binary.BigEndian.Uint32(ip[8:12]))
-	ipv6Hex += ipHex[6:] + ipHex[4:6] + ipHex[2:4] + ipHex[:2]
-
-	ipHex = fmt.Sprintf("%08X", binary.BigEndian.Uint32(ip[12:16]))
-	ipv6Hex += ipHex[6:] + ipHex[4:6] + ipHex[2:4] + ipHex[:2]
-
-	return ipv6Hex
-}
-
-func hexIPAddr(ipAddr string) string {
-	ip := net.ParseIP(ipAddr)
-	if len(ip) == 0 {
-		return ""
-	}
-	return ip2Hex(ip)
-}
-
-func hexPort(port string) (string, error) {
-	portInt, err := strconv.Atoi(port)
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%04X", portInt), nil
-}
-
-// getInodeByAddrs, localAddr format: 127.0.0.1:1234
-func getInodeByAddrs(localAddr, remoteAddr string, isTCP6 bool) (inode string, err error) {
-	var (
-		localIP    string
-		localPort  string
-		remoteIP   string
-		remotePort string
-	)
-	localIP, localPort, err = splitAddr(localAddr, isTCP6)
-	if err != nil {
-		return
-	}
-	remoteIP, remotePort, err = splitAddr(remoteAddr, isTCP6)
-	if err != nil {
-		return
-	}
-	localIPHex := hexIPAddr(localIP)
-	remoteIPHex := hexIPAddr(remoteIP)
-	localPortHex, err := hexPort(localPort)
-	if err != nil {
-		return "", err
-	}
-	remotePortHex, err := hexPort(remotePort)
-	if err != nil {
-		return "", err
-	}
-	return getInode(localIPHex+":"+localPortHex, remoteIPHex+":"+remotePortHex, isTCP6)
-}
-
+// socket diags related
 const (
-	localIPv4 = "127.0.0.1"
-	localIPv6 = "[::1]"
+	SOCK_DIAG_BY_FAMILY = 20         /* linux.sock_diag.h */
+	TCPDIAG_NOCOOKIE    = 0xFFFFFFFF /* TCPDIAG_NOCOOKIE in net/ipv4/tcp_diag.h*/
+	sizeofInetDiagMSG   = 0x38
 )
 
-// addr format: "127.0.0.1:53816"
-func splitAddrIPv4(addr string) (ipv4 string, port string, err error) {
-	addrSplit := strings.Split(addr, ":")
-	if len(addrSplit) != 2 {
-		err = fmt.Errorf("bad format of ipv4 addr: %s", addr)
-		return
-	}
-	ipv4 = addrSplit[0]
-	if ipv4 == "" {
-		ipv4 = localIPv4
-	}
-	port = addrSplit[1]
-	return
+type writeBuffer struct {
+	Bytes []byte
+	pos   int
 }
 
-// addr format: "[::1]:53816"
-func splitAddrIPv6(addr string) (ipv6 string, port string, err error) {
-	if !strings.HasPrefix(addr, "[") || !strings.Contains(addr, "]:") {
-		err = fmt.Errorf("bad format of ipv6 addr: %s", addr)
-		return
-	}
-	sep := strings.LastIndex(addr, "]")
-	ipv6 = addr[1:sep]
-	port = addr[sep+2:]
-	return
+func (b *writeBuffer) Next(n int) []byte {
+	s := b.Bytes[b.pos : b.pos+n]
+	b.pos += n
+	return s
 }
 
-func splitAddr(addr string, isTCP6 bool) (ip string, port string, err error) {
+func (req inetDiagReqV2) marshal() []byte {
+	b := writeBuffer{Bytes: make([]byte, sizeofInetDiagMSG)}
+
+	nlenc.PutUint8(b.Next(1), req.SdiagFamily)
+	nlenc.PutUint8(b.Next(1), req.SdiagProtocol)
+	nlenc.PutUint8(b.Next(1), req.IdiagExt)
+	nlenc.PutUint8(b.Next(1), req.Pad)
+	nlenc.PutUint32(b.Next(4), req.IdiagStates)
+
+	binary.BigEndian.PutUint16(b.Next(2), req.IdiagSport)
+	binary.BigEndian.PutUint16(b.Next(2), req.IdiagDport)
+
+	copy(b.Next(16), req.IdiagSrc[:])
+	copy(b.Next(16), req.IdiagDst[:])
+	nlenc.PutUint32(b.Next(4), req.IdiagIf)
+	nlenc.PutUint32(b.Next(4), req.IdiagCookie[0])
+	nlenc.PutUint32(b.Next(4), req.IdiagCookie[1])
+
+	return b.Bytes
+}
+
+func getInodeByAddrs(localAddr, remoteAddr *net.TCPAddr, isTCP6 bool) (inode string, err error) {
+	var (
+		family   uint8
+		localIP  net.IP
+		remoteIP net.IP
+	)
 	if isTCP6 {
-		return splitAddrIPv6(addr)
-	}
-	return splitAddrIPv4(addr)
-}
-
-// getInode get the inode, localAddrHex format: 0100007F:04D2
-func getInode(localAddrHex, remoteAddrHex string, isTCP6 bool) (inode string, err error) {
-	var path string
-	if isTCP6 {
-		path = "/proc/net/tcp6"
+		family = syscall.AF_INET6
+		localIP = localAddr.IP.To16()
+		remoteIP = remoteAddr.IP.To16()
 	} else {
-		path = "/proc/net/tcp"
+		family = syscall.AF_INET
+		localIP = localAddr.IP.To4()
+		remoteIP = remoteAddr.IP.To4()
 	}
-	data, err := ioutil.ReadFile(path)
+	req := &inetDiagReqV2{
+		SdiagFamily:   family,
+		SdiagProtocol: syscall.IPPROTO_TCP,
+		IdiagStates:   0xffffffff,
+		IdiagSport:    uint16(localAddr.Port),
+		IdiagDport:    uint16(remoteAddr.Port),
+		IdiagSrc:      localIP,
+		IdiagDst:      remoteIP,
+		IdiagIf:       0,
+		IdiagCookie:   [2]uint32{TCPDIAG_NOCOOKIE, TCPDIAG_NOCOOKIE},
+	}
+	reqMsg := netlink.Message{
+		Header: netlink.Header{
+			Type:  SOCK_DIAG_BY_FAMILY,
+			Flags: netlink.Request | netlink.Dump,
+		},
+		Data: req.marshal(),
+	}
+	c, err := netlink.Dial(syscall.NETLINK_INET_DIAG, nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to read file: %w", err)
+		return
 	}
-	lines := strings.Split(string(data), "\n")
-	if len(lines) == 0 {
-		return "", fmt.Errorf("bad format: %s", data)
+	defer c.Close()
+	respMsg, err := c.Execute(reqMsg)
+	if err != nil {
+		return
 	}
-
-	// skip the first header line
-	for _, line := range lines[1:] {
-		fields := strings.Fields(line)
-		if len(fields) < 10 {
+	for _, msg := range respMsg {
+		if len(msg.Data) < sizeofInetDiagMSG {
 			continue
 		}
-		if strings.Contains(fields[1] /* local address:port */, localAddrHex) &&
-			strings.Contains(fields[2] /* remote address:port */, remoteAddrHex) {
-			return fields[9], nil // fields[9] is inode
-		}
+		response := (*inetDiagMSG)(unsafe.Pointer(&msg.Data[0]))
+		return strconv.FormatUint(uint64(response.INode), 10), nil
 	}
-	return "", fmt.Errorf("no inode for [%s %s]", localAddrHex, remoteAddrHex)
+	return "", fmt.Errorf("no inode for [%s %s]", localAddr.String(), remoteAddr.String())
 }
 
 func hasIncludeInode(pid, inode string) bool {
