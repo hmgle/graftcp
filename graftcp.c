@@ -581,6 +581,10 @@ int client_main(int argc, char **argv)
 		switch (opt) {
 		case 'a':
 			cmd_conf.local_addr = strdup(optarg);
+			if (cmd_conf.local_addr == NULL) {
+				perror("strdup failed to allocate memory");
+				exit(1);
+			}
 			break;
 		case 'p':
 			cmd_conf.local_port = malloc(sizeof(*cmd_conf.local_port));
@@ -588,12 +592,24 @@ int client_main(int argc, char **argv)
 			break;
 		case 'f':
 			cmd_conf.pipe_path = strdup(optarg);
+			if (cmd_conf.pipe_path == NULL) {
+				perror("strdup failed to allocate memory");
+				exit(1);
+			}
 			break;
 		case 'b':
 			cmd_conf.blackip_file_path = strdup(optarg);
+			if (cmd_conf.blackip_file_path == NULL) {
+				perror("strdup failed to allocate memory");
+				exit(1);
+			}
 			break;
 		case 'w':
 			cmd_conf.whiteip_file_path = strdup(optarg);
+			if (cmd_conf.whiteip_file_path == NULL) {
+				perror("strdup failed to allocate memory");
+				exit(1);
+			}
 			break;
 		case 'n':
 			cmd_conf.ignore_local = malloc(sizeof(*cmd_conf.ignore_local));
@@ -601,9 +617,17 @@ int client_main(int argc, char **argv)
 			break;
 		case 'c':
 			conf_file_path = strdup(optarg);
+			if (conf_file_path == NULL) {
+				perror("strdup failed to allocate memory");
+				exit(1);
+			}
 			break;
 		case 'u':
 			cmd_conf.username = strdup(optarg);
+			if (cmd_conf.username == NULL) {
+				perror("strdup failed to allocate memory");
+				exit(1);
+			}
 			break;
 		case 'V':
 			fprintf(stderr, "graftcp %s\n", VERSION);
@@ -670,6 +694,10 @@ int client_main(int argc, char **argv)
 		run_gid = pent->pw_gid;
 		run_uid = pent->pw_uid;
 		run_home = strdup(pent->pw_dir);
+		if (run_home == NULL) {
+			perror("strdup failed to allocate memory");
+			exit(1);
+		}
 	}
 
 	init(&conf, argc - optind, argv + optind);
