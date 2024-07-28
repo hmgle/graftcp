@@ -41,6 +41,8 @@ static int config_local_addr(const char *key, const char *value, struct graftcp_
 	if (strlen(value) <= 0)
 		return -1;
 	conf->local_addr = strdup(value);
+	if (!conf->local_addr)
+		return -1;
 	return 0;
 }
 
@@ -59,18 +61,24 @@ static int config_local_port(const char *key, const char *value, struct graftcp_
 static int config_pipe_path(const char *key, const char *value, struct graftcp_conf *conf)
 {
 	conf->pipe_path = strdup(value);
+	if (!conf->pipe_path)
+		return -1;
 	return 0;
 }
 
 static int config_blackip_file_path(const char *key, const char *value, struct graftcp_conf *conf)
 {
 	conf->blackip_file_path = strdup(value);
+	if (!conf->blackip_file_path)
+		return -1;
 	return 0;
 }
 
 static int config_whiteip_file_path(const char *key, const char *value, struct graftcp_conf *conf)
 {
 	conf->whiteip_file_path = strdup(value);
+	if (!conf->whiteip_file_path)
+		return -1;
 	return 0;
 }
 
