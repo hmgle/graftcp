@@ -185,8 +185,8 @@ func (l *Local) Start() {
 	l.StartService(ln)
 }
 
-func getPidByAddr(localAddr, remoteAddr *net.TCPAddr, isTCP6 bool) (pid string, destAddr string) {
-	inode, err := getInodeByAddrs(localAddr, remoteAddr, isTCP6)
+func getPidByAddr(localAddr, remoteAddr *net.TCPAddr) (pid string, destAddr string) {
+	inode, err := getInodeByAddrs(localAddr, remoteAddr)
 	if err != nil {
 		log.Errorf("getInodeByAddrs(%s, %s) err: %s", localAddr, remoteAddr, err.Error())
 		return "", ""
@@ -214,8 +214,7 @@ func getPidByAddr(localAddr, remoteAddr *net.TCPAddr, isTCP6 bool) (pid string, 
 // HandleConn handle conn.
 func (l *Local) HandleConn(conn *net.TCPConn) error {
 	raddr, laddr := conn.RemoteAddr().(*net.TCPAddr), conn.LocalAddr().(*net.TCPAddr)
-	isTCP6 := strings.Contains(conn.LocalAddr().String(), "[")
-	pid, destAddr := getPidByAddr(raddr, laddr, isTCP6)
+	pid, destAddr := getPidByAddr(raddr, laddr)
 	if pid == "" || destAddr == "" {
 		log.Errorf("getPidByAddr(%s, %s) failed", raddr.String(), conn.LocalAddr().String())
 		conn.Close()
