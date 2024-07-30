@@ -87,6 +87,8 @@ struct socket_info {
 	uint64_t magic_fd;
 	int domain;
 	int type;
+	size_t dest_addr_len;
+	char dest_addr[sizeof(struct sockaddr_in6)];
 	struct timeval conn_ti;
 	UT_hash_handle hh;	/* makes this structure hashable */
 };
