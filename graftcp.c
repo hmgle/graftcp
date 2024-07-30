@@ -245,10 +245,15 @@ void connect_pre_handle(struct proc_info *pinfp)
 		return;
 	}
 
-	if (dest_sa.sin_family == AF_INET) /* IPv4 */
+	if (dest_sa.sin_family == AF_INET) { /* IPv4 */
+		memcpy(si->dest_addr, &dest_sa, sizeof(dest_sa));
+		si->dest_addr_len = sizeof(dest_sa);
 		putdata(pinfp->pid, addr, (char *)&PROXY_SA, sizeof(PROXY_SA));
-	else /* IPv6 */
+	} else { /* IPv6 */
+		memcpy(si->dest_addr, &dest_sa6, sizeof(dest_sa6));
+		si->dest_addr_len = sizeof(dest_sa6);
 		putdata(pinfp->pid, addr, (char *)&PROXY_SA6, sizeof(PROXY_SA6));
+	}
 
 	char buf[1024] = { 0 };
 	strcpy(buf, dest_ip_addr_str);
@@ -304,6 +309,16 @@ void socket_exiting_handle(struct proc_info *pinfp, int fd)
 	del_socket_info(si);
 	si->magic_fd = (fd << 31) + pinfp->pid;
 	add_socket_info(si);
+}
+
+void connect_exiting_handle(struct proc_info *pinfp)
+{
+	int socket_fd = get_syscall_arg(pinfp->pid, 0);
+	struct socket_info *si = find_socket_info((socket_fd << 31) + pinfp->pid);
+	if (si == NULL || si->dest_addr_len == 0)
+		return;
+	long addr = get_syscall_arg(pinfp->pid, 1);
+	putdata(pinfp->pid, addr, si->dest_addr, si->dest_addr_len);
 }
 
 void do_child(struct graftcp_conf *conf, int argc, char **argv)
@@ -408,6 +423,9 @@ int trace_syscall_exiting(struct proc_info *pinfp)
 			exit(errno);
 		}
 		socket_exiting_handle(pinfp, child_ret);
+		break;
+	case SYS_connect:
+		connect_exiting_handle(pinfp);
 		break;
 	}
 end:
