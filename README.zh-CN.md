@@ -33,7 +33,7 @@ sudo make enable_systemd
 
 ### 二进制包安装
 
-在 https://github.com/hmgle/graftcp/releases 下载 [Debian](https://github.com/hmgle/graftcp/releases/download/v0.4.0/graftcp_0.4.0-1_amd64.deb) 或者 [Arch Linux](https://github.com/hmgle/graftcp/releases/download/v0.4.0/graftcp-0.4.0-1-x86_64.pkg.tar.zst) 安装包并安装。
+在 <https://github.com/hmgle/graftcp/releases> 下载 [Debian](https://github.com/hmgle/graftcp/releases/download/v0.4.0/graftcp_0.4.0-1_amd64.deb) 或者 [Arch Linux](https://github.com/hmgle/graftcp/releases/download/v0.4.0/graftcp-0.4.0-1-x86_64.pkg.tar.zst) 安装包并安装。
 
 ## 用法参数
 
@@ -161,8 +161,8 @@ graftcp-local/graftcp-local
 通过 `graftcp` 启动 `Bash` / `Zsh` / `Fish`，在这个新开的 shell 里面执行的任何新命令产生的 TCP 连接都会重定向到 SOCKS5 代理：
 
 ```console
-% ./graftcp bash
-$ wget https://www.google.com
+% ./graftcp bash --rcfile <(echo 'PS1="(graftcp) $PS1"')
+(graftcp) $ wget https://www.google.com
 ```
 
 ![demo](demo.gif)
