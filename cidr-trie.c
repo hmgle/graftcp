@@ -119,7 +119,7 @@ void trie128_insert(trie_t *trie, struct cidr6_s *cidr6, int value)
 {
 	trie_node_t *node, *next;
 	uint8_t bit = 0x80;
-	uint i = 0;
+	unsigned int i = 0;
 
 	next = trie->root;
 	for (node = trie->root; bit & cidr6->mask.s6_addr[i];) {
@@ -161,7 +161,7 @@ static int parse_cidr6(const char *line, struct cidr6_s *cidr6)
         int shift;
         char ip6buf[IPV6_MAX_TEXT_LENGTH + 1];
         uint8_t *mask;
-        uint i, s;
+        unsigned int i, s;
 
         p = strchr(line, '/');
         if (p) {
@@ -180,7 +180,7 @@ static int parse_cidr6(const char *line, struct cidr6_s *cidr6)
                         for (i = 0; i < 16; i++) {
                                 s = (shift > 8) ? 8 : shift;
                                 shift -= s;
-                                mask[i] = (u_char) (0xffu << (8 - s));
+                                mask[i] = (unsigned char) (0xffu << (8 - s));
                         }
                 } else {
                         memset(cidr6->mask.s6_addr, 0, 16);
@@ -207,7 +207,7 @@ int trie128_lookup(trie_t *trie, uint8_t *ip)
 {
 	trie_node_t *node;
 	uint8_t bit = 0x80;
-	uint i = 0;
+	unsigned int i = 0;
 
 	for (node = trie->root; node;) {
 		if (node->value != TRIE_NO_VALUE)
