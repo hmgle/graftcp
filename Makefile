@@ -47,6 +47,7 @@ else
 endif
 
 CFLAGS += -DVERSION=\"$(VERSION)\"
+LDFLAGS ?=
 
 SRC := $(wildcard *.c)
 
@@ -58,7 +59,7 @@ all: $(TARGET)
 
 
 graftcp: main.o graftcp.o util.o cidr-trie.o conf.o
-	$(CC) $^ -o $@
+	$(CC) $(LDFLAGS) $^ -o $@
 
 libgraftcp.a: graftcp.o util.o cidr-trie.o conf.o
 	$(AR) rcs $@ $^
