@@ -106,6 +106,11 @@ static bool ip4_is_ignore(uint32_t ip)
 
 static bool ip6_is_ignore(uint8_t *ip)
 {
+	if (IN6_IS_ADDR_V4MAPPED((struct in6_addr *)ip)) {
+		uint32_t v4;
+		memcpy(&v4, ip + 12, sizeof(v4));
+		return ip4_is_ignore(v4);
+	}
 	if (BLACKLIST_IP) {
 		if (cidr6_trie_lookup(BLACKLIST_IP, ip))
 			return true;
