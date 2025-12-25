@@ -217,8 +217,12 @@ void set_retval(pid_t pid, long new_val)
 	switch (iov.iov_len) {
 	case sizeof(struct user_pt_regs):
 		arm_regs_union.aarch64_r.regs[0] = new_val;
+		break;
 	case sizeof(struct arm_pt_regs):
 		arm_regs_union.arm_r.ARM_r0 = new_val;
+		break;
+	default:
+		return;
 	}
 	ptrace(PTRACE_SETREGSET, pid, NT_PRSTATUS, &iov);
 	assert(errno == 0);
@@ -346,14 +350,16 @@ void getdata(pid_t child, long addr, char *dst, int len)
 	j = len / sizeof(long);
 	laddr = dst;
 	while (i < j) {
-		data.val = ptrace(PTRACE_PEEKDATA, child, addr + i * 8, NULL);
+		data.val = ptrace(PTRACE_PEEKDATA, child,
+				  addr + i * (long)sizeof(long), NULL);
 		memcpy(laddr, data.chars, sizeof(long));
 		++i;
 		laddr += sizeof(long);
 	}
 	j = len % sizeof(long);
 	if (j != 0) {
-		data.val = ptrace(PTRACE_PEEKDATA, child, addr + i * 8, NULL);
+		data.val = ptrace(PTRACE_PEEKDATA, child,
+				  addr + i * (long)sizeof(long), NULL);
 		memcpy(laddr, data.chars, j);
 	}
 }
@@ -372,13 +378,17 @@ void putdata(pid_t child, long addr, char *src, int len)
 	laddr = src;
 	while (i < j) {
 		memcpy(data.chars, laddr, sizeof(long));
-		ptrace(PTRACE_POKEDATA, child, addr + i * 8, data.val);
+		ptrace(PTRACE_POKEDATA, child,
+		       addr + i * (long)sizeof(long), data.val);
 		++i;
 		laddr += sizeof(long);
 	}
 	j = len % sizeof(long);
 	if (j != 0) {
+		data.val = ptrace(PTRACE_PEEKDATA, child,
+				  addr + i * (long)sizeof(long), NULL);
 		memcpy(data.chars, laddr, j);
-		ptrace(PTRACE_POKEDATA, child, addr + i * 8, data.val);
+		ptrace(PTRACE_POKEDATA, child,
+		       addr + i * (long)sizeof(long), data.val);
 	}
 }
