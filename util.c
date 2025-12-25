@@ -217,8 +217,12 @@ void set_retval(pid_t pid, long new_val)
 	switch (iov.iov_len) {
 	case sizeof(struct user_pt_regs):
 		arm_regs_union.aarch64_r.regs[0] = new_val;
+		break;
 	case sizeof(struct arm_pt_regs):
 		arm_regs_union.arm_r.ARM_r0 = new_val;
+		break;
+	default:
+		return;
 	}
 	ptrace(PTRACE_SETREGSET, pid, NT_PRSTATUS, &iov);
 	assert(errno == 0);
