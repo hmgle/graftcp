@@ -211,8 +211,11 @@ void socket_pre_handle(struct proc_info *pinfp)
 		return;
 	}
 #endif
-	si->key = socket_key(pinfp->pid, MAGIC_FD);
-	add_socket_info(si);
+	if (pinfp->pending_socket) {
+		free(pinfp->pending_socket);
+		pinfp->pending_socket = NULL;
+	}
+	pinfp->pending_socket = si;
 }
 
 void connect_pre_handle(struct proc_info *pinfp)
@@ -306,10 +309,14 @@ void socket_exiting_handle(struct proc_info *pinfp, int fd)
 {
 	struct socket_info *si;
 
-	si = find_socket_info(pinfp->pid, MAGIC_FD);
+	si = pinfp->pending_socket;
+	pinfp->pending_socket = NULL;
 	if (si == NULL)
 		return;
-	del_socket_info(si);
+	if (fd < 0) {
+		free(si);
+		return;
+	}
 	si->key = socket_key(pinfp->pid, fd);
 	add_socket_info(si);
 }
@@ -488,6 +495,10 @@ int do_trace()
 		if (WIFSIGNALED(status) || WIFEXITED(status)
 		    || !WIFSTOPPED(status)) {
 			exit_code = WEXITSTATUS(status);
+			if (pinfp->pending_socket) {
+				free(pinfp->pending_socket);
+				pinfp->pending_socket = NULL;
+			}
 			/* TODO free pinfp */
 			continue;
 		}

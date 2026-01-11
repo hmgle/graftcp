@@ -105,10 +105,6 @@ struct socket_info {
 	UT_hash_handle hh;	/* makes this structure hashable */
 };
 
-/* magic fd number */
-#define MAGIC_FD  7777777
-#define MAGIC_NUM 3579
-
 #define FLAG_STARTUP    00002
 #define FLAG_INSYSCALL  00010
 
@@ -118,7 +114,7 @@ struct proc_info {
 	pid_t pid;
 	int flags;
 	int csn;		/* current syscall number */
-	struct socket_info *cws;	/* current process's writing socket info */
+	struct socket_info *pending_socket;
 	UT_hash_handle hh;	/* makes this structure hashable */
 };
 
