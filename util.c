@@ -18,7 +18,7 @@ struct socket_info *SOCKET_INFO_TAB = NULL;
 
 void add_socket_info(struct socket_info *s)
 {
-	HASH_ADD_INT(SOCKET_INFO_TAB, magic_fd, s);
+	HASH_ADD(hh, SOCKET_INFO_TAB, key, sizeof(s->key), s);
 }
 
 void del_socket_info(struct socket_info *s)
@@ -26,11 +26,12 @@ void del_socket_info(struct socket_info *s)
 	HASH_DEL(SOCKET_INFO_TAB, s);
 }
 
-struct socket_info *find_socket_info(uint64_t magic_fd)
+struct socket_info *find_socket_info(pid_t pid, int fd)
 {
 	struct socket_info *s;
+	struct socket_key key = socket_key(pid, fd);
 
-	HASH_FIND_INT(SOCKET_INFO_TAB, &magic_fd, s);
+	HASH_FIND(hh, SOCKET_INFO_TAB, &key, sizeof(key), s);
 	return s;
 }
 
@@ -38,7 +39,7 @@ struct proc_info *PROC_INFO_TAB = NULL;
 
 void add_proc_info(struct proc_info *p)
 {
-	HASH_ADD_INT(PROC_INFO_TAB, pid, p);
+	HASH_ADD(hh, PROC_INFO_TAB, pid, sizeof(p->pid), p);
 }
 
 void del_proc_info(struct proc_info *p)
@@ -50,7 +51,7 @@ struct proc_info *find_proc_info(pid_t pid)
 {
 	struct proc_info *p;
 
-	HASH_FIND_INT(PROC_INFO_TAB, &pid, p);
+	HASH_FIND(hh, PROC_INFO_TAB, &pid, sizeof(pid), p);
 	return p;
 }
 
