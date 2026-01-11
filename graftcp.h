@@ -81,10 +81,22 @@
 
 #define MIN_CLOSE_MSEC 500
 
-struct socket_info {
+struct socket_key {
 	pid_t pid;
 	int fd;
-	uint64_t magic_fd;
+};
+
+static inline struct socket_key socket_key(pid_t pid, int fd)
+{
+	struct socket_key key;
+	memset(&key, 0, sizeof(key));
+	key.pid = pid;
+	key.fd = fd;
+	return key;
+}
+
+struct socket_info {
+	struct socket_key key;
 	int domain;
 	int type;
 	size_t dest_addr_len;
@@ -92,10 +104,6 @@ struct socket_info {
 	struct timeval conn_ti;
 	UT_hash_handle hh;	/* makes this structure hashable */
 };
-
-/* magic fd number */
-#define MAGIC_FD  7777777
-#define MAGIC_NUM 3579
 
 #define FLAG_STARTUP    00002
 #define FLAG_INSYSCALL  00010
@@ -106,13 +114,13 @@ struct proc_info {
 	pid_t pid;
 	int flags;
 	int csn;		/* current syscall number */
-	struct socket_info *cws;	/* current process's writing socket info */
+	struct socket_info *pending_socket;
 	UT_hash_handle hh;	/* makes this structure hashable */
 };
 
 void add_socket_info(struct socket_info *s);
 void del_socket_info(struct socket_info *s);
-struct socket_info *find_socket_info(uint64_t magic_fd);
+struct socket_info *find_socket_info(pid_t pid, int fd);
 
 void add_proc_info(struct proc_info *p);
 void del_proc_info(struct proc_info *p);
