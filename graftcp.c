@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <getopt.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include <pwd.h>
 #include <grp.h>
 #include <linux/version.h>
@@ -69,15 +70,17 @@ static void load_ip_file(char *path, cidr_trie_t **trie)
 		exit(1);
 	}
 	while ((read = getline(&line, &len, f)) != -1) {
+		while (read > 0 && isspace((unsigned char)line[read - 1]))
+			line[--read] = '\0';
+
 		/* 7 is the shortest ip: (x.x.x.x) */
 		if (read < 7)
 			continue;
-		line[read - 1] = '\0';
 		if (*trie == NULL)
 			*trie = cidr_trie_new();
 		cidr_trie_insert_str(*trie, line, 1);
-		line = NULL;
 	}
+	free(line);
 	fclose(f);
 }
 
