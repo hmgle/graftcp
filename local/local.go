@@ -229,9 +229,15 @@ func (l *Local) HandleConn(conn *net.TCPConn) error {
 		return fmt.Errorf("bad dialer")
 	}
 	destConn, err := dialer.Dial("tcp", destAddr)
-	if err != nil && l.selectMode == AutoSelectMode { // AutoSelectMode try direct
-		log.Infof("dial %s direct", destAddr)
-		destConn, err = net.Dial("tcp", destAddr)
+	if err != nil && l.selectMode == AutoSelectMode {
+		if l.httpProxyDialer != nil && dialer != l.httpProxyDialer {
+			log.Infof("try http_proxy for %s", destAddr)
+			destConn, err = l.httpProxyDialer.Dial("tcp", destAddr)
+		}
+		if err != nil {
+			log.Infof("dial %s direct", destAddr)
+			destConn, err = net.Dial("tcp", destAddr)
+		}
 	}
 	if err != nil {
 		log.Errorf("dialer.Dial(%s) err: %s", destAddr, err.Error())
