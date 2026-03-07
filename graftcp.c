@@ -687,6 +687,7 @@ int client_main(int argc, char **argv)
 			BLACKLIST_IP = cidr_trie_new();
 		cidr_trie_insert_str(BLACKLIST_IP, conf.local_addr, 1);
 		cidr_trie_insert_str(BLACKLIST_IP, LOCAL_DEFAULT_ADDR, 1);
+		cidr_trie_insert_str(BLACKLIST_IP, "::1", 1);
 	}
 	PROXY_SA.sin_family = AF_INET;
 	PROXY_SA.sin_port = htons(*conf.local_port);
