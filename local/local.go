@@ -255,10 +255,21 @@ func (l *Local) HandleConn(conn *net.TCPConn) error {
 }
 
 func pipe(dst, src net.Conn, c chan int64) {
-	n, _ := io.Copy(dst, src)
+	n, err := io.Copy(dst, src)
+	if err == nil || errors.Is(err, io.EOF) {
+		type closeWriter interface {
+			CloseWrite() error
+		}
+		if cw, ok := dst.(closeWriter); ok {
+			_ = cw.CloseWrite()
+		}
+		c <- n
+		return
+	}
+
 	now := time.Now()
-	dst.SetDeadline(now)
-	src.SetDeadline(now)
+	_ = dst.SetDeadline(now)
+	_ = src.SetDeadline(now)
 	c <- n
 }
 
