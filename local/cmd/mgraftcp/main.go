@@ -245,7 +245,6 @@ func main() {
 	}
 
 	l := local.NewLocal(":0", socks5Addr, socks5User, socks5Pwd, httpProxyAddr)
-	defer l.Close()
 	l.SetSelectMode(selectProxyMode)
 	activeRegistry = l.Registry()
 

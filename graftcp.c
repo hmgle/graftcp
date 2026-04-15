@@ -66,15 +66,27 @@ static void release_socket_token(struct socket_info *si)
 	si->token_registered = false;
 }
 
+static void build_loopback_sockaddr4(struct sockaddr_in *sa, uint32_t token,
+				     uint16_t port)
+{
+	memset(sa, 0, sizeof(*sa));
+	sa->sin_family = AF_INET;
+	sa->sin_port = htons(port);
+	sa->sin_addr.s_addr = htonl(token);
+}
+
 static void build_loopback_sockaddr6(struct sockaddr_in6 *sa6, uint32_t token,
 				     uint16_t port)
 {
+	uint32_t token_network = htonl(token);
+
 	memset(sa6, 0, sizeof(*sa6));
 	sa6->sin6_family = AF_INET6;
 	sa6->sin6_port = htons(port);
 	sa6->sin6_addr.s6_addr[10] = 0xff;
 	sa6->sin6_addr.s6_addr[11] = 0xff;
-	memcpy(sa6->sin6_addr.s6_addr + 12, &token, sizeof(token));
+	memcpy(sa6->sin6_addr.s6_addr + 12, &token_network,
+	       sizeof(token_network));
 }
 
 static void load_ip_file(char *path, cidr_trie_t **trie)
@@ -295,10 +307,8 @@ void connect_pre_handle(struct proc_info *pinfp)
 	if (dest_sa.sin_family == AF_INET) { /* IPv4 */
 		memcpy(si->dest_addr, &dest_sa, sizeof(dest_sa));
 		si->dest_addr_len = sizeof(dest_sa);
-		memset(&proxy_sa, 0, sizeof(proxy_sa));
-		proxy_sa.sin_family = AF_INET;
-		proxy_sa.sin_port = htons(LOCAL_PROXY_PORT);
-		proxy_sa.sin_addr.s_addr = loopback_token;
+		build_loopback_sockaddr4(&proxy_sa, loopback_token,
+					 LOCAL_PROXY_PORT);
 		putdata(pinfp->pid, addr, (char *)&proxy_sa, sizeof(proxy_sa));
 	} else { /* IPv6 */
 		memcpy(si->dest_addr, &dest_sa6, sizeof(dest_sa6));

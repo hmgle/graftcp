@@ -102,14 +102,6 @@ func (l *Local) Registry() *RouteRegistry {
 	return l.routes
 }
 
-// Close releases background resources owned by the local runtime.
-func (l *Local) Close() {
-	if l == nil || l.routes == nil {
-		return
-	}
-	l.routes.Close()
-}
-
 // SetSelectMode set the select mode for l.
 func (l *Local) SetSelectMode(mode string) {
 	switch mode {
@@ -202,13 +194,12 @@ func (l *Local) Start() {
 // HandleConn handle conn.
 func (l *Local) HandleConn(conn *net.TCPConn) error {
 	raddr, laddr := conn.RemoteAddr().(*net.TCPAddr), conn.LocalAddr().(*net.TCPAddr)
-	token, destAddr, ok := l.routes.Lookup(laddr.IP)
+	token, destAddr, ok := l.routes.Consume(laddr.IP)
 	if !ok {
 		log.Errorf("route lookup failed for source %s, local %s", raddr.String(), laddr.String())
 		conn.Close()
 		return fmt.Errorf("can't find the destAddr for %s", raddr.String())
 	}
-	defer l.routes.ReleaseToken(token)
 
 	log.Infof("Request Token: %s, Source Addr: %s, Dest Addr: %s", TokenToIP(token), raddr.String(), destAddr)
 
