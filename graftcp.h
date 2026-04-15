@@ -16,6 +16,7 @@
 #define GRAFTCP_H
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <unistd.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -79,8 +80,6 @@
 #define satosin6(x)  ((struct sockaddr_in6 *) &(x))
 #define SOCKPORT6(x) (satosin6(x)->sin6_port)
 
-#define MIN_CLOSE_MSEC 500
-
 struct socket_key {
 	pid_t pid;
 	int fd;
@@ -101,7 +100,8 @@ struct socket_info {
 	int type;
 	size_t dest_addr_len;
 	char dest_addr[sizeof(struct sockaddr_in6)];
-	struct timeval conn_ti;
+	uint32_t loopback_token;
+	bool token_registered;
 	UT_hash_handle hh;	/* makes this structure hashable */
 };
 

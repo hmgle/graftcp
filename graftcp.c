@@ -37,15 +37,14 @@
 #define VERSION "v0.7"
 #endif
 
-struct sockaddr_in PROXY_SA;
-struct sockaddr_in6 PROXY_SA6;
+extern uint32_t mgraftcp_register_connect(int family, const char *addr,
+					  uint16_t port);
+extern void mgraftcp_release_connect(uint32_t token);
 
 char *DEFAULT_LOCAL_ADDR         = "127.0.0.1";
-char *LOCAL_DEFAULT_ADDR         = "0.0.0.0";
 uint16_t DEFAULT_LOCAL_PORT      = 2233;
-char *DEFAULT_LOCAL_PIPE_PAHT    = "/tmp/graftcplocal.fifo";
 bool DEFAULT_IGNORE_LOCAL        = true;
-int LOCAL_PIPE_FD;
+uint16_t LOCAL_PROXY_PORT;
 
 cidr_trie_t *BLACKLIST_IP     = NULL;
 cidr_trie_t *WHITELACKLIST_IP = NULL;
@@ -56,6 +55,27 @@ static gid_t run_gid;
 static char *run_home;
 
 static int exit_code = 0;
+
+static void release_socket_token(struct socket_info *si)
+{
+	if (si == NULL || !si->token_registered)
+		return;
+
+	mgraftcp_release_connect(si->loopback_token);
+	si->loopback_token = 0;
+	si->token_registered = false;
+}
+
+static void build_loopback_sockaddr6(struct sockaddr_in6 *sa6, uint32_t token,
+				     uint16_t port)
+{
+	memset(sa6, 0, sizeof(*sa6));
+	sa6->sin6_family = AF_INET6;
+	sa6->sin6_port = htons(port);
+	sa6->sin6_addr.s6_addr[10] = 0xff;
+	sa6->sin6_addr.s6_addr[11] = 0xff;
+	memcpy(sa6->sin6_addr.s6_addr + 12, &token, sizeof(token));
+}
 
 static void load_ip_file(char *path, cidr_trie_t **trie)
 {
@@ -231,10 +251,16 @@ void connect_pre_handle(struct proc_info *pinfp)
 	long addr = get_syscall_arg(pinfp->pid, 1);
 	struct sockaddr_in dest_sa;
 	struct sockaddr_in6 dest_sa6;
+	struct sockaddr_in proxy_sa;
+	struct sockaddr_in6 proxy_sa6;
 	unsigned short dest_ip_port;
 	struct in_addr dest_ip_addr;
 	char *dest_ip_addr_str;
 	char dest_str[INET6_ADDRSTRLEN];
+	uint32_t loopback_token;
+
+	release_socket_token(si);
+	si->dest_addr_len = 0;
 
 	getdata(pinfp->pid, addr, (char *)&dest_sa, sizeof(dest_sa));
 
@@ -255,42 +281,40 @@ void connect_pre_handle(struct proc_info *pinfp)
 		return;
 	}
 
+	loopback_token = mgraftcp_register_connect(dest_sa.sin_family,
+						   dest_ip_addr_str,
+						   ntohs(dest_ip_port));
+	if (loopback_token == 0) {
+		fprintf(stderr, "mgraftcp register connect failed for %s:%d\n",
+			dest_ip_addr_str, ntohs(dest_ip_port));
+		return;
+	}
+	si->loopback_token = loopback_token;
+	si->token_registered = true;
+
 	if (dest_sa.sin_family == AF_INET) { /* IPv4 */
 		memcpy(si->dest_addr, &dest_sa, sizeof(dest_sa));
 		si->dest_addr_len = sizeof(dest_sa);
-		putdata(pinfp->pid, addr, (char *)&PROXY_SA, sizeof(PROXY_SA));
+		memset(&proxy_sa, 0, sizeof(proxy_sa));
+		proxy_sa.sin_family = AF_INET;
+		proxy_sa.sin_port = htons(LOCAL_PROXY_PORT);
+		proxy_sa.sin_addr.s_addr = loopback_token;
+		putdata(pinfp->pid, addr, (char *)&proxy_sa, sizeof(proxy_sa));
 	} else { /* IPv6 */
 		memcpy(si->dest_addr, &dest_sa6, sizeof(dest_sa6));
 		si->dest_addr_len = sizeof(dest_sa6);
-		putdata(pinfp->pid, addr, (char *)&PROXY_SA6, sizeof(PROXY_SA6));
+		build_loopback_sockaddr6(&proxy_sa6, loopback_token,
+					 LOCAL_PROXY_PORT);
+		putdata(pinfp->pid, addr, (char *)&proxy_sa6, sizeof(proxy_sa6));
 	}
-
-	char buf[1024] = { 0 };
-	strcpy(buf, dest_ip_addr_str);
-	strcat(buf, ":");
-	sprintf(&buf[strlen(buf)], "%d:%d\n", ntohs(dest_ip_port), pinfp->pid);
-	if (write(LOCAL_PIPE_FD, buf, strlen(buf)) <= 0) {
-		if (errno)
-			perror("write");
-		fprintf(stderr, "write failed!\n");
-	}
-	gettimeofday(&si->conn_ti, NULL);
 }
 
 void close_pre_handle(struct proc_info *pinfp)
 {
 	int fd = get_syscall_arg(pinfp->pid, 0);
 	struct socket_info *si = find_socket_info(pinfp->pid, fd);
-	struct timeval now;
-	unsigned long delta_ms;
 
 	if (si) {
-		gettimeofday(&now, NULL);
-		delta_ms = (now.tv_sec - si->conn_ti.tv_sec) * 1000 +
-			(now.tv_usec - si->conn_ti.tv_usec) / 1000;
-		if (delta_ms < MIN_CLOSE_MSEC)
-			usleep((MIN_CLOSE_MSEC - delta_ms) * 1000);
-
 		del_socket_info(si);
 		free(si);
 	}
@@ -328,10 +352,17 @@ void connect_exiting_handle(struct proc_info *pinfp)
 {
 	int socket_fd = get_syscall_arg(pinfp->pid, 0);
 	struct socket_info *si = find_socket_info(pinfp->pid, socket_fd);
+	int ret;
 	if (si == NULL || si->dest_addr_len == 0)
 		return;
 	long addr = get_syscall_arg(pinfp->pid, 1);
 	putdata(pinfp->pid, addr, si->dest_addr, si->dest_addr_len);
+
+	ret = get_retval(pinfp->pid);
+	if (ret < 0 && ret != -EINPROGRESS && ret != -EALREADY
+	    && ret != -EWOULDBLOCK && ret != -EAGAIN) {
+		release_socket_token(si);
+	}
 }
 
 void do_child(struct graftcp_conf *conf, int argc, char **argv)
@@ -499,6 +530,7 @@ int do_trace()
 		    || !WIFSTOPPED(status)) {
 			exit_code = WEXITSTATUS(status);
 			if (pinfp->pending_socket) {
+				release_socket_token(pinfp->pending_socket);
 				free(pinfp->pending_socket);
 				pinfp->pending_socket = NULL;
 			}
@@ -554,13 +586,10 @@ static void usage(char **argv)
 		"  -c --conf-file=<config-file-path>\n"
 		"                    Specify configuration file.\n"
 		"                    Default: $XDG_CONFIG_HOME/graftcp/graftcp.conf\n"
-		"  -a --local-addr=<graftcp-local-IP-addr>\n"
-		"                    graftcp-local's IP address. Default: localhost\n"
-		"  -p --local-port=<graftcp-local-port>\n"
-		"                    Which port is graftcp-local listening? Default: 2233\n"
-		"  -f --local-fifo=<fifo-path>\n"
-		"                    Path of fifo to communicate with graftcp-local.\n"
-		"                    Default: /tmp/graftcplocal.fifo\n"
+		"  -a --local-addr=<embedded-listener-ip>\n"
+		"                    Reserved for the embedded mgraftcp runtime\n"
+		"  -p --local-port=<embedded-listener-port>\n"
+		"                    Which embedded listener port should be used? Default: 2233\n"
 		"  -b --blackip-file=<black-ip-file-path>\n"
 		"                    The IP in black-ip-file will connect direct\n"
 		"  -w --whiteip-file=<white-ip-file-path>\n"
@@ -587,7 +616,6 @@ int client_main(int argc, char **argv)
 		{"conf-file", required_argument, 0, 'c'},
 		{"local-addr", required_argument, 0, 'a'},
 		{"local-port", required_argument, 0, 'p'},
-		{"local-fifo", required_argument, 0, 'f'},
 		{"blackip-file", required_argument, 0, 'b'},
 		{"whiteip-file", required_argument, 0, 'w'},
 		{"user", required_argument, 0, 'u'},
@@ -598,7 +626,6 @@ int client_main(int argc, char **argv)
 	struct graftcp_conf conf = {
 		.local_addr             = DEFAULT_LOCAL_ADDR,
 		.local_port             = &DEFAULT_LOCAL_PORT,
-		.pipe_path              = DEFAULT_LOCAL_PIPE_PAHT,
 		.blackip_file_path      = NULL,
 		.whiteip_file_path      = NULL,
 		.ignore_local           = &DEFAULT_IGNORE_LOCAL,
@@ -611,7 +638,7 @@ int client_main(int argc, char **argv)
 	conf_init(&file_conf);
 	conf_init(&cmd_conf);
 
-	while ((opt = getopt_long(argc, argv, "+Vha:p:f:b:w:c:u:n", long_opts,
+	while ((opt = getopt_long(argc, argv, "+Vha:p:b:w:c:u:n", long_opts,
 			    	&index)) != -1) {
 		switch (opt) {
 		case 'a':
@@ -624,13 +651,6 @@ int client_main(int argc, char **argv)
 		case 'p':
 			cmd_conf.local_port = malloc(sizeof(*cmd_conf.local_port));
 			*cmd_conf.local_port = atoi(optarg);
-			break;
-		case 'f':
-			cmd_conf.pipe_path = strdup(optarg);
-			if (cmd_conf.pipe_path == NULL) {
-				perror("strdup");
-				exit(1);
-			}
 			break;
 		case 'b':
 			cmd_conf.blackip_file_path = strdup(optarg);
@@ -685,35 +705,11 @@ int client_main(int argc, char **argv)
 	if (*conf.ignore_local) {
 		if (BLACKLIST_IP == NULL)
 			BLACKLIST_IP = cidr_trie_new();
-		cidr_trie_insert_str(BLACKLIST_IP, conf.local_addr, 1);
-		cidr_trie_insert_str(BLACKLIST_IP, LOCAL_DEFAULT_ADDR, 1);
+		cidr_trie_insert_str(BLACKLIST_IP, "127.0.0.0/8", 1);
+		cidr_trie_insert_str(BLACKLIST_IP, "0.0.0.0/32", 1);
 		cidr_trie_insert_str(BLACKLIST_IP, "::1", 1);
 	}
-	PROXY_SA.sin_family = AF_INET;
-	PROXY_SA.sin_port = htons(*conf.local_port);
-	if (inet_aton(conf.local_addr, &PROXY_SA.sin_addr) == 0) {
-		struct hostent *he;
-
-		he = gethostbyname(conf.local_addr);
-		if (he == NULL) {
-			perror("gethostbyname");
-			exit(errno);
-		}
-		memcpy(&PROXY_SA.sin_addr, he->h_addr, sizeof(struct in_addr));
-	}
-	PROXY_SA6.sin6_family = AF_INET6;
-	PROXY_SA6.sin6_port = htons(*conf.local_port);
-	if (inet_pton(AF_INET6, "::1", &PROXY_SA6.sin6_addr) < 0 ) {
-		perror("inet_pton");
-		exit(errno);
-	}
-
-	LOCAL_PIPE_FD = open(conf.pipe_path, O_WRONLY);
-	if (LOCAL_PIPE_FD < 0) {
-		perror("open fifo");
-		fprintf(stderr, "It seems that graftcp-local is not running, should start graftcp-local first.\n");
-		exit(errno);
-	}
+	LOCAL_PROXY_PORT = *conf.local_port;
 
 	if (conf.username) {
 		struct passwd *pent;

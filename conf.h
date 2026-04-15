@@ -22,7 +22,6 @@
 struct graftcp_conf {
 	char *local_addr;
 	uint16_t *local_port;
-	char *pipe_path;
 	char *blackip_file_path;
 	char *whiteip_file_path;
 	bool *ignore_local;

@@ -15,13 +15,10 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"io/ioutil"
-	"log"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"unsafe"
 
 	"github.com/hmgle/graftcp/local"
@@ -97,6 +94,45 @@ func setCfg(key, val string) {
 		httpProxyAddr = val
 	case "select_proxy_mode":
 		selectProxyMode = val
+	case "blackip_file_path", "blackip-file":
+		blackIPFile = val
+	case "whiteip_file_path", "whiteip-file":
+		whiteIPFile = val
+	case "username":
+		userName = val
+	case "ignore_local":
+		notIgnoreLocal = !parseBool(val, true)
+	case "not_ignore_local", "not-ignore-local":
+		notIgnoreLocal = parseBool(val, false)
+	}
+}
+
+func parseBool(val string, defaultValue bool) bool {
+	switch strings.ToLower(strings.TrimSpace(val)) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return defaultValue
+	}
+}
+
+func configKeyOverriddenByFlag(flagset map[string]bool, key string) bool {
+	key = strings.ToLower(strings.TrimSpace(key))
+	if flagset[key] {
+		return true
+	}
+
+	switch key {
+	case "blackip_file_path":
+		return flagset["blackip-file"]
+	case "whiteip_file_path":
+		return flagset["whiteip-file"]
+	case "ignore_local", "not_ignore_local":
+		return flagset["not-ignore-local"]
+	default:
+		return false
 	}
 }
 
@@ -114,9 +150,9 @@ func parseLine(line string) (key, val string) {
 
 func parseConfigFile(path string) error {
 	if path == "" {
-		// try default config file "graftcp-local.conf"
+		// try default config file "mgraftcp.conf"
 		exePath := local.GetExePath()
-		defaultConf := filepath.Dir(exePath) + "/graftcp-local.conf"
+		defaultConf := filepath.Dir(exePath) + "/mgraftcp.conf"
 		if _, err := os.Stat(defaultConf); err == nil {
 			if enableDebugLog {
 				dlog.Infof("find config: %s", defaultConf)
@@ -124,20 +160,20 @@ func parseConfigFile(path string) error {
 			path = defaultConf
 			goto loadConf
 		}
-		// try $XDG_CONFIG_HOME/graftcp-local/graftcp-local.conf
+		// try $XDG_CONFIG_HOME/mgraftcp/mgraftcp.conf
 		var dotConf string
 		if xdgConfPath := os.Getenv("XDG_CONFIG_HOME"); xdgConfPath != "" {
-			dotConf = filepath.Join(xdgConfPath, "graftcp-local", "graftcp-local.conf")
+			dotConf = filepath.Join(xdgConfPath, "mgraftcp", "mgraftcp.conf")
 		} else if homeDir, err := os.UserHomeDir(); err == nil {
-			dotConf = filepath.Join(homeDir, ".config", "graftcp-local", "graftcp-local.conf")
+			dotConf = filepath.Join(homeDir, ".config", "mgraftcp", "mgraftcp.conf")
 		}
 		if _, err := os.Stat(dotConf); err == nil {
 			dlog.Infof("find config: %s", dotConf)
 			path = dotConf
 			goto loadConf
 		}
-		// try "/etc/graftcp-local/graftcp-local.conf"
-		etcConf := "/etc/graftcp-local/graftcp-local.conf"
+		// try "/etc/mgraftcp/mgraftcp.conf"
+		etcConf := "/etc/mgraftcp/mgraftcp.conf"
 		if _, err := os.Stat(etcConf); err == nil {
 			if enableDebugLog {
 				dlog.Infof("find config: %s", etcConf)
@@ -168,7 +204,7 @@ loadConf:
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
-				if k, v := parseLine(line); !flagset[k] {
+				if k, v := parseLine(line); !configKeyOverriddenByFlag(flagset, k) {
 					setCfg(k, v)
 				}
 				break
@@ -178,7 +214,7 @@ loadConf:
 			}
 			return err
 		}
-		if k, v := parseLine(line); !flagset[k] {
+		if k, v := parseLine(line); !configKeyOverriddenByFlag(flagset, k) {
 			setCfg(k, v)
 		}
 	}
@@ -209,25 +245,13 @@ func main() {
 	}
 
 	l := local.NewLocal(":0", socks5Addr, socks5User, socks5Pwd, httpProxyAddr)
+	defer l.Close()
 	l.SetSelectMode(selectProxyMode)
+	activeRegistry = l.Registry()
 
-	tmpDir, err := ioutil.TempDir("/tmp", "mgraftcp")
-	if err != nil {
-		log.Fatalf("ioutil.TempDir err: %s", err.Error())
-	}
-	defer os.RemoveAll(tmpDir)
-	pipePath := tmpDir + "/mgraftcp.fifo"
-	syscall.Mkfifo(pipePath, uint32(os.ModePerm))
-
-	l.FifoFd, err = os.OpenFile(pipePath, os.O_RDWR, 0)
-	if err != nil {
-		log.Fatalf("os.OpenFile(%s) err: %s", pipePath, err.Error())
-	}
-
-	go l.UpdateProcessAddrInfo()
 	ln, err := l.StartListen()
 	if err != nil {
-		log.Fatalf("l.StartListen err: %s", err.Error())
+		dlog.Fatalf("l.StartListen err: %s", err.Error())
 	}
 	go l.StartService(ln)
 	defer ln.Close()
@@ -236,7 +260,7 @@ func main() {
 
 	var fixArgs []string
 	fixArgs = append(fixArgs, os.Args[0])
-	fixArgs = append(fixArgs, "-p", strconv.Itoa(faddr.Port), "-f", pipePath)
+	fixArgs = append(fixArgs, "-p", strconv.Itoa(faddr.Port))
 	if blackIPFile != "" {
 		fixArgs = append(fixArgs, "-b", blackIPFile)
 	}

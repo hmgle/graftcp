@@ -22,7 +22,6 @@
 
 static int config_local_addr(const char *, const char *, struct graftcp_conf *);
 static int config_local_port(const char *, const char *, struct graftcp_conf *);
-static int config_pipe_path(const char *, const char *, struct graftcp_conf *);
 static int config_blackip_file_path(const char *, const char *, struct graftcp_conf *);
 static int config_whiteip_file_path(const char *, const char *, struct graftcp_conf *);
 static int config_ignore_local(const char *, const char *, struct graftcp_conf *);
@@ -30,7 +29,6 @@ static int config_ignore_local(const char *, const char *, struct graftcp_conf *
 static const struct graftcp_config_t config[] = {
 	{ "local_addr",        config_local_addr        },
 	{ "local_port",        config_local_port        },
-	{ "pipepath",          config_pipe_path         },
 	{ "blackip_file_path", config_blackip_file_path },
 	{ "whiteip_file_path", config_whiteip_file_path },
 	{ "ignore_local",      config_ignore_local      },
@@ -55,14 +53,6 @@ static int config_local_port(const char *key, const char *value, struct graftcp_
 		return -1;
 	conf->local_port = malloc(sizeof(*conf->local_port));
 	*conf->local_port = port;
-	return 0;
-}
-
-static int config_pipe_path(const char *key, const char *value, struct graftcp_conf *conf)
-{
-	conf->pipe_path = strdup(value);
-	if (!conf->pipe_path)
-		return -1;
 	return 0;
 }
 
@@ -175,7 +165,6 @@ int conf_init(struct graftcp_conf *conf)
 {
 	conf->local_addr = NULL;
 	conf->local_port = NULL;
-	conf->pipe_path = NULL;
 	conf->blackip_file_path = NULL;
 	conf->whiteip_file_path = NULL;
 	conf->ignore_local = NULL;
@@ -192,10 +181,6 @@ void conf_free(struct graftcp_conf *conf)
 	if (conf->local_port) {
 		free(conf->local_port);
 		conf->local_port = NULL;
-	}
-	if (conf->pipe_path) {
-		free(conf->pipe_path);
-		conf->pipe_path = NULL;
 	}
 	if (conf->blackip_file_path) {
 		free(conf->blackip_file_path);
@@ -288,8 +273,6 @@ void conf_override(struct graftcp_conf *w, const struct graftcp_conf *r)
 		w->local_addr = r->local_addr;
 	if (r->local_port)
 		w->local_port = r->local_port;
-	if (r->pipe_path)
-		w->pipe_path = r->pipe_path;
 	if (r->blackip_file_path)
 		w->blackip_file_path = r->blackip_file_path;
 	if (r->whiteip_file_path)

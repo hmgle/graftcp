@@ -1,15 +1,12 @@
 package local
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"io"
 	"math/rand"
 	"net"
 	"net/url"
-	"os"
-	"strings"
 	"time"
 
 	"golang.org/x/net/proxy"
@@ -32,7 +29,7 @@ const (
 
 // Local ...
 type Local struct {
-	faddr *net.TCPAddr // Frontend address: graftcp-local address
+	faddr *net.TCPAddr // Frontend address for the embedded local proxy
 
 	faddrString string
 
@@ -40,7 +37,7 @@ type Local struct {
 	httpProxyDialer proxy.Dialer
 	directDialer    proxy.Dialer
 
-	FifoFd *os.File
+	routes *RouteRegistry
 
 	selectMode modeT
 }
@@ -59,6 +56,7 @@ func NewLocal(listenAddr, socks5Addr, socks5Username, socks5PassWord, httpProxyA
 	local := &Local{
 		faddr:       listenTCPAddr,
 		faddrString: listenAddr,
+		routes:      NewRouteRegistry(),
 	}
 	local.directDialer = proxy.Direct
 
@@ -94,6 +92,22 @@ func NewLocal(listenAddr, socks5Addr, socks5Username, socks5PassWord, httpProxyA
 		}
 	}
 	return local
+}
+
+// Registry exposes the route registry used by the local proxy listener.
+func (l *Local) Registry() *RouteRegistry {
+	if l == nil {
+		return nil
+	}
+	return l.routes
+}
+
+// Close releases background resources owned by the local runtime.
+func (l *Local) Close() {
+	if l == nil || l.routes == nil {
+		return
+	}
+	l.routes.Close()
 }
 
 // SetSelectMode set the select mode for l.
@@ -152,7 +166,7 @@ func (l *Local) StartListen() (ln *net.TCPListener, err error) {
 		log.Fatalf("net.ListenTCP(%s) err: %s", l.faddr.String(), err.Error())
 		return
 	}
-	log.Infof("graftcp-local start listening %s...", l.faddr.String())
+	log.Infof("mgraftcp local listener started on %s", l.faddr.String())
 	if l.faddr.Port == 0 {
 		l.faddrString = ln.Addr().String()
 		l.faddr, err = net.ResolveTCPAddr("tcp", l.faddrString)
@@ -185,42 +199,18 @@ func (l *Local) Start() {
 	l.StartService(ln)
 }
 
-func getPidByAddr(localAddr, remoteAddr *net.TCPAddr) (pid string, destAddr string) {
-	inode, err := getInodeByAddrs(localAddr, remoteAddr)
-	if err != nil {
-		log.Errorf("getInodeByAddrs(%s, %s) err: %s", localAddr, remoteAddr, err.Error())
-		return "", ""
-	}
-	for i := 0; i < 3; i++ { // try 3 times
-		RangePidAddr(func(p, a string) bool {
-			if hasIncludeInode(p, inode) {
-				pid = p
-				destAddr = a
-				return false
-			}
-			return true
-		})
-		if pid != "" {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if pid != "" {
-		DeletePidAddr(pid)
-	}
-	return
-}
-
 // HandleConn handle conn.
 func (l *Local) HandleConn(conn *net.TCPConn) error {
 	raddr, laddr := conn.RemoteAddr().(*net.TCPAddr), conn.LocalAddr().(*net.TCPAddr)
-	pid, destAddr := getPidByAddr(raddr, laddr)
-	if pid == "" || destAddr == "" {
-		log.Errorf("getPidByAddr(%s, %s) failed", raddr.String(), conn.LocalAddr().String())
+	token, destAddr, ok := l.routes.Lookup(laddr.IP)
+	if !ok {
+		log.Errorf("route lookup failed for source %s, local %s", raddr.String(), laddr.String())
 		conn.Close()
-		return fmt.Errorf("can't find the pid and destAddr for %s", raddr.String())
+		return fmt.Errorf("can't find the destAddr for %s", raddr.String())
 	}
-	log.Infof("Request PID: %s, Source Addr: %s, Dest Addr: %s", pid, raddr.String(), destAddr)
+	defer l.routes.ReleaseToken(token)
+
+	log.Infof("Request Token: %s, Source Addr: %s, Dest Addr: %s", TokenToIP(token), raddr.String(), destAddr)
 
 	dialer := l.proxySelector()
 	if dialer == nil {
@@ -271,42 +261,6 @@ func pipe(dst, src net.Conn, c chan int64) {
 	_ = dst.SetDeadline(now)
 	_ = src.SetDeadline(now)
 	c <- n
-}
-
-// UpdateProcessAddrInfo update process address info.
-func (l *Local) UpdateProcessAddrInfo() {
-	r := bufio.NewReader(l.FifoFd)
-	for {
-		line, _, err := r.ReadLine()
-		if err != nil {
-			log.Errorf("r.ReadLine err: %s", err.Error())
-			break
-		}
-		copyLine := string(line)
-		// dest_ipaddr:dest_port:pid
-		s := strings.Split(copyLine, ":")
-		if len(s) < 3 {
-			log.Errorf("r.ReadLine(): %s", copyLine)
-			continue
-		}
-		var (
-			pid  string
-			addr string
-		)
-		if len(s) > 3 { // IPv6
-			pid = s[len(s)-1]
-			destPort := s[len(s)-2]
-			destIP := copyLine[:len(copyLine)-2-len(pid)-len(destPort)]
-			addr = "[" + destIP + "]:" + destPort
-		} else { // IPv4
-			pid = s[2]
-			addr = s[0] + ":" + s[1]
-		}
-		go func() {
-			StorePidAddr(pid, addr)
-			log.Debugf("StorePidAddr(%s, %s)", pid, addr)
-		}()
-	}
 }
 
 func init() {
