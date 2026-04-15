@@ -30,7 +30,6 @@
 #endif /* ifdef ENABLE_SECCOMP_BPF */
 
 #include "graftcp.h"
-#include "conf.h"
 #include "cidr-trie.h"
 
 #ifndef VERSION
@@ -40,7 +39,6 @@
 extern uint32_t mgraftcp_register_connect(int family, const char *addr,
 					  uint16_t port);
 
-char *DEFAULT_LOCAL_ADDR         = "127.0.0.1";
 uint16_t DEFAULT_LOCAL_PORT      = 2233;
 bool DEFAULT_IGNORE_LOCAL        = true;
 uint16_t LOCAL_PROXY_PORT;
@@ -224,13 +222,14 @@ static void install_seccomp()
 void socket_pre_handle(struct proc_info *pinfp)
 {
 	struct socket_info *si = calloc(1, sizeof(*si));
-	si->domain = get_syscall_arg(pinfp->pid, 0);
-	si->type = get_syscall_arg(pinfp->pid, 1);
 
 #ifndef ENABLE_SECCOMP_BPF
+	int domain = get_syscall_arg(pinfp->pid, 0);
+	int type = get_syscall_arg(pinfp->pid, 1);
+
 	/* If not TCP socket, ignore */
-	if ((si->type & SOCK_STREAM) < 1
-	     || (si->domain != AF_INET && si->domain != AF_INET6)) {
+	if ((type & SOCK_STREAM) < 1
+	     || (domain != AF_INET && domain != AF_INET6)) {
 		free(si);
 		return;
 	}
@@ -338,7 +337,7 @@ void socket_exiting_handle(struct proc_info *pinfp, int fd)
 	add_socket_info(si);
 }
 
-void do_child(struct graftcp_conf *conf, int argc, char **argv)
+void do_child(const char *username, int argc, char **argv)
 {
 	char *args[argc + 1];
 	int i;
@@ -348,8 +347,8 @@ void do_child(struct graftcp_conf *conf, int argc, char **argv)
 		args[i] = argv[i];
 	args[argc] = NULL;
 	ptrace(PTRACE_TRACEME, 0, NULL, NULL);
-	if (conf->username) {
-		if (initgroups(conf->username, run_gid) < 0) {
+	if (username) {
+		if (initgroups(username, run_gid) < 0) {
 			perror("initgroups");
 			exit(errno);
 		}
@@ -379,7 +378,7 @@ void do_child(struct graftcp_conf *conf, int argc, char **argv)
 	}
 }
 
-void init(struct graftcp_conf *conf, int argc, char **argv)
+void init(const char *username, int argc, char **argv)
 {
 	pid_t child;
 	struct proc_info *pi;
@@ -392,7 +391,7 @@ void init(struct graftcp_conf *conf, int argc, char **argv)
 #ifdef ENABLE_SECCOMP_BPF
 		install_seccomp();
 #endif
-		do_child(conf, argc, argv);
+		do_child(username, argc, argv);
 	}
 	pi = alloc_proc_info(child);
 	pi->flags |= FLAG_STARTUP;
@@ -552,11 +551,6 @@ static void usage(char **argv)
 {
 	fprintf(stderr, "Usage: %s [options] prog [prog-args]\n\n"
 		"Options:\n"
-		"  -c --conf-file=<config-file-path>\n"
-		"                    Specify configuration file.\n"
-		"                    Default: $XDG_CONFIG_HOME/graftcp/graftcp.conf\n"
-		"  -a --local-addr=<embedded-listener-ip>\n"
-		"                    Reserved for the embedded mgraftcp runtime\n"
 		"  -p --local-port=<embedded-listener-port>\n"
 		"                    Which embedded listener port should be used? Default: 2233\n"
 		"  -b --blackip-file=<black-ip-file-path>\n"
@@ -579,11 +573,14 @@ static void usage(char **argv)
 int client_main(int argc, char **argv)
 {
 	int opt, index;
+	char *blackip_file_path = NULL;
+	char *whiteip_file_path = NULL;
+	char *username = NULL;
+	bool ignore_local = DEFAULT_IGNORE_LOCAL;
+	uint16_t local_proxy_port = DEFAULT_LOCAL_PORT;
 	struct option long_opts[] = {
 		{"help", no_argument, 0, 'h'},
 		{"version", no_argument, 0, 'V'},
-		{"conf-file", required_argument, 0, 'c'},
-		{"local-addr", required_argument, 0, 'a'},
 		{"local-port", required_argument, 0, 'p'},
 		{"blackip-file", required_argument, 0, 'b'},
 		{"whiteip-file", required_argument, 0, 'w'},
@@ -592,63 +589,32 @@ int client_main(int argc, char **argv)
 		{0, 0, 0, 0}
 	};
 
-	struct graftcp_conf conf = {
-		.local_addr             = DEFAULT_LOCAL_ADDR,
-		.local_port             = &DEFAULT_LOCAL_PORT,
-		.blackip_file_path      = NULL,
-		.whiteip_file_path      = NULL,
-		.ignore_local           = &DEFAULT_IGNORE_LOCAL,
-		.username               = NULL,
-	};
-
-	__defer_free char *conf_file_path = NULL;
-	__defer_conf_free struct graftcp_conf file_conf;
-	__defer_conf_free struct graftcp_conf cmd_conf;
-	conf_init(&file_conf);
-	conf_init(&cmd_conf);
-
-	while ((opt = getopt_long(argc, argv, "+Vha:p:b:w:c:u:n", long_opts,
-			    	&index)) != -1) {
+	while ((opt = getopt_long(argc, argv, "+Vhp:b:w:u:n", long_opts,
+				    	&index)) != -1) {
 		switch (opt) {
-		case 'a':
-			cmd_conf.local_addr = strdup(optarg);
-			if (cmd_conf.local_addr == NULL) {
-				perror("strdup");
-				exit(1);
-			}
-			break;
 		case 'p':
-			cmd_conf.local_port = malloc(sizeof(*cmd_conf.local_port));
-			*cmd_conf.local_port = atoi(optarg);
+			local_proxy_port = atoi(optarg);
 			break;
 		case 'b':
-			cmd_conf.blackip_file_path = strdup(optarg);
-			if (cmd_conf.blackip_file_path == NULL) {
+			blackip_file_path = strdup(optarg);
+			if (blackip_file_path == NULL) {
 				perror("strdup");
 				exit(1);
 			}
 			break;
 		case 'w':
-			cmd_conf.whiteip_file_path = strdup(optarg);
-			if (cmd_conf.whiteip_file_path == NULL) {
+			whiteip_file_path = strdup(optarg);
+			if (whiteip_file_path == NULL) {
 				perror("strdup");
 				exit(1);
 			}
 			break;
 		case 'n':
-			cmd_conf.ignore_local = malloc(sizeof(*cmd_conf.ignore_local));
-			*cmd_conf.ignore_local = false;
-			break;
-		case 'c':
-			conf_file_path = strdup(optarg);
-			if (conf_file_path == NULL) {
-				perror("strdup");
-				exit(1);
-			}
+			ignore_local = false;
 			break;
 		case 'u':
-			cmd_conf.username = strdup(optarg);
-			if (cmd_conf.username == NULL) {
+			username = strdup(optarg);
+			if (username == NULL) {
 				perror("strdup");
 				exit(1);
 			}
@@ -656,52 +622,52 @@ int client_main(int argc, char **argv)
 		case 'V':
 			fprintf(stderr, "graftcp %s\n", VERSION);
 			exit(0);
-		case 0:
-		case 'h':
-		default:
-			usage(argv);
-			exit(0);
-		}
+			case 0:
+			case 'h':
+			default:
+				usage(argv);
+				exit(0);
+			}
 	}
-	conf_read(conf_file_path, &file_conf);
-	conf_override(&conf, &file_conf);
-	conf_override(&conf, &cmd_conf);
 
-	if (conf.blackip_file_path)
-		load_blackip_file(conf.blackip_file_path);
-	if (conf.whiteip_file_path)
-		load_whiteip_file(conf.whiteip_file_path);
-	if (*conf.ignore_local) {
+	if (blackip_file_path)
+		load_blackip_file(blackip_file_path);
+	if (whiteip_file_path)
+		load_whiteip_file(whiteip_file_path);
+	if (ignore_local) {
 		if (BLACKLIST_IP == NULL)
 			BLACKLIST_IP = cidr_trie_new();
 		cidr_trie_insert_str(BLACKLIST_IP, "127.0.0.0/8", 1);
 		cidr_trie_insert_str(BLACKLIST_IP, "0.0.0.0/32", 1);
 		cidr_trie_insert_str(BLACKLIST_IP, "::1", 1);
 	}
-	LOCAL_PROXY_PORT = *conf.local_port;
+	LOCAL_PROXY_PORT = local_proxy_port;
 
-	if (conf.username) {
+	if (username) {
 		struct passwd *pent;
 
 		if (geteuid() != 0) {
 			fprintf(stderr, "You must be root to use the -u option\n");
 			exit(1);
 		}
-		pent = getpwnam(conf.username);
+		pent = getpwnam(username);
 		if (pent == NULL) {
-			fprintf(stderr, "Cannot find user '%s'\n", conf.username);
+			fprintf(stderr, "Cannot find user '%s'\n", username);
 			exit(1);
 		}
 		run_gid = pent->pw_gid;
 		run_uid = pent->pw_uid;
-		run_home = strdup(pent->pw_dir);
-		if (run_home == NULL) {
-			perror("strdup");
-			exit(1);
+			run_home = strdup(pent->pw_dir);
+			if (run_home == NULL) {
+				perror("strdup");
+				exit(1);
+			}
 		}
-	}
 
-	init(&conf, argc - optind, argv + optind);
+	init(username, argc - optind, argv + optind);
+	free(blackip_file_path);
+	free(whiteip_file_path);
+	free(username);
 	if (do_trace() < 0)
 		return -1;
 	return exit_code;

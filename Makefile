@@ -56,7 +56,7 @@ TARGET = local/mgraftcp
 .PHONY: all clean
 all: $(TARGET)
 
-libgraftcp.a: graftcp.o util.o cidr-trie.o conf.o
+libgraftcp.a: graftcp.o util.o cidr-trie.o
 	$(AR) rcs $@ $^
 
 %.o: %.c

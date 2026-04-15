@@ -96,8 +96,6 @@ static inline struct socket_key socket_key(pid_t pid, int fd)
 
 struct socket_info {
 	struct socket_key key;
-	int domain;
-	int type;
 	UT_hash_handle hh;	/* makes this structure hashable */
 };
 
