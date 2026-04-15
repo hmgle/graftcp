@@ -260,8 +260,6 @@ void connect_pre_handle(struct proc_info *pinfp)
 	char dest_str[INET6_ADDRSTRLEN];
 	uint32_t loopback_token;
 
-	si->dest_addr_len = 0;
-
 	getdata(pinfp->pid, addr, (char *)&dest_sa, sizeof(dest_sa));
 
 	if (dest_sa.sin_family == AF_INET) { /* IPv4 */
@@ -291,14 +289,10 @@ void connect_pre_handle(struct proc_info *pinfp)
 	}
 
 	if (dest_sa.sin_family == AF_INET) { /* IPv4 */
-		memcpy(si->dest_addr, &dest_sa, sizeof(dest_sa));
-		si->dest_addr_len = sizeof(dest_sa);
 		build_loopback_sockaddr4(&proxy_sa, loopback_token,
 					 LOCAL_PROXY_PORT);
 		putdata(pinfp->pid, addr, (char *)&proxy_sa, sizeof(proxy_sa));
 	} else { /* IPv6 */
-		memcpy(si->dest_addr, &dest_sa6, sizeof(dest_sa6));
-		si->dest_addr_len = sizeof(dest_sa6);
 		build_loopback_sockaddr6(&proxy_sa6, loopback_token,
 					 LOCAL_PROXY_PORT);
 		putdata(pinfp->pid, addr, (char *)&proxy_sa6, sizeof(proxy_sa6));
@@ -342,16 +336,6 @@ void socket_exiting_handle(struct proc_info *pinfp, int fd)
 	}
 	si->key = socket_key(pinfp->pid, fd);
 	add_socket_info(si);
-}
-
-void connect_exiting_handle(struct proc_info *pinfp)
-{
-	int socket_fd = get_syscall_arg(pinfp->pid, 0);
-	struct socket_info *si = find_socket_info(pinfp->pid, socket_fd);
-	if (si == NULL || si->dest_addr_len == 0)
-		return;
-	long addr = get_syscall_arg(pinfp->pid, 1);
-	putdata(pinfp->pid, addr, si->dest_addr, si->dest_addr_len);
 }
 
 void do_child(struct graftcp_conf *conf, int argc, char **argv)
@@ -456,9 +440,6 @@ int trace_syscall_exiting(struct proc_info *pinfp)
 			exit(errno);
 		}
 		socket_exiting_handle(pinfp, child_ret);
-		break;
-	case SYS_connect:
-		connect_exiting_handle(pinfp);
 		break;
 	}
 end:

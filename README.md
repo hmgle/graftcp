@@ -93,7 +93,7 @@ An example config is available in [`example-mgraftcp.conf`](./example-mgraftcp.c
 2. For every intercepted `connect(2)`, it records the original destination in an in-process route table and allocates a unique loopback token IP from `127.0.0.0/8`.
 3. The tracee's destination sockaddr is rewritten to that token IP plus the embedded listener port.
 4. When the embedded listener accepts the connection, it reads the token from `LocalAddr()`, resolves the original destination from the route table, then dials the configured SOCKS5/HTTP/direct path.
-5. The original sockaddr is restored in the tracee after the syscall exits, so the traced process still sees its own original destination argument.
+5. `mgraftcp` intentionally keeps weak socket visibility semantics: it does not restore the original `connect()` buffer after the syscall returns.
 
 For IPv6 `connect(2)`, `mgraftcp` rewrites to an IPv4-mapped loopback address (`::ffff:127.x.y.z`) so the same token registry can be reused.
 
@@ -103,3 +103,8 @@ For IPv6 `connect(2)`, `mgraftcp` rewrites to an IPv4-mapped loopback address (`
 - `ptrace(2)` permissions still apply. If tracing is blocked, check Yama `ptrace_scope`, capabilities, or run as root when appropriate.
 - Local destinations are ignored by default. Use `--not-ignore-local` to proxy loopback/private-local connects as well.
 - The proxy configuration file covers proxy endpoints and the common routing flags. CLI flags still override config values.
+- This branch intentionally does not virtualize `getpeername()` / `getsockname()`, and a traced program may observe the fake loopback endpoint in the original `connect()` buffer.
+- IPv6 is intentionally simplified to the IPv4-mapped loopback path; sockets that require `IPV6_V6ONLY=1` are out of scope by design.
+- Socket tracking is best-effort and keyed by `(pid, fd)`, not by shared fd tables; `dup*`, `close_range()`, and cross-thread socket ownership are intentionally not modeled.
+- Loopback-token registrations are reclaimed on accept, not on every failed or abandoned connect; stale entries may remain until the token space wraps and overwrites them.
+- The design rationale and tradeoffs are documented in [docs/simplicity-first-mgraftcp-design.zh-CN.md](./docs/simplicity-first-mgraftcp-design.zh-CN.md).

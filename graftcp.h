@@ -98,8 +98,6 @@ struct socket_info {
 	struct socket_key key;
 	int domain;
 	int type;
-	size_t dest_addr_len;
-	char dest_addr[sizeof(struct sockaddr_in6)];
 	UT_hash_handle hh;	/* makes this structure hashable */
 };
 

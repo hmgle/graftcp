@@ -93,7 +93,7 @@ Usage: mgraftcp [-hn] [-b value] [--config value] [--enable-debug-log] [--http_p
 2. 每次拦截到 `connect(2)` 时，把原始目标地址登记到进程内路由表，并从 `127.0.0.0/8` 分配一个唯一 Loopback token IP。
 3. 把 tracee 的目的 sockaddr 改写成这个 token IP 和内嵌 listener 的端口。
 4. 内嵌 listener `accept` 到连接后，从 `LocalAddr()` 取出 token，直接在进程内解析出原始目标地址，再按 SOCKS5 / HTTP / direct 策略发起真实连接。
-5. 系统调用返回后，会把 tracee 参数内存中的原始 sockaddr 写回去，因此被跟踪程序仍然看到自己的原始目标地址参数。
+5. `mgraftcp` 有意固定为弱语义：`connect()` 返回后，不再把 tracee 原始 `sockaddr` 缓冲区写回去。
 
 对 IPv6 `connect(2)`，当前实现会改写为 IPv4-mapped Loopback 地址 `::ffff:127.x.y.z`，从而复用同一套 token 路由逻辑。
 
@@ -103,3 +103,8 @@ Usage: mgraftcp [-hn] [-b value] [--config value] [--enable-debug-log] [--http_p
 - 仍然受 `ptrace(2)` 权限限制；如果跟踪失败，请检查 Yama `ptrace_scope`、能力集或是否需要 root。
 - 默认忽略本地目标地址；如果希望本地连接也走代理，使用 `--not-ignore-local`。
 - 配置文件支持代理地址和常见路由选项；命令行参数仍然覆盖配置文件。
+- 当前分支不会虚拟化 `getpeername()` / `getsockname()`，程序也可能在原始 `connect()` 缓冲区里看到 fake loopback endpoint。
+- IPv6 故意统一走 IPv4-mapped loopback；依赖 `IPV6_V6ONLY=1` 的 socket 不在当前设计目标内。
+- socket 跟踪是按 `(pid, fd)` 做的 best-effort，而不是按共享 fd table 建模；`dup*`、`close_range()`、跨线程共享 socket 等场景都属于有意不覆盖的边界。
+- loopback token 只会在本地 listener 成功 `accept()` 后回收；失败或放弃的连接可能留下残留条目，等待 token wrap-around 覆盖。
+- 设计取舍和风险说明见 [docs/simplicity-first-mgraftcp-design.zh-CN.md](./docs/simplicity-first-mgraftcp-design.zh-CN.md)。
