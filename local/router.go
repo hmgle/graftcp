@@ -78,30 +78,12 @@ func (r *RouteRegistry) Register(family int, host string, port uint16) (uint32, 
 
 // Consume resolves and removes the destination registered for the accepted
 // local loopback IP.
-func (r *RouteRegistry) Consume(localIP net.IP) (uint32, string, bool) {
-	token, ok := IPToToken(localIP)
+func (r *RouteRegistry) Consume(localIP net.IP) (string, bool) {
+	token, ok := ipToToken(localIP)
 	if !ok {
-		return 0, "", false
+		return "", false
 	}
 
-	destAddr, ok := r.loadAndDelete(token)
-	if !ok {
-		return 0, "", false
-	}
-	return token, destAddr, true
-}
-
-// ReleaseToken removes a token mapping. It is safe to call multiple times.
-func (r *RouteRegistry) ReleaseToken(token uint32) bool {
-	if token == 0 {
-		return false
-	}
-
-	_, ok := r.routes.LoadAndDelete(token)
-	return ok
-}
-
-func (r *RouteRegistry) loadAndDelete(token uint32) (string, bool) {
 	value, ok := r.routes.LoadAndDelete(token)
 	if !ok {
 		return "", false
@@ -114,8 +96,7 @@ func (r *RouteRegistry) loadAndDelete(token uint32) (string, bool) {
 	return destAddr, true
 }
 
-// IPToToken converts an accepted loopback IP to its registry token.
-func IPToToken(ip net.IP) (uint32, bool) {
+func ipToToken(ip net.IP) (uint32, bool) {
 	ip4 := ip.To4()
 	if ip4 == nil {
 		return 0, false
@@ -123,8 +104,7 @@ func IPToToken(ip net.IP) (uint32, bool) {
 	return binary.BigEndian.Uint32(ip4), true
 }
 
-// TokenToIP converts a registry token back to an IPv4 loopback address.
-func TokenToIP(token uint32) net.IP {
+func tokenToIP(token uint32) net.IP {
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], token)
 	return net.IPv4(buf[0], buf[1], buf[2], buf[3]).To4()

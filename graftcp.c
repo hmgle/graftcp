@@ -39,7 +39,6 @@
 
 extern uint32_t mgraftcp_register_connect(int family, const char *addr,
 					  uint16_t port);
-extern void mgraftcp_release_connect(uint32_t token);
 
 char *DEFAULT_LOCAL_ADDR         = "127.0.0.1";
 uint16_t DEFAULT_LOCAL_PORT      = 2233;
@@ -55,16 +54,6 @@ static gid_t run_gid;
 static char *run_home;
 
 static int exit_code = 0;
-
-static void release_socket_token(struct socket_info *si)
-{
-	if (si == NULL || !si->token_registered)
-		return;
-
-	mgraftcp_release_connect(si->loopback_token);
-	si->loopback_token = 0;
-	si->token_registered = false;
-}
 
 static void build_loopback_sockaddr4(struct sockaddr_in *sa, uint32_t token,
 				     uint16_t port)
@@ -271,7 +260,6 @@ void connect_pre_handle(struct proc_info *pinfp)
 	char dest_str[INET6_ADDRSTRLEN];
 	uint32_t loopback_token;
 
-	release_socket_token(si);
 	si->dest_addr_len = 0;
 
 	getdata(pinfp->pid, addr, (char *)&dest_sa, sizeof(dest_sa));
@@ -301,8 +289,6 @@ void connect_pre_handle(struct proc_info *pinfp)
 			dest_ip_addr_str, ntohs(dest_ip_port));
 		return;
 	}
-	si->loopback_token = loopback_token;
-	si->token_registered = true;
 
 	if (dest_sa.sin_family == AF_INET) { /* IPv4 */
 		memcpy(si->dest_addr, &dest_sa, sizeof(dest_sa));
@@ -362,17 +348,10 @@ void connect_exiting_handle(struct proc_info *pinfp)
 {
 	int socket_fd = get_syscall_arg(pinfp->pid, 0);
 	struct socket_info *si = find_socket_info(pinfp->pid, socket_fd);
-	int ret;
 	if (si == NULL || si->dest_addr_len == 0)
 		return;
 	long addr = get_syscall_arg(pinfp->pid, 1);
 	putdata(pinfp->pid, addr, si->dest_addr, si->dest_addr_len);
-
-	ret = get_retval(pinfp->pid);
-	if (ret < 0 && ret != -EINPROGRESS && ret != -EALREADY
-	    && ret != -EWOULDBLOCK && ret != -EAGAIN) {
-		release_socket_token(si);
-	}
 }
 
 void do_child(struct graftcp_conf *conf, int argc, char **argv)
@@ -536,17 +515,16 @@ int do_trace()
 			goto end;
 		}
 #endif
-		if (WIFSIGNALED(status) || WIFEXITED(status)
-		    || !WIFSTOPPED(status)) {
-			exit_code = WEXITSTATUS(status);
-			if (pinfp->pending_socket) {
-				release_socket_token(pinfp->pending_socket);
-				free(pinfp->pending_socket);
-				pinfp->pending_socket = NULL;
+			if (WIFSIGNALED(status) || WIFEXITED(status)
+			    || !WIFSTOPPED(status)) {
+				exit_code = WEXITSTATUS(status);
+				if (pinfp->pending_socket) {
+					free(pinfp->pending_socket);
+					pinfp->pending_socket = NULL;
+				}
+				/* TODO free pinfp */
+				continue;
 			}
-			/* TODO free pinfp */
-			continue;
-		}
 		sig = WSTOPSIG(status);
 		if (sig == SIGSTOP) {
 			sig = 0;

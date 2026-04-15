@@ -194,14 +194,14 @@ func (l *Local) Start() {
 // HandleConn handle conn.
 func (l *Local) HandleConn(conn *net.TCPConn) error {
 	raddr, laddr := conn.RemoteAddr().(*net.TCPAddr), conn.LocalAddr().(*net.TCPAddr)
-	token, destAddr, ok := l.routes.Consume(laddr.IP)
+	destAddr, ok := l.routes.Consume(laddr.IP)
 	if !ok {
 		log.Errorf("route lookup failed for source %s, local %s", raddr.String(), laddr.String())
 		conn.Close()
 		return fmt.Errorf("can't find the destAddr for %s", raddr.String())
 	}
 
-	log.Infof("Request Token: %s, Source Addr: %s, Dest Addr: %s", TokenToIP(token), raddr.String(), destAddr)
+	log.Infof("Request Token: %s, Source Addr: %s, Dest Addr: %s", laddr.IP.String(), raddr.String(), destAddr)
 
 	dialer := l.proxySelector()
 	if dialer == nil {

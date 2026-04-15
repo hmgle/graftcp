@@ -24,12 +24,3 @@ func mgraftcp_register_connect(family C.int, addr *C.char, port C.uint16_t) C.ui
 
 	return C.uint32_t(token)
 }
-
-//export mgraftcp_release_connect
-func mgraftcp_release_connect(token C.uint32_t) {
-	if activeRegistry == nil {
-		return
-	}
-
-	activeRegistry.ReleaseToken(uint32(token))
-}

@@ -100,8 +100,6 @@ struct socket_info {
 	int type;
 	size_t dest_addr_len;
 	char dest_addr[sizeof(struct sockaddr_in6)];
-	uint32_t loopback_token;
-	bool token_registered;
 	UT_hash_handle hh;	/* makes this structure hashable */
 };
 
