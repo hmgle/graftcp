@@ -21,6 +21,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <errno.h>
+#include <limits.h>
 #include <sys/ptrace.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -42,8 +43,6 @@
 #include <sys/syscall.h>
 #include <fcntl.h>
 #include <assert.h>
-
-#include "uthash.h"
 
 #if defined(__arm__) || defined(__arm64__) || defined(__aarch64__)
 
@@ -80,20 +79,25 @@
 #define satosin6(x)  ((struct sockaddr_in6 *) &(x))
 #define SOCKPORT6(x) (satosin6(x)->sin6_port)
 
-struct tracked_fd_entry;
-
 #define FLAG_STARTUP    00002
 #define FLAG_INSYSCALL  00010
 
 #define exiting(pinfp)  ((pinfp)->flags & FLAG_INSYSCALL)
+
+#define TRACKED_FD_WORD_BITS (sizeof(unsigned long) * CHAR_BIT)
+#define TRACKED_FD_INLINE_BITS 1024U
+#define TRACKED_FD_INLINE_WORDS \
+	((TRACKED_FD_INLINE_BITS + TRACKED_FD_WORD_BITS - 1U) / TRACKED_FD_WORD_BITS)
 
 struct proc_info {
 	pid_t pid;
 	int flags;
 	int csn;		/* current syscall number */
 	bool pending_socket;
-	struct tracked_fd_entry *tracked_fds;
-	UT_hash_handle hh;	/* makes this structure hashable */
+	size_t tracked_fd_capacity;
+	unsigned long *tracked_fd_bits;
+	unsigned long tracked_fd_inline[TRACKED_FD_INLINE_WORDS];
+	struct proc_info *next;
 };
 
 struct proc_info *find_proc_info(pid_t pid);
@@ -103,7 +107,6 @@ void free_proc_info(struct proc_info *p);
 int track_socket_fd(struct proc_info *pinfp, int fd);
 bool is_tracked_socket_fd(struct proc_info *pinfp, int fd);
 void untrack_socket_fd(struct proc_info *pinfp, int fd);
-void untrack_all_socket_fds(struct proc_info *pinfp);
 
 int get_syscall_number(pid_t pid);
 int get_retval(pid_t pid);

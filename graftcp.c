@@ -17,6 +17,7 @@
 #include <getopt.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <stddef.h>
 #include <pwd.h>
 #include <grp.h>
 #include <linux/version.h>

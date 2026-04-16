@@ -12,86 +12,157 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
+#include <stdlib.h>
+
 #include "graftcp.h"
 
-struct tracked_fd_entry {
-	int fd;
-	UT_hash_handle hh;
-};
-
-static struct tracked_fd_entry *find_tracked_fd(struct proc_info *pinfp, int fd)
+static size_t tracked_fd_word_count(size_t bit_count)
 {
-	struct tracked_fd_entry *entry = NULL;
+	return (bit_count + TRACKED_FD_WORD_BITS - 1U) / TRACKED_FD_WORD_BITS;
+}
+
+static bool using_inline_tracked_fds(const struct proc_info *pinfp)
+{
+	return pinfp != NULL && pinfp->tracked_fd_bits == pinfp->tracked_fd_inline;
+}
+
+static int resize_tracked_fds(struct proc_info *pinfp, size_t new_bit_count)
+{
+	size_t old_words;
+	size_t new_words;
+	unsigned long *new_bits;
 
 	if (pinfp == NULL)
-		return NULL;
-	HASH_FIND(hh, pinfp->tracked_fds, &fd, sizeof(fd), entry);
-	return entry;
+		return -1;
+	old_words = tracked_fd_word_count(pinfp->tracked_fd_capacity);
+	new_words = tracked_fd_word_count(new_bit_count);
+	if (new_words <= old_words) {
+		pinfp->tracked_fd_capacity = new_bit_count;
+		return 0;
+	}
+
+	if (using_inline_tracked_fds(pinfp)) {
+		new_bits = calloc(new_words, sizeof(*new_bits));
+		if (new_bits == NULL)
+			return -1;
+		memcpy(new_bits, pinfp->tracked_fd_inline,
+		       old_words * sizeof(*new_bits));
+	} else {
+		new_bits = realloc(pinfp->tracked_fd_bits,
+				   new_words * sizeof(*new_bits));
+		if (new_bits == NULL)
+			return -1;
+		memset(new_bits + old_words, 0,
+		       (new_words - old_words) * sizeof(*new_bits));
+	}
+
+	pinfp->tracked_fd_bits = new_bits;
+	pinfp->tracked_fd_capacity = new_bit_count;
+	return 0;
+}
+
+static int ensure_tracked_fd_capacity(struct proc_info *pinfp, int fd)
+{
+	size_t required_bits;
+	size_t new_bit_count;
+
+	if (pinfp == NULL || fd < 0)
+		return -1;
+	required_bits = (size_t)fd + 1U;
+	if (required_bits <= pinfp->tracked_fd_capacity)
+		return 0;
+
+	new_bit_count = pinfp->tracked_fd_capacity;
+	if (new_bit_count == 0)
+		new_bit_count = TRACKED_FD_INLINE_BITS;
+	while (new_bit_count < required_bits) {
+		if (new_bit_count > SIZE_MAX / 2U) {
+			new_bit_count = required_bits;
+			break;
+		}
+		new_bit_count *= 2U;
+	}
+
+	return resize_tracked_fds(pinfp, new_bit_count);
+}
+
+static unsigned long tracked_fd_bit(int fd)
+{
+	return 1UL << ((unsigned int)fd % TRACKED_FD_WORD_BITS);
+}
+
+static size_t tracked_fd_word_index(int fd)
+{
+	return (size_t)(unsigned int)fd / TRACKED_FD_WORD_BITS;
 }
 
 int track_socket_fd(struct proc_info *pinfp, int fd)
 {
-	struct tracked_fd_entry *entry;
+	if (pinfp == NULL || fd < 0)
+		return -1;
+	if (ensure_tracked_fd_capacity(pinfp, fd) < 0)
+		return -1;
 
-	if (pinfp == NULL)
-		return -1;
-	entry = find_tracked_fd(pinfp, fd);
-	if (entry != NULL)
-		return 0;
-	entry = calloc(1, sizeof(*entry));
-	if (entry == NULL)
-		return -1;
-	entry->fd = fd;
-	HASH_ADD(hh, pinfp->tracked_fds, fd, sizeof(entry->fd), entry);
+	pinfp->tracked_fd_bits[tracked_fd_word_index(fd)] |= tracked_fd_bit(fd);
 	return 0;
 }
 
 bool is_tracked_socket_fd(struct proc_info *pinfp, int fd)
 {
-	return find_tracked_fd(pinfp, fd) != NULL;
+	if (pinfp == NULL || fd < 0)
+		return false;
+	if ((size_t)fd >= pinfp->tracked_fd_capacity)
+		return false;
+
+	return (pinfp->tracked_fd_bits[tracked_fd_word_index(fd)] &
+		tracked_fd_bit(fd)) != 0;
 }
 
 void untrack_socket_fd(struct proc_info *pinfp, int fd)
 {
-	struct tracked_fd_entry *entry = find_tracked_fd(pinfp, fd);
-
-	if (entry == NULL)
+	if (pinfp == NULL || fd < 0)
 		return;
-	HASH_DEL(pinfp->tracked_fds, entry);
-	free(entry);
+	if ((size_t)fd >= pinfp->tracked_fd_capacity)
+		return;
+
+	pinfp->tracked_fd_bits[tracked_fd_word_index(fd)] &= ~tracked_fd_bit(fd);
 }
 
-void untrack_all_socket_fds(struct proc_info *pinfp)
+static struct proc_info *PROC_INFO_LIST = NULL;
+
+static struct proc_info **find_proc_info_slot(pid_t pid)
 {
-	struct tracked_fd_entry *entry;
-	struct tracked_fd_entry *tmp;
+	struct proc_info **slot = &PROC_INFO_LIST;
 
-	if (pinfp == NULL)
-		return;
-	HASH_ITER(hh, pinfp->tracked_fds, entry, tmp) {
-		HASH_DEL(pinfp->tracked_fds, entry);
-		free(entry);
-	}
+	while (*slot != NULL && (*slot)->pid != pid)
+		slot = &(*slot)->next;
+	return slot;
 }
-
-static struct proc_info *PROC_INFO_TAB = NULL;
 
 static void add_proc_info(struct proc_info *p)
 {
-	HASH_ADD(hh, PROC_INFO_TAB, pid, sizeof(p->pid), p);
+	if (p == NULL)
+		return;
+	p->next = PROC_INFO_LIST;
+	PROC_INFO_LIST = p;
 }
 
 static void del_proc_info(struct proc_info *p)
 {
-	HASH_DEL(PROC_INFO_TAB, p);
+	struct proc_info **slot;
+
+	if (p == NULL)
+		return;
+	slot = find_proc_info_slot(p->pid);
+	if (*slot == p)
+		*slot = p->next;
 }
 
 struct proc_info *find_proc_info(pid_t pid)
 {
-	struct proc_info *p;
+	struct proc_info **slot = find_proc_info_slot(pid);
 
-	HASH_FIND(hh, PROC_INFO_TAB, &pid, sizeof(pid), p);
-	return p;
+	return *slot;
 }
 
 struct proc_info *alloc_proc_info(pid_t pid)
@@ -101,6 +172,8 @@ struct proc_info *alloc_proc_info(pid_t pid)
 	if (newp == NULL)
 		return NULL;
 	newp->pid = pid;
+	newp->tracked_fd_capacity = TRACKED_FD_INLINE_BITS;
+	newp->tracked_fd_bits = newp->tracked_fd_inline;
 	add_proc_info(newp);
 	return newp;
 }
@@ -109,7 +182,8 @@ void free_proc_info(struct proc_info *p)
 {
 	if (p == NULL)
 		return;
-	untrack_all_socket_fds(p);
+	if (!using_inline_tracked_fds(p))
+		free(p->tracked_fd_bits);
 	del_proc_info(p);
 	free(p);
 }
