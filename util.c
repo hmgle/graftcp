@@ -28,15 +28,21 @@ static bool using_inline_tracked_fds(const struct proc_info *pinfp)
 
 static int resize_tracked_fds(struct proc_info *pinfp, size_t new_bit_count)
 {
+	size_t old_capacity;
 	size_t old_words;
 	size_t new_words;
 	unsigned long *new_bits;
 
 	if (pinfp == NULL)
 		return -1;
-	old_words = tracked_fd_word_count(pinfp->tracked_fd_capacity);
+	/* This bitmap only grows; shrinking would need to scrub truncated bits. */
+	old_capacity = pinfp->tracked_fd_capacity;
+	if (new_bit_count <= old_capacity)
+		return 0;
+
+	old_words = tracked_fd_word_count(old_capacity);
 	new_words = tracked_fd_word_count(new_bit_count);
-	if (new_words <= old_words) {
+	if (new_words == old_words) {
 		pinfp->tracked_fd_capacity = new_bit_count;
 		return 0;
 	}
