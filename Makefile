@@ -1,5 +1,5 @@
 # "Makefile" for graftcp.
-# Copyright (C) 2016, 2018, 2020, 2021, 2023, 2024 Hmgle <dustgle@gmail.com>
+# Copyright (C) 2016, 2018, 2020, 2021, 2023, 2024, 2026 Hmgle <dustgle@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,13 +14,19 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-KERNEL = $(shell uname -s)
+KERNEL := $(shell uname -s)
 ifneq ($(KERNEL), Linux)
 $(error only support Linux now.)
 endif
 
-VERSION = $(shell git rev-parse --is-inside-work-tree 1>/dev/null 2>&1 && \
-             git describe --tags --always || echo "v0.7")
+BASE_VERSION ?= v0.7
+RAW_VERSION := $(shell git rev-parse --is-inside-work-tree 1>/dev/null 2>&1 && \
+               git describe --tags --always 2>/dev/null || echo "$(BASE_VERSION)")
+ifeq ($(patsubst v%,,$(RAW_VERSION)),$(RAW_VERSION))
+	VERSION := $(BASE_VERSION)
+else
+	VERSION := $(RAW_VERSION)
+endif
 
 # CROSS_COMPILE can be set on the command line
 # make CROSS_COMPILE=arm-linux-gnueabi-
@@ -28,59 +34,80 @@ VERSION = $(shell git rev-parse --is-inside-work-tree 1>/dev/null 2>&1 && \
 
 CROSS_COMPILE ?=
 
-CC		= $(CROSS_COMPILE)gcc
-CXX		= $(CROSS_COMPILE)g++
-AR		= $(CROSS_COMPILE)ar
+CC ?= $(CROSS_COMPILE)gcc
+CXX ?= $(CROSS_COMPILE)g++
+AR ?= $(CROSS_COMPILE)ar
+ARFLAGS ?= rcs
+GO ?= go
 
-debug = 0
+DEBUG ?= 0
 
-PREFIX = /usr/local
-BINDIR = $(PREFIX)/bin
+PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
 
-INSTALL = install -D
+INSTALL ?= install -D
 
-CFLAGS += -Wall
-ifeq ($(debug), 1)
+CPPFLAGS += -DVERSION=\"$(VERSION)\"
+CFLAGS += -Wall -MMD -MP
+ifeq ($(DEBUG),1)
 	CFLAGS += -O0 -g
 else
 	CFLAGS += -O2 -DNDEBUG
 endif
 
-CFLAGS += -DVERSION=\"$(VERSION)\"
-LDFLAGS ?=
+LOCAL_DIR := local
+TARGET := $(LOCAL_DIR)/mgraftcp
 
-SRC := $(wildcard *.c)
+LIB_SRCS := graftcp.c util.c cidr-trie.c
+LIB_OBJS := $(LIB_SRCS:.c=.o)
+LIB_DEPS := $(LIB_OBJS:.o=.d)
 
-TARGET = local/mgraftcp
+GO_BUILD_FILES := $(filter-out %_test.go,$(wildcard $(LOCAL_DIR)/*.go $(LOCAL_DIR)/cmd/mgraftcp/*.go))
+GO_LDFLAGS ?= -s -w
+GO_CACHE_DIR ?= $(CURDIR)/$(LOCAL_DIR)/.cache/go-build
+GO_MOD_CACHE_DIR ?= $(CURDIR)/.gomodcache
 
-.PHONY: all clean
+CC_MACHINE := $(shell $(CC) -dumpmachine 2>/dev/null)
+TARGET_GOARCH :=
+ifneq ($(findstring aarch64,$(CC_MACHINE)),)
+	TARGET_GOARCH := arm64
+else ifneq ($(findstring arm,$(CC_MACHINE)),)
+	TARGET_GOARCH := arm
+else ifneq ($(or $(findstring i386,$(CC_MACHINE)),$(findstring i486,$(CC_MACHINE)),$(findstring i586,$(CC_MACHINE)),$(findstring i686,$(CC_MACHINE))),)
+	TARGET_GOARCH := 386
+endif
+
+GO_ENV := GOTOOLCHAIN=local GOCACHE=$(GO_CACHE_DIR) GOMODCACHE=$(GO_MOD_CACHE_DIR) \
+	CGO_ENABLED=1 CC=$(CC) CXX=$(CXX) AR=$(AR)
+ifdef TARGET_GOARCH
+	GO_ENV += GOOS=linux GOARCH=$(TARGET_GOARCH)
+endif
+
+.DEFAULT_GOAL := all
+.SUFFIXES:
+
+.PHONY: all clean install uninstall test
 all: $(TARGET)
 
-libgraftcp.a: graftcp.o util.o cidr-trie.o
-	$(AR) rcs $@ $^
+libgraftcp.a: $(LIB_OBJS)
+	$(AR) $(ARFLAGS) $@ $^
 
 %.o: %.c
-	$(CC) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
 
-local/mgraftcp: libgraftcp.a $(wildcard local/*.go local/cmd/mgraftcp/*.go local/go.mod local/go.sum)
-	$(MAKE) -C $(dir $@) VERSION=$(VERSION) CC=$(CC) CXX=$(CXX) AR=$(AR) $(notdir $@)
+$(TARGET): libgraftcp.a $(GO_BUILD_FILES) $(LOCAL_DIR)/go.mod $(LOCAL_DIR)/go.sum
+	$(GO_ENV) $(GO) -C $(LOCAL_DIR) build -o $(notdir $@) -ldflags "$(GO_LDFLAGS) -X main.version=$(VERSION)" ./cmd/mgraftcp
 
-.PHONY: install uninstall
-
-install: local/mgraftcp
-	$(MAKE) -C local $@
+install: $(TARGET)
+	$(INSTALL) $< $(DESTDIR)$(BINDIR)/mgraftcp
 
 uninstall:
-	$(MAKE) -C local $@
+	$(RM) $(DESTDIR)$(BINDIR)/mgraftcp
 
-sinclude $(SRC:.c=.d)
-
-%.d: %.c
-	@set -e; rm -f $@; \
-		$(CC) -MM $(CPPFLAGS) $< > $@.$$$$; \
-		sed 's,\(.*\)\.o[:]*,\1.o $@:,' < $@.$$$$ > $@; \
-		rm -f $@.$$$$
+test: libgraftcp.a
+	$(GO_ENV) $(GO) -C $(LOCAL_DIR) test ./...
 
 clean:
-	-rm -f *.o *.a graftcp *.d
-	$(MAKE) -C local $@
+	$(RM) $(LIB_OBJS) $(LIB_DEPS) libgraftcp.a $(TARGET)
+
+-include $(LIB_DEPS)

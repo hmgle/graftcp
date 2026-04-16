@@ -1,7 +1,9 @@
-graftcp
-local/cmd/graftcp-local/graftcp-local
-local/cmd/mgraftcp/mgraftcp
-
 *.o
 *.d
 *.a
+/local/mgraftcp
+/compile_commands.json
+/.cache/
+/.gocache/
+/.gomodcache/
+/local/.cache/
