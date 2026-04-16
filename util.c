@@ -14,35 +14,74 @@
  */
 #include "graftcp.h"
 
-struct socket_info *SOCKET_INFO_TAB = NULL;
+struct tracked_fd_entry {
+	int fd;
+	UT_hash_handle hh;
+};
 
-void add_socket_info(struct socket_info *s)
+static struct tracked_fd_entry *find_tracked_fd(struct proc_info *pinfp, int fd)
 {
-	HASH_ADD(hh, SOCKET_INFO_TAB, key, sizeof(s->key), s);
+	struct tracked_fd_entry *entry = NULL;
+
+	if (pinfp == NULL)
+		return NULL;
+	HASH_FIND(hh, pinfp->tracked_fds, &fd, sizeof(fd), entry);
+	return entry;
 }
 
-void del_socket_info(struct socket_info *s)
+int track_socket_fd(struct proc_info *pinfp, int fd)
 {
-	HASH_DEL(SOCKET_INFO_TAB, s);
+	struct tracked_fd_entry *entry;
+
+	if (pinfp == NULL)
+		return -1;
+	entry = find_tracked_fd(pinfp, fd);
+	if (entry != NULL)
+		return 0;
+	entry = calloc(1, sizeof(*entry));
+	if (entry == NULL)
+		return -1;
+	entry->fd = fd;
+	HASH_ADD(hh, pinfp->tracked_fds, fd, sizeof(entry->fd), entry);
+	return 0;
 }
 
-struct socket_info *find_socket_info(pid_t pid, int fd)
+bool is_tracked_socket_fd(struct proc_info *pinfp, int fd)
 {
-	struct socket_info *s;
-	struct socket_key key = socket_key(pid, fd);
-
-	HASH_FIND(hh, SOCKET_INFO_TAB, &key, sizeof(key), s);
-	return s;
+	return find_tracked_fd(pinfp, fd) != NULL;
 }
 
-struct proc_info *PROC_INFO_TAB = NULL;
+void untrack_socket_fd(struct proc_info *pinfp, int fd)
+{
+	struct tracked_fd_entry *entry = find_tracked_fd(pinfp, fd);
 
-void add_proc_info(struct proc_info *p)
+	if (entry == NULL)
+		return;
+	HASH_DEL(pinfp->tracked_fds, entry);
+	free(entry);
+}
+
+void untrack_all_socket_fds(struct proc_info *pinfp)
+{
+	struct tracked_fd_entry *entry;
+	struct tracked_fd_entry *tmp;
+
+	if (pinfp == NULL)
+		return;
+	HASH_ITER(hh, pinfp->tracked_fds, entry, tmp) {
+		HASH_DEL(pinfp->tracked_fds, entry);
+		free(entry);
+	}
+}
+
+static struct proc_info *PROC_INFO_TAB = NULL;
+
+static void add_proc_info(struct proc_info *p)
 {
 	HASH_ADD(hh, PROC_INFO_TAB, pid, sizeof(p->pid), p);
 }
 
-void del_proc_info(struct proc_info *p)
+static void del_proc_info(struct proc_info *p)
 {
 	HASH_DEL(PROC_INFO_TAB, p);
 }
@@ -58,9 +97,21 @@ struct proc_info *find_proc_info(pid_t pid)
 struct proc_info *alloc_proc_info(pid_t pid)
 {
 	struct proc_info *newp = calloc(1, sizeof(*newp));
+
+	if (newp == NULL)
+		return NULL;
 	newp->pid = pid;
 	add_proc_info(newp);
 	return newp;
+}
+
+void free_proc_info(struct proc_info *p)
+{
+	if (p == NULL)
+		return;
+	untrack_all_socket_fds(p);
+	del_proc_info(p);
+	free(p);
 }
 
 #ifndef offsetof

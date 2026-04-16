@@ -221,8 +221,6 @@ static void install_seccomp()
 
 void socket_pre_handle(struct proc_info *pinfp)
 {
-	struct socket_info *si = calloc(1, sizeof(*si));
-
 #ifndef ENABLE_SECCOMP_BPF
 	int domain = get_syscall_arg(pinfp->pid, 0);
 	int type = get_syscall_arg(pinfp->pid, 1);
@@ -230,22 +228,16 @@ void socket_pre_handle(struct proc_info *pinfp)
 	/* If not TCP socket, ignore */
 	if ((type & SOCK_STREAM) < 1
 	     || (domain != AF_INET && domain != AF_INET6)) {
-		free(si);
 		return;
 	}
 #endif
-	if (pinfp->pending_socket) {
-		free(pinfp->pending_socket);
-		pinfp->pending_socket = NULL;
-	}
-	pinfp->pending_socket = si;
+	pinfp->pending_socket = true;
 }
 
 void connect_pre_handle(struct proc_info *pinfp)
 {
 	int socket_fd = get_syscall_arg(pinfp->pid, 0);
-	struct socket_info *si = find_socket_info(pinfp->pid, socket_fd);
-	if (si == NULL)
+	if (!is_tracked_socket_fd(pinfp, socket_fd))
 		return;
 
 	long addr = get_syscall_arg(pinfp->pid, 1);
@@ -301,12 +293,7 @@ void connect_pre_handle(struct proc_info *pinfp)
 void close_pre_handle(struct proc_info *pinfp)
 {
 	int fd = get_syscall_arg(pinfp->pid, 0);
-	struct socket_info *si = find_socket_info(pinfp->pid, fd);
-
-	if (si) {
-		del_socket_info(si);
-		free(si);
-	}
+	untrack_socket_fd(pinfp, fd);
 }
 
 void clone_pre_handle(struct proc_info *pinfp)
@@ -323,18 +310,16 @@ void clone_pre_handle(struct proc_info *pinfp)
 
 void socket_exiting_handle(struct proc_info *pinfp, int fd)
 {
-	struct socket_info *si;
-
-	si = pinfp->pending_socket;
-	pinfp->pending_socket = NULL;
-	if (si == NULL)
+	if (!pinfp->pending_socket)
 		return;
+	pinfp->pending_socket = false;
 	if (fd < 0) {
-		free(si);
 		return;
 	}
-	si->key = socket_key(pinfp->pid, fd);
-	add_socket_info(si);
+	if (track_socket_fd(pinfp, fd) < 0) {
+		perror("calloc");
+		exit(errno);
+	}
 }
 
 void do_child(const char *username, int argc, char **argv)
@@ -394,6 +379,10 @@ void init(const char *username, int argc, char **argv)
 		do_child(username, argc, argv);
 	}
 	pi = alloc_proc_info(child);
+	if (pi == NULL) {
+		perror("calloc");
+		exit(errno);
+	}
 	pi->flags |= FLAG_STARTUP;
 }
 
@@ -468,6 +457,10 @@ int do_trace()
 		pinfp = find_proc_info(child);
 		if (!pinfp)
 			pinfp = alloc_proc_info(child);
+		if (pinfp == NULL) {
+			perror("calloc");
+			exit(errno);
+		}
 
 		if (pinfp->flags & FLAG_STARTUP) {
 			pinfp->flags &= ~FLAG_STARTUP;
@@ -495,16 +488,15 @@ int do_trace()
 			goto end;
 		}
 #endif
-			if (WIFSIGNALED(status) || WIFEXITED(status)
-			    || !WIFSTOPPED(status)) {
+		if (WIFSIGNALED(status) || WIFEXITED(status)
+		    || !WIFSTOPPED(status)) {
+			if (WIFEXITED(status))
 				exit_code = WEXITSTATUS(status);
-				if (pinfp->pending_socket) {
-					free(pinfp->pending_socket);
-					pinfp->pending_socket = NULL;
-				}
-				/* TODO free pinfp */
-				continue;
-			}
+			else if (WIFSIGNALED(status))
+				exit_code = 128 + WTERMSIG(status);
+			free_proc_info(pinfp);
+			continue;
+		}
 		sig = WSTOPSIG(status);
 		if (sig == SIGSTOP) {
 			sig = 0;

@@ -80,24 +80,7 @@
 #define satosin6(x)  ((struct sockaddr_in6 *) &(x))
 #define SOCKPORT6(x) (satosin6(x)->sin6_port)
 
-struct socket_key {
-	pid_t pid;
-	int fd;
-};
-
-static inline struct socket_key socket_key(pid_t pid, int fd)
-{
-	struct socket_key key;
-	memset(&key, 0, sizeof(key));
-	key.pid = pid;
-	key.fd = fd;
-	return key;
-}
-
-struct socket_info {
-	struct socket_key key;
-	UT_hash_handle hh;	/* makes this structure hashable */
-};
+struct tracked_fd_entry;
 
 #define FLAG_STARTUP    00002
 #define FLAG_INSYSCALL  00010
@@ -108,18 +91,19 @@ struct proc_info {
 	pid_t pid;
 	int flags;
 	int csn;		/* current syscall number */
-	struct socket_info *pending_socket;
+	bool pending_socket;
+	struct tracked_fd_entry *tracked_fds;
 	UT_hash_handle hh;	/* makes this structure hashable */
 };
 
-void add_socket_info(struct socket_info *s);
-void del_socket_info(struct socket_info *s);
-struct socket_info *find_socket_info(pid_t pid, int fd);
-
-void add_proc_info(struct proc_info *p);
-void del_proc_info(struct proc_info *p);
 struct proc_info *find_proc_info(pid_t pid);
 struct proc_info *alloc_proc_info(pid_t pid);
+void free_proc_info(struct proc_info *p);
+
+int track_socket_fd(struct proc_info *pinfp, int fd);
+bool is_tracked_socket_fd(struct proc_info *pinfp, int fd);
+void untrack_socket_fd(struct proc_info *pinfp, int fd);
+void untrack_all_socket_fds(struct proc_info *pinfp);
 
 int get_syscall_number(pid_t pid);
 int get_retval(pid_t pid);
