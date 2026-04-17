@@ -314,13 +314,9 @@ void socket_exiting_handle(struct proc_info *pinfp, int fd)
 	if (!pinfp->pending_socket)
 		return;
 	pinfp->pending_socket = false;
-	if (fd < 0) {
+	if (fd < 0)
 		return;
-	}
-	if (track_socket_fd(pinfp, fd) < 0) {
-		perror("calloc");
-		exit(errno);
-	}
+	track_socket_fd(pinfp, fd);
 }
 
 void do_child(const char *username, int argc, char **argv)

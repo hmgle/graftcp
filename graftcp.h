@@ -84,19 +84,15 @@
 
 #define exiting(pinfp)  ((pinfp)->flags & FLAG_INSYSCALL)
 
-#define TRACKED_FD_WORD_BITS (sizeof(unsigned long) * CHAR_BIT)
-#define TRACKED_FD_INLINE_BITS 1024U
-#define TRACKED_FD_INLINE_WORDS \
-	((TRACKED_FD_INLINE_BITS + TRACKED_FD_WORD_BITS - 1U) / TRACKED_FD_WORD_BITS)
+#define TRACKED_SOCKET_MAX 32U
 
 struct proc_info {
 	pid_t pid;
 	int flags;
 	int csn;		/* current syscall number */
 	bool pending_socket;
-	size_t tracked_fd_capacity;
-	unsigned long *tracked_fd_bits;
-	unsigned long tracked_fd_inline[TRACKED_FD_INLINE_WORDS];
+	unsigned int tracked_socket_count;
+	int tracked_socket_fds[TRACKED_SOCKET_MAX];
 	struct proc_info *next;
 };
 
@@ -104,7 +100,7 @@ struct proc_info *find_proc_info(pid_t pid);
 struct proc_info *alloc_proc_info(pid_t pid);
 void free_proc_info(struct proc_info *p);
 
-int track_socket_fd(struct proc_info *pinfp, int fd);
+void track_socket_fd(struct proc_info *pinfp, int fd);
 bool is_tracked_socket_fd(struct proc_info *pinfp, int fd);
 void untrack_socket_fd(struct proc_info *pinfp, int fd);
 
