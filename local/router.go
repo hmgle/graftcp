@@ -40,13 +40,15 @@ func (g *LoopbackGen) nextToken() uint32 {
 
 // RouteRegistry stores the original destination for each pending loopback token.
 type RouteRegistry struct {
-	routes    sync.Map // map[uint32]string
+	mu        sync.Mutex
+	routes    map[uint32]string
 	allocator *LoopbackGen
 }
 
 // NewRouteRegistry creates a registry backed by the 127.0.0.0/8 loopback range.
 func NewRouteRegistry() *RouteRegistry {
 	return &RouteRegistry{
+		routes:    make(map[uint32]string),
 		allocator: newLoopbackGen(loopbackStartToken, loopbackEndToken),
 	}
 }
@@ -66,33 +68,43 @@ func normalizeDestAddr(family int, host string, port uint16) (string, error) {
 
 // Register assigns the next loopback token IP for a connect target.
 func (r *RouteRegistry) Register(family int, host string, port uint16) (uint32, error) {
+	if r == nil || r.allocator == nil {
+		return 0, fmt.Errorf("route registry is not initialized")
+	}
 	destAddr, err := normalizeDestAddr(family, host, port)
 	if err != nil {
 		return 0, err
 	}
 
 	token := r.allocator.nextToken()
-	r.routes.Store(token, destAddr)
+	r.mu.Lock()
+	if r.routes == nil {
+		r.routes = make(map[uint32]string)
+	}
+	r.routes[token] = destAddr
+	r.mu.Unlock()
 	return token, nil
 }
 
 // Consume resolves and removes the destination registered for the accepted
 // local loopback IP.
 func (r *RouteRegistry) Consume(localIP net.IP) (string, bool) {
+	if r == nil {
+		return "", false
+	}
 	token, ok := ipToToken(localIP)
 	if !ok {
 		return "", false
 	}
 
-	value, ok := r.routes.LoadAndDelete(token)
+	r.mu.Lock()
+	destAddr, ok := r.routes[token]
 	if !ok {
+		r.mu.Unlock()
 		return "", false
 	}
-
-	destAddr, ok := value.(string)
-	if !ok {
-		return "", false
-	}
+	delete(r.routes, token)
+	r.mu.Unlock()
 	return destAddr, true
 }
 

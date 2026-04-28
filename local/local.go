@@ -48,10 +48,10 @@ func (l *Local) GetFAddr() (faddrString string, faddr *net.TCPAddr) {
 }
 
 // NewLocal ...
-func NewLocal(listenAddr, socks5Addr, socks5Username, socks5PassWord, httpProxyAddr string) *Local {
+func NewLocal(listenAddr, socks5Addr, socks5Username, socks5PassWord, httpProxyAddr string) (*Local, error) {
 	listenTCPAddr, err := net.ResolveTCPAddr("tcp", listenAddr)
 	if err != nil {
-		log.Fatalf("resolve frontend(%s) error: %s", listenAddr, err.Error())
+		return nil, fmt.Errorf("resolve frontend %q: %w", listenAddr, err)
 	}
 	local := &Local{
 		faddr:       listenTCPAddr,
@@ -60,38 +60,41 @@ func NewLocal(listenAddr, socks5Addr, socks5Username, socks5PassWord, httpProxyA
 	}
 	local.directDialer = proxy.Direct
 
-	socks5TCPAddr, err1 := net.ResolveTCPAddr("tcp", socks5Addr)
-	httpProxyTCPAddr, err2 := net.ResolveTCPAddr("tcp", httpProxyAddr)
-	if err1 != nil && err2 != nil {
-		log.Fatalf(
-			"neither %s nor %s can be resolved, resolve(%s): %v, resolve(%s): %v, please check the config for proxy",
-			socks5Addr, httpProxyAddr, socks5Addr, err1, httpProxyAddr, err2)
-	}
-	if err1 == nil {
-		var auth *proxy.Auth
-		if socks5Username != "" {
-			auth = &proxy.Auth{
-				User:     socks5Username,
-				Password: socks5PassWord,
+	if socks5Addr != "" {
+		socks5TCPAddr, err := net.ResolveTCPAddr("tcp", socks5Addr)
+		if err != nil {
+			log.Errorf("resolve socks5 proxy %q: %s", socks5Addr, err.Error())
+		} else {
+			var auth *proxy.Auth
+			if socks5Username != "" {
+				auth = &proxy.Auth{
+					User:     socks5Username,
+					Password: socks5PassWord,
+				}
+			}
+			dialerSocks5, err := proxy.SOCKS5("tcp", socks5TCPAddr.String(), auth, proxy.Direct)
+			if err != nil {
+				log.Errorf("proxy.SOCKS5(%s) fail: %s", socks5TCPAddr.String(), err.Error())
+			} else {
+				local.socks5Dialer = dialerSocks5
 			}
 		}
-		dialerSocks5, err := proxy.SOCKS5("tcp", socks5TCPAddr.String(), auth, proxy.Direct)
+	}
+	if httpProxyAddr != "" {
+		httpProxyTCPAddr, err := net.ResolveTCPAddr("tcp", httpProxyAddr)
 		if err != nil {
-			log.Errorf("proxy.SOCKS5(%s) fail: %s", socks5TCPAddr.String(), err.Error())
+			log.Errorf("resolve http proxy %q: %s", httpProxyAddr, err.Error())
 		} else {
-			local.socks5Dialer = dialerSocks5
+			httpProxyURI, _ := url.Parse("http://" + httpProxyTCPAddr.String())
+			dialerHTTPProxy, err := proxy.FromURL(httpProxyURI, proxy.Direct)
+			if err != nil {
+				log.Errorf("proxy.FromURL(%v) err: %s", httpProxyURI, err.Error())
+			} else {
+				local.httpProxyDialer = dialerHTTPProxy
+			}
 		}
 	}
-	if err2 == nil {
-		httpProxyURI, _ := url.Parse("http://" + httpProxyTCPAddr.String())
-		dialerHTTPProxy, err := proxy.FromURL(httpProxyURI, proxy.Direct)
-		if err != nil {
-			log.Errorf("proxy.FromURL(%v) err: %s", httpProxyURI, err.Error())
-		} else {
-			local.httpProxyDialer = dialerHTTPProxy
-		}
-	}
-	return local
+	return local, nil
 }
 
 // Registry exposes the route registry used by the local proxy listener.
@@ -103,7 +106,7 @@ func (l *Local) Registry() *RouteRegistry {
 }
 
 // SetSelectMode set the select mode for l.
-func (l *Local) SetSelectMode(mode string) {
+func (l *Local) SetSelectMode(mode string) error {
 	switch mode {
 	case "auto":
 		l.selectMode = AutoSelectMode
@@ -115,7 +118,10 @@ func (l *Local) SetSelectMode(mode string) {
 		l.selectMode = OnlySocks5Mode
 	case "direct":
 		l.selectMode = DirectMode
+	default:
+		return fmt.Errorf("unknown proxy selection mode %q", mode)
 	}
+	return nil
 }
 
 func (l *Local) proxySelector() proxy.Dialer {
@@ -138,8 +144,10 @@ func (l *Local) proxySelector() proxy.Dialer {
 			return l.httpProxyDialer
 		} else if l.socks5Dialer != nil {
 			return l.socks5Dialer
+		} else if l.httpProxyDialer != nil {
+			return l.httpProxyDialer
 		}
-		return l.httpProxyDialer
+		return l.directDialer
 	case OnlySocks5Mode:
 		return l.socks5Dialer
 	case OnlyHTTPProxyMode:
@@ -155,8 +163,7 @@ func (l *Local) proxySelector() proxy.Dialer {
 func (l *Local) StartListen() (ln *net.TCPListener, err error) {
 	ln, err = net.ListenTCP("tcp", l.faddr)
 	if err != nil {
-		log.Fatalf("net.ListenTCP(%s) err: %s", l.faddr.String(), err.Error())
-		return
+		return nil, fmt.Errorf("listen on %s: %w", l.faddr.String(), err)
 	}
 	log.Infof("mgraftcp local listener started on %s", l.faddr.String())
 	if l.faddr.Port == 0 {
@@ -185,7 +192,11 @@ func (l *Local) StartService(ln *net.TCPListener) {
 
 // Start listening and service.
 func (l *Local) Start() {
-	ln, _ := l.StartListen()
+	ln, err := l.StartListen()
+	if err != nil {
+		log.Fatalf("l.StartListen err: %s", err.Error())
+		return
+	}
 	defer ln.Close()
 
 	l.StartService(ln)

@@ -4,8 +4,8 @@ package main
 //
 // #include <stdlib.h>
 //
-// static void *alloc_string_slice(int len) {
-//              return malloc(sizeof(char*)*len);
+// static char **alloc_string_slice(int len) {
+//              return calloc(len, sizeof(char*));
 // }
 //
 // int client_main(int argc, char **argv);
@@ -26,22 +26,23 @@ import (
 	"github.com/pborman/getopt/v2"
 )
 
-const (
-	maxArgsLen = 0xfff
-)
-
 func clientMain(args []string) int {
 	argc := C.int(len(args))
 
-	argv := (*[maxArgsLen]*C.char)(C.alloc_string_slice(argc))
+	argv := (**C.char)(C.alloc_string_slice(argc + 1))
+	if argv == nil {
+		fmt.Fprintln(os.Stderr, "mgraftcp: failed to allocate argv")
+		return 1
+	}
 	defer C.free(unsafe.Pointer(argv))
 
+	argvSlice := unsafe.Slice(argv, len(args)+1)
 	for i, arg := range args {
-		argv[i] = C.CString(arg)
-		defer C.free(unsafe.Pointer(argv[i]))
+		argvSlice[i] = C.CString(arg)
+		defer C.free(unsafe.Pointer(argvSlice[i]))
 	}
 
-	returnValue := C.client_main(argc, (**C.char)(unsafe.Pointer(argv)))
+	returnValue := C.client_main(argc, argv)
 	return int(returnValue)
 }
 
@@ -233,7 +234,10 @@ func main() {
 		getopt.Usage()
 		return
 	}
-	parseConfigFile(configFile)
+	if err := parseConfigFile(configFile); err != nil {
+		fmt.Fprintf(os.Stderr, "mgraftcp: %v\n", err)
+		os.Exit(1)
+	}
 
 	retCode := 0
 	defer func() { os.Exit(retCode) }()
@@ -244,8 +248,15 @@ func main() {
 		local.SetLogger(noopLogger{})
 	}
 
-	l := local.NewLocal(":0", socks5Addr, socks5User, socks5Pwd, httpProxyAddr)
-	l.SetSelectMode(selectProxyMode)
+	l, err := local.NewLocal(":0", socks5Addr, socks5User, socks5Pwd, httpProxyAddr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mgraftcp: %v\n", err)
+		os.Exit(1)
+	}
+	if err := l.SetSelectMode(selectProxyMode); err != nil {
+		fmt.Fprintf(os.Stderr, "mgraftcp: %v\n", err)
+		os.Exit(1)
+	}
 	activeRegistry = l.Registry()
 
 	ln, err := l.StartListen()
