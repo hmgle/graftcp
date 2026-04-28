@@ -49,7 +49,7 @@ bool DEFAULT_IGNORE_LOCAL        = true;
 uint16_t LOCAL_PROXY_PORT;
 
 cidr_trie_t *BLACKLIST_IP     = NULL;
-cidr_trie_t *WHITELACKLIST_IP = NULL;
+cidr_trie_t *WHITELIST_IP = NULL;
 
 
 static uid_t run_uid;
@@ -125,7 +125,7 @@ static void load_blackip_file(char *path)
 
 static void load_whiteip_file(char *path)
 {
-	load_ip_file(path, &WHITELACKLIST_IP);
+	load_ip_file(path, &WHITELIST_IP);
 }
 
 static bool ip4_is_ignore(uint32_t ip)
@@ -134,8 +134,8 @@ static bool ip4_is_ignore(uint32_t ip)
 		if (cidr4_trie_lookup(BLACKLIST_IP, ntohl(ip)))
 			return true;
 	}
-	if (WHITELACKLIST_IP) {
-		if (!cidr4_trie_lookup(WHITELACKLIST_IP, ntohl(ip)))
+	if (WHITELIST_IP) {
+		if (!cidr4_trie_lookup(WHITELIST_IP, ntohl(ip)))
 			return true;
 	}
 	return false;
@@ -152,8 +152,8 @@ static bool ip6_is_ignore(uint8_t *ip)
 		if (cidr6_trie_lookup(BLACKLIST_IP, ip))
 			return true;
 	}
-	if (WHITELACKLIST_IP) {
-		if (!cidr6_trie_lookup(WHITELACKLIST_IP, ip))
+	if (WHITELIST_IP) {
+		if (!cidr6_trie_lookup(WHITELIST_IP, ip))
 			return true;
 	}
 	return false;
