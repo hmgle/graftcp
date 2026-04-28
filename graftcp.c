@@ -88,6 +88,7 @@ static void load_ip_file(char *path, cidr_trie_t **trie)
 	char *line = NULL;
 	size_t len = 0;
 	ssize_t read;
+	unsigned int line_no = 0;
 
 	f = fopen(path, "r");
 	if (f == NULL) {
@@ -95,15 +96,23 @@ static void load_ip_file(char *path, cidr_trie_t **trie)
 		exit(1);
 	}
 	while ((read = getline(&line, &len, f)) != -1) {
+		line_no++;
 		while (read > 0 && isspace((unsigned char)line[read - 1]))
 			line[--read] = '\0';
 
 		/* 7 is the shortest ip: (x.x.x.x) */
 		if (read < 7)
 			continue;
-		if (*trie == NULL)
+		if (*trie == NULL) {
 			*trie = cidr_trie_new();
-		cidr_trie_insert_str(*trie, line, 1);
+			if (*trie == NULL) {
+				perror("calloc");
+				exit(1);
+			}
+		}
+		if (cidr_trie_insert_str(*trie, line, 1) < 0)
+			fprintf(stderr, "%s:%u: invalid CIDR entry: %s\n",
+				path, line_no, line);
 	}
 	free(line);
 	fclose(f);
@@ -317,7 +326,8 @@ void socket_exiting_handle(struct proc_info *pinfp, int fd)
 	pinfp->pending_socket = false;
 	if (fd < 0)
 		return;
-	track_socket_fd(pinfp, fd);
+	if (track_socket_fd(pinfp, fd) < 0)
+		fprintf(stderr, "mgraftcp failed to track socket fd %d\n", fd);
 }
 
 void do_child(const char *username, int argc, char **argv)
@@ -645,9 +655,16 @@ int client_main(int argc, char **argv)
 	if (ignore_local) {
 		if (BLACKLIST_IP == NULL)
 			BLACKLIST_IP = cidr_trie_new();
-		cidr_trie_insert_str(BLACKLIST_IP, "127.0.0.0/8", 1);
-		cidr_trie_insert_str(BLACKLIST_IP, "0.0.0.0/32", 1);
-		cidr_trie_insert_str(BLACKLIST_IP, "::1", 1);
+		if (BLACKLIST_IP == NULL) {
+			perror("calloc");
+			exit(1);
+		}
+		if (cidr_trie_insert_str(BLACKLIST_IP, "127.0.0.0/8", 1) < 0 ||
+		    cidr_trie_insert_str(BLACKLIST_IP, "0.0.0.0/32", 1) < 0 ||
+		    cidr_trie_insert_str(BLACKLIST_IP, "::1", 1) < 0) {
+			fprintf(stderr, "failed to initialize local address blacklist\n");
+			exit(1);
+		}
 	}
 	LOCAL_PROXY_PORT = local_proxy_port;
 

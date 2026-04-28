@@ -17,12 +17,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <arpa/inet.h>
+#include <errno.h>
 
 #include "cidr-trie.h"
 
-static trie_node_t *node_callc()
+static trie_node_t *node_calloc()
 {
 	trie_node_t *node = calloc(1, sizeof(*node));
+	if (node == NULL)
+		return NULL;
 	node->left = NULL;
 	node->right = NULL;
 	node->value = TRIE_NO_VALUE;
@@ -32,14 +35,23 @@ static trie_node_t *node_callc()
 trie_t *trie_new()
 {
 	trie_t *trie = calloc(1, sizeof(*trie));
-	trie->root = node_callc();
+	if (trie == NULL)
+		return NULL;
+	trie->root = node_calloc();
+	if (trie->root == NULL) {
+		free(trie);
+		return NULL;
+	}
 	return trie;
 }
 
-void trie32_insert(trie_t *trie, struct cidr_s *cidr, int value)
+int trie32_insert(trie_t *trie, struct cidr_s *cidr, int value)
 {
 	trie_node_t *node, *next;
 	uint32_t bit = 0x80000000;
+
+	if (trie == NULL || trie->root == NULL || cidr == NULL)
+		return -1;
 
 	next = trie->root;
 	for (node = trie->root; bit & cidr->mask; bit >>= 1) {
@@ -50,10 +62,12 @@ void trie32_insert(trie_t *trie, struct cidr_s *cidr, int value)
 	}
 	if (next) {
 		node->value = value;
-		return;
+		return 0;
 	}
 	for (; bit & cidr->mask; bit >>= 1) {
-		next = node_callc();
+		next = node_calloc();
+		if (next == NULL)
+			return -1;
 		if (cidr->addr & bit)
 			node->right = next;
 		else
@@ -61,32 +75,51 @@ void trie32_insert(trie_t *trie, struct cidr_s *cidr, int value)
 		node = next;
 	}
 	node->value = value;
+	return 0;
 }
 
 #define IPV4_MAX_TEXT_LENGTH 15
 #define IPV6_MAX_TEXT_LENGTH 45
 
+static int parse_prefix(const char *text, int max, int *prefix)
+{
+	char *end;
+	long value;
+
+	errno = 0;
+	value = strtol(text, &end, 10);
+	if (errno != 0 || end == text || *end != '\0' ||
+	    value < 0 || value > max)
+		return -1;
+	*prefix = (int)value;
+	return 0;
+}
+
 static int parse_cidr(const char *line, struct cidr_s *cidr)
 {
 	char *p;
-	int shift;
+	int prefix;
 	char ipbuf[IPV4_MAX_TEXT_LENGTH + 1];
+	struct in_addr addr;
 
 	p = strchr(line, '/');
 	if (p) {
-		if (p - line > IPV4_MAX_TEXT_LENGTH)
+		if (p == line || p - line > IPV4_MAX_TEXT_LENGTH)
 			return -1;
-		strncpy(ipbuf, line, p - line);
+		memcpy(ipbuf, line, p - line);
 		ipbuf[p - line] = '\0';
-		cidr->addr = ntohl(inet_addr(ipbuf));
-
-		shift = strtol(++p, NULL, 0);
-		if (shift < 0 || shift > 32)
+		if (inet_pton(AF_INET, ipbuf, &addr) != 1)
 			return -1;
-		cidr->mask = shift ? (uint32_t)(0xffffffff << (32 - shift)) : 0;
+		if (parse_prefix(p + 1, 32, &prefix) < 0)
+			return -1;
+		cidr->addr = ntohl(addr.s_addr);
+		cidr->mask = prefix ?
+			     (uint32_t)(0xffffffffu << (32 - prefix)) : 0;
 	} else {
+		if (inet_pton(AF_INET, line, &addr) != 1)
+			return -1;
 		cidr->mask = 0xffffffff;
-		cidr->addr = ntohl(inet_addr(line));
+		cidr->addr = ntohl(addr.s_addr);
 	}
 	return 0;
 }
@@ -97,8 +130,7 @@ int trie32_insert_str(trie_t *trie, const char *ipstr, int value)
 
 	if (parse_cidr(ipstr, &cidr))
 		return -1;
-	trie32_insert(trie, &cidr, value);
-	return 0;
+	return trie32_insert(trie, &cidr, value);
 }
 
 int trie32_lookup(trie_t *trie, uint32_t ip)
@@ -115,11 +147,14 @@ int trie32_lookup(trie_t *trie, uint32_t ip)
 	return TRIE_NO_VALUE;
 }
 
-void trie128_insert(trie_t *trie, struct cidr6_s *cidr6, int value)
+int trie128_insert(trie_t *trie, struct cidr6_s *cidr6, int value)
 {
 	trie_node_t *node, *next;
 	uint8_t bit = 0x80;
 	unsigned int i = 0;
+
+	if (trie == NULL || trie->root == NULL || cidr6 == NULL)
+		return -1;
 
 	next = trie->root;
 	for (node = trie->root; bit & cidr6->mask.s6_addr[i];) {
@@ -136,10 +171,12 @@ void trie128_insert(trie_t *trie, struct cidr6_s *cidr6, int value)
 	}
 	if (next) {
 		node->value = value;
-		return;
+		return 0;
 	}
 	for (; bit & cidr6->mask.s6_addr[i];) {
-		next = node_callc();
+		next = node_calloc();
+		if (next == NULL)
+			return -1;
 		if (bit & cidr6->addr.s6_addr[i])
 			node->right = next;
 		else
@@ -153,44 +190,43 @@ void trie128_insert(trie_t *trie, struct cidr6_s *cidr6, int value)
 		}
 	}
 	node->value = value;
+	return 0;
+}
+
+static void build_ipv6_mask(struct in6_addr *mask, int prefix)
+{
+	unsigned int i;
+
+	memset(mask->s6_addr, 0, 16);
+	for (i = 0; prefix >= 8 && i < 16; i++, prefix -= 8)
+		mask->s6_addr[i] = 0xff;
+	if (prefix > 0 && i < 16)
+		mask->s6_addr[i] = (unsigned char)(0xffu << (8 - prefix));
 }
 
 static int parse_cidr6(const char *line, struct cidr6_s *cidr6)
 {
-        char *p;
-        int shift;
-        char ip6buf[IPV6_MAX_TEXT_LENGTH + 1];
-        uint8_t *mask;
-        unsigned int i, s;
+	char *p;
+	int prefix;
+	char ip6buf[IPV6_MAX_TEXT_LENGTH + 1];
 
-        p = strchr(line, '/');
-        if (p) {
-                if (p - line > IPV6_MAX_TEXT_LENGTH)
-                        return -1;
-                strncpy(ip6buf, line, p - line);
-                ip6buf[p - line] = '\0';
-                if (inet_pton(AF_INET6, ip6buf, &cidr6->addr) != 1)
-                        return -1;
-
-                shift = strtol(++p, NULL, 0);
-                if (shift < 0 || shift > 128)
-                        return -1;
-                if (shift) {
-                        mask = cidr6->mask.s6_addr;
-                        for (i = 0; i < 16; i++) {
-                                s = (shift > 8) ? 8 : shift;
-                                shift -= s;
-                                mask[i] = (unsigned char) (0xffu << (8 - s));
-                        }
-                } else {
-                        memset(cidr6->mask.s6_addr, 0, 16);
-                }
-        } else {
-                if (inet_pton(AF_INET6, line, &cidr6->addr) != 1)
-                        return -1;
-                memset(cidr6->mask.s6_addr, 0xff, 16);
-        }
-        return 0;
+	p = strchr(line, '/');
+	if (p) {
+		if (p == line || p - line > IPV6_MAX_TEXT_LENGTH)
+			return -1;
+		memcpy(ip6buf, line, p - line);
+		ip6buf[p - line] = '\0';
+		if (inet_pton(AF_INET6, ip6buf, &cidr6->addr) != 1)
+			return -1;
+		if (parse_prefix(p + 1, 128, &prefix) < 0)
+			return -1;
+		build_ipv6_mask(&cidr6->mask, prefix);
+	} else {
+		if (inet_pton(AF_INET6, line, &cidr6->addr) != 1)
+			return -1;
+		memset(cidr6->mask.s6_addr, 0xff, 16);
+	}
+	return 0;
 }
 
 int trie128_insert_str(trie_t *trie, const char *ipstr, int value)
@@ -199,8 +235,7 @@ int trie128_insert_str(trie_t *trie, const char *ipstr, int value)
 
 	if (parse_cidr6(ipstr, &cidr6))
 		return -1;
-	trie128_insert(trie, &cidr6, value);
-	return 0;
+	return trie128_insert(trie, &cidr6, value);
 }
 
 int trie128_lookup(trie_t *trie, uint8_t *ip)
@@ -225,23 +260,33 @@ int trie128_lookup(trie_t *trie, uint8_t *ip)
 cidr_trie_t *cidr_trie_new()
 {
 	cidr_trie_t *cidr_trie = calloc(1, sizeof(*cidr_trie));
+	if (cidr_trie == NULL)
+		return NULL;
 	cidr_trie->cidr4_trie = NULL;
 	cidr_trie->cidr6_trie = NULL;
 	return cidr_trie;
 }
 
-void cidr_trie_insert_str(cidr_trie_t *cidr_trie, const char *ipstr, int value)
+int cidr_trie_insert_str(cidr_trie_t *cidr_trie, const char *ipstr, int value)
 {
 	char *p;
+
+	if (cidr_trie == NULL || ipstr == NULL)
+		return -1;
+
 	p = strchr(ipstr, ':');
 	if (p) {
 		if (cidr_trie->cidr6_trie == NULL)
 			cidr_trie->cidr6_trie = trie_new();
-		trie128_insert_str(cidr_trie->cidr6_trie, ipstr, value);
+		if (cidr_trie->cidr6_trie == NULL)
+			return -1;
+		return trie128_insert_str(cidr_trie->cidr6_trie, ipstr, value);
 	} else {
 		if (cidr_trie->cidr4_trie == NULL)
 			cidr_trie->cidr4_trie = trie_new();
-		trie32_insert_str(cidr_trie->cidr4_trie, ipstr, value);
+		if (cidr_trie->cidr4_trie == NULL)
+			return -1;
+		return trie32_insert_str(cidr_trie->cidr4_trie, ipstr, value);
 	}
 }
 

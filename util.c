@@ -30,16 +30,28 @@ static int find_tracked_socket_fd(const struct proc_info *pinfp, int fd)
 	return -1;
 }
 
-void track_socket_fd(struct proc_info *pinfp, int fd)
+int track_socket_fd(struct proc_info *pinfp, int fd)
 {
+	int *fds;
+	unsigned int new_cap;
+
 	if (pinfp == NULL || fd < 0)
-		return;
+		return -1;
 	if (find_tracked_socket_fd(pinfp, fd) >= 0)
-		return;
-	if (pinfp->tracked_socket_count >= TRACKED_SOCKET_MAX)
-		return;
+		return 0;
+	if (pinfp->tracked_socket_count >= pinfp->tracked_socket_cap) {
+		new_cap = pinfp->tracked_socket_cap ?
+			  pinfp->tracked_socket_cap * 2 : TRACKED_SOCKET_INITIAL_CAP;
+		fds = realloc(pinfp->tracked_socket_fds,
+			      new_cap * sizeof(*pinfp->tracked_socket_fds));
+		if (fds == NULL)
+			return -1;
+		pinfp->tracked_socket_fds = fds;
+		pinfp->tracked_socket_cap = new_cap;
+	}
 
 	pinfp->tracked_socket_fds[pinfp->tracked_socket_count++] = fd;
+	return 0;
 }
 
 bool is_tracked_socket_fd(struct proc_info *pinfp, int fd)
@@ -112,6 +124,7 @@ void free_proc_info(struct proc_info *p)
 	if (p == NULL)
 		return;
 	del_proc_info(p);
+	free(p->tracked_socket_fds);
 	free(p);
 }
 

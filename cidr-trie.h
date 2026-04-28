@@ -45,10 +45,10 @@ struct cidr6_s {
 };
 
 trie_t *trie_new();
-void trie32_insert(trie_t *trie, struct cidr_s *cidr, int value);
+int trie32_insert(trie_t *trie, struct cidr_s *cidr, int value);
 int trie32_insert_str(trie_t *trie, const char *ipstr, int value);
 int trie32_lookup(trie_t *trie, uint32_t ip);
-void trie128_insert(trie_t *trie, struct cidr6_s *cidr6, int value);
+int trie128_insert(trie_t *trie, struct cidr6_s *cidr6, int value);
 int trie128_insert_str(trie_t *trie, const char *ipstr, int value);
 int trie128_lookup(trie_t *trie, uint8_t *ip);
 
@@ -58,7 +58,7 @@ typedef struct {
 } cidr_trie_t;
 
 cidr_trie_t *cidr_trie_new();
-void cidr_trie_insert_str(cidr_trie_t *cidr_trie, const char *ipstr, int value);
+int cidr_trie_insert_str(cidr_trie_t *cidr_trie, const char *ipstr, int value);
 int cidr4_trie_lookup(cidr_trie_t *cidr_trie, uint32_t ip);
 int cidr6_trie_lookup(cidr_trie_t *cidr_trie, uint8_t *ip);
 

@@ -88,7 +88,7 @@
 
 #define exiting(pinfp)  ((pinfp)->flags & FLAG_INSYSCALL)
 
-#define TRACKED_SOCKET_MAX 32U
+#define TRACKED_SOCKET_INITIAL_CAP 8U
 
 struct proc_info {
 	pid_t pid;
@@ -96,7 +96,8 @@ struct proc_info {
 	int csn;		/* current syscall number */
 	bool pending_socket;
 	unsigned int tracked_socket_count;
-	int tracked_socket_fds[TRACKED_SOCKET_MAX];
+	unsigned int tracked_socket_cap;
+	int *tracked_socket_fds;
 	struct proc_info *next;
 };
 
@@ -104,7 +105,7 @@ struct proc_info *find_proc_info(pid_t pid);
 struct proc_info *alloc_proc_info(pid_t pid);
 void free_proc_info(struct proc_info *p);
 
-void track_socket_fd(struct proc_info *pinfp, int fd);
+int track_socket_fd(struct proc_info *pinfp, int fd);
 bool is_tracked_socket_fd(struct proc_info *pinfp, int fd);
 void untrack_socket_fd(struct proc_info *pinfp, int fd);
 
