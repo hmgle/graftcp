@@ -14,6 +14,8 @@ import (
 
 type modeT int
 
+var errBadDialer = errors.New("bad dialer")
+
 const (
 	// AutoSelectMode select socks5 if socks5 is reachable, else HTTP proxy
 	AutoSelectMode modeT = iota
@@ -159,6 +161,25 @@ func (l *Local) proxySelector() proxy.Dialer {
 	}
 }
 
+func (l *Local) dialTCP(destAddr string) (net.Conn, error) {
+	dialer := l.proxySelector()
+	if dialer == nil {
+		return nil, errBadDialer
+	}
+	destConn, err := dialer.Dial("tcp", destAddr)
+	if err != nil && l.selectMode == AutoSelectMode {
+		if l.httpProxyDialer != nil && dialer != l.httpProxyDialer {
+			log.Infof("try http_proxy for %s", destAddr)
+			destConn, err = l.httpProxyDialer.Dial("tcp", destAddr)
+		}
+		if err != nil {
+			log.Infof("dial %s direct", destAddr)
+			destConn, err = net.Dial("tcp", destAddr)
+		}
+	}
+	return destConn, err
+}
+
 // StartListen start listening.
 func (l *Local) StartListen() (ln *net.TCPListener, err error) {
 	ln, err = net.ListenTCP("tcp", l.faddr)
@@ -214,22 +235,11 @@ func (l *Local) HandleConn(conn *net.TCPConn) error {
 
 	log.Infof("Request Token: %s, Source Addr: %s, Dest Addr: %s", laddr.IP.String(), raddr.String(), destAddr)
 
-	dialer := l.proxySelector()
-	if dialer == nil {
+	destConn, err := l.dialTCP(destAddr)
+	if errors.Is(err, errBadDialer) {
 		log.Errorf("bad dialer,  please check the config for proxy")
 		conn.Close()
-		return fmt.Errorf("bad dialer")
-	}
-	destConn, err := dialer.Dial("tcp", destAddr)
-	if err != nil && l.selectMode == AutoSelectMode {
-		if l.httpProxyDialer != nil && dialer != l.httpProxyDialer {
-			log.Infof("try http_proxy for %s", destAddr)
-			destConn, err = l.httpProxyDialer.Dial("tcp", destAddr)
-		}
-		if err != nil {
-			log.Infof("dial %s direct", destAddr)
-			destConn, err = net.Dial("tcp", destAddr)
-		}
+		return err
 	}
 	if err != nil {
 		log.Errorf("dialer.Dial(%s) err: %s", destAddr, err.Error())
