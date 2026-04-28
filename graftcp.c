@@ -37,6 +37,10 @@
 #define VERSION "v0.7"
 #endif
 
+#ifndef PTRACE_O_EXITKILL
+#define PTRACE_O_EXITKILL 0
+#endif
+
 extern uint32_t mgraftcp_register_connect(int family, const char *addr,
 					  uint16_t port);
 
@@ -53,6 +57,7 @@ static gid_t run_gid;
 static char *run_home;
 
 static int exit_code = 0;
+static pid_t root_pid = -1;
 
 static void build_loopback_sockaddr4(struct sockaddr_in *sa, uint32_t token,
 				     uint16_t port)
@@ -298,7 +303,8 @@ void clone_pre_handle(struct proc_info *pinfp)
 	long flags = get_syscall_arg(pinfp->pid, 0);
 
 	flags &= ~CLONE_UNTRACED;
-	ptrace(PTRACE_POKEUSER, pinfp->pid, sizeof(long) * RDI, flags);
+	if (ptrace(PTRACE_POKEUSER, pinfp->pid, sizeof(long) * RDI, flags) < 0)
+		perror("ptrace(PTRACE_POKEUSER)");
 #elif defined(__arm__) || defined(__arm64__) || defined(__aarch64__)
 	/* Do not know how to handle this */
 #endif
@@ -323,7 +329,10 @@ void do_child(const char *username, int argc, char **argv)
 	for (i = 0; i < argc; i++)
 		args[i] = argv[i];
 	args[argc] = NULL;
-	ptrace(PTRACE_TRACEME, 0, NULL, NULL);
+	if (ptrace(PTRACE_TRACEME, 0, NULL, NULL) < 0) {
+		perror("ptrace(PTRACE_TRACEME)");
+		exit(errno);
+	}
 	if (username) {
 		if (initgroups(username, run_gid) < 0) {
 			perror("initgroups");
@@ -349,6 +358,9 @@ void do_child(const char *username, int argc, char **argv)
 	 * the immediately following execve syscall.
 	 */
 	kill(pid, SIGSTOP);
+#ifdef ENABLE_SECCOMP_BPF
+	install_seccomp();
+#endif
 	if (execvp(args[0], args) < 0) {
 		fprintf(stderr, "graftcp %s: %s\n", args[0], strerror(errno));
 		exit(errno);
@@ -365,11 +377,9 @@ void init(const char *username, int argc, char **argv)
 		perror("fork");
 		exit(errno);
 	} else if (child == 0) {
-#ifdef ENABLE_SECCOMP_BPF
-		install_seccomp();
-#endif
 		do_child(username, argc, argv);
 	}
+	root_pid = child;
 	pi = alloc_proc_info(child);
 	if (pi == NULL) {
 		perror("calloc");
@@ -380,7 +390,10 @@ void init(const char *username, int argc, char **argv)
 
 int trace_syscall_entering(struct proc_info *pinfp)
 {
+	errno = 0;
 	pinfp->csn = get_syscall_number(pinfp->pid);
+	if (errno != 0)
+		return -1;
 	switch (pinfp->csn) {
 	case SYS_socket:
 		socket_pre_handle(pinfp);
@@ -433,19 +446,45 @@ int trace_syscall(struct proc_info *pinfp)
 	    trace_syscall_entering(pinfp);
 }
 
+static bool is_syscall_stop(int status)
+{
+	return WIFSTOPPED(status) && WSTOPSIG(status) == (SIGTRAP | 0x80);
+}
+
+static bool is_group_stop(pid_t pid)
+{
+	siginfo_t si;
+
+	errno = 0;
+	if (ptrace(PTRACE_GETSIGINFO, pid, 0, &si) == 0)
+		return false;
+	return errno == EINVAL;
+}
+
 int do_trace()
 {
 	pid_t child;
 	int status;
-	int stopped;
 	int sig;
 	unsigned event;
 	struct proc_info *pinfp;
+	long ptrace_options = PTRACE_O_TRACESYSGOOD |
+			      PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXEC |
+#ifdef ENABLE_SECCOMP_BPF
+			      PTRACE_O_TRACESECCOMP |
+#endif
+			      PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK |
+			      PTRACE_O_EXITKILL;
 
 	for (;;) {
-		child = wait(&status);
-		if (child < 0)
+		do {
+			child = waitpid(-1, &status, __WALL);
+		} while (child < 0 && errno == EINTR);
+		if (child < 0) {
+			if (errno == ECHILD)
+				return 0;
 			return 0;
+		}
 		pinfp = find_proc_info(child);
 		if (!pinfp)
 			pinfp = alloc_proc_info(child);
@@ -458,55 +497,40 @@ int do_trace()
 			pinfp->flags &= ~FLAG_STARTUP;
 
 			if (ptrace(PTRACE_SETOPTIONS, child, 0,
-				   PTRACE_O_TRACECLONE | PTRACE_O_TRACEEXEC |
-#ifdef ENABLE_SECCOMP_BPF
-				   PTRACE_O_TRACESECCOMP |
-#endif
-				   PTRACE_O_TRACEFORK | PTRACE_O_TRACEVFORK) <
-			    0) {
+				   ptrace_options) < 0) {
 				perror("ptrace");
 				exit(errno);
 			}
 		}
 		event = ((unsigned)status >> 16);
-#ifdef ENABLE_SECCOMP_BPF
-		if (event != 0 && event != PTRACE_EVENT_SECCOMP) {
-			sig = 0;
-			goto end;
-		}
-#else
-		if (event != 0) {
-			sig = 0;
-			goto end;
-		}
-#endif
 		if (WIFSIGNALED(status) || WIFEXITED(status)
 		    || !WIFSTOPPED(status)) {
-			if (WIFEXITED(status))
+			if (child == root_pid && WIFEXITED(status))
 				exit_code = WEXITSTATUS(status);
-			else if (WIFSIGNALED(status))
+			else if (child == root_pid && WIFSIGNALED(status))
 				exit_code = 128 + WTERMSIG(status);
 			free_proc_info(pinfp);
 			continue;
 		}
-		sig = WSTOPSIG(status);
-		if (sig == SIGSTOP) {
-			sig = 0;
+
+		sig = 0;
+		if (event != 0) {
+#ifdef ENABLE_SECCOMP_BPF
+			if (event == PTRACE_EVENT_SECCOMP &&
+			    trace_syscall(pinfp) < 0)
+				perror("trace_syscall");
+#endif
 			goto end;
 		}
-		if (sig != SIGTRAP) {
-			siginfo_t si;
-			stopped =
-			    (ptrace(PTRACE_GETSIGINFO, child, 0, (long)&si) <
-			     0);
-			if (!stopped) {
-				/* It's signal-delivery-stop. Inject the signal */
-				goto end;
-			}
+		if (is_syscall_stop(status)) {
+			if (trace_syscall(pinfp) < 0)
+				perror("trace_syscall");
+			goto end;
 		}
-		if (trace_syscall(pinfp) < 0)
-			continue;
-		sig = 0;
+
+		sig = WSTOPSIG(status);
+		if (sig == SIGSTOP || is_group_stop(child))
+			sig = 0;
 end:
 		/*
 		 * Since the value returned by a successful PTRACE_PEEK*  request  may  be
