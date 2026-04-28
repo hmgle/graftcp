@@ -58,7 +58,7 @@ endif
 LOCAL_DIR := local
 TARGET := $(LOCAL_DIR)/mgraftcp
 
-LIB_SRCS := graftcp.c util.c cidr-trie.c
+LIB_SRCS := graftcp.c util.c ptrace-ops.c cidr-trie.c
 LIB_OBJS := $(LIB_SRCS:.c=.o)
 LIB_DEPS := $(LIB_OBJS:.o=.d)
 
