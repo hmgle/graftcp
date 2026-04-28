@@ -4,7 +4,7 @@
 
 ## 简介
 
-`mgraftcp` 通过 `ptrace(2)` 拦截目标程序的 `connect(2)`，把任意 Linux 进程的 TCP 连接重定向到 SOCKS5 或 HTTP 代理。显式启用后，它也可以把 UDP/53 DNS 查询重定向到内嵌的 DNS-over-TCP 转发器。
+`mgraftcp` 通过 `ptrace(2)` 拦截目标程序的 socket syscall，把任意 Linux 进程的 TCP 连接重定向到 SOCKS5 或 HTTP 代理。显式启用后，它也可以把 UDP/53 DNS 查询重定向到内嵌的 DNS-over-TCP 转发器，并通过 SOCKS5 UDP ASSOCIATE 或 direct UDP 代理通用 UDP。
 
 这次重构后，旧的 `graftcp` + `graftcp-local` 双程序模型已经移除：
 
@@ -37,17 +37,19 @@ sudo make install
 
 ```console
 $ ./local/mgraftcp --help
-Usage: mgraftcp [-hn] [-b value] [--config value] [--disable-dns] [--dns-server value] [--enable-debug-log] [--enable-dns] [--http_proxy value] [--select_proxy_mode value] [--socks5 value] [--socks5_password value] [--socks5_username value] [-u value] [--version] [-w value] [parameters ...]
+Usage: mgraftcp [-hn] [-b value] [--config value] [--disable-dns] [--disable-udp] [--dns-server value] [--enable-debug-log] [--enable-dns] [--enable-udp] [--http_proxy value] [--select_proxy_mode value] [--socks5 value] [--socks5_password value] [--socks5_username value] [-u value] [--version] [-w value] [parameters ...]
  -b, --blackip-file=value
                     The IP in black-ip-file will connect direct
      --config=value
                     Path to the configuration file
      --disable-dns  Disable DNS proxy
+     --disable-udp  Disable generic UDP proxy
      --dns-server=value
                     DNS upstream server address, e.g.: 1.1.1.1:53 [1.1.1.1:53]
      --enable-debug-log
                     Enable debug log
      --enable-dns   Enable DNS proxy for UDP/53 queries
+     --enable-udp   Enable generic UDP proxy
  -h, --help         Display this help and exit
      --http_proxy=value
                     http proxy address, e.g.: 127.0.0.1:8080
@@ -76,6 +78,7 @@ Usage: mgraftcp [-hn] [-b value] [--config value] [--disable-dns] [--dns-server 
 ```sh
 ./local/mgraftcp --socks5 127.0.0.1:1080 curl https://example.com
 ./local/mgraftcp --enable-dns --dns-server 1.1.1.1:53 curl https://example.com
+./local/mgraftcp --enable-udp --socks5 127.0.0.1:1080 your-udp-client
 ./local/mgraftcp --http_proxy 127.0.0.1:8080 git clone https://github.com/hmgle/graftcp.git
 ./local/mgraftcp bash --rcfile <(echo 'PS1="(mgraftcp) $PS1"')
 ```
@@ -104,16 +107,21 @@ Usage: mgraftcp [-hn] [-b value] [--config value] [--disable-dns] [--dns-server 
 
 启用 DNS 代理时，`mgraftcp` 还会启动一个内嵌 UDP DNS listener。目标端口为 53 的 UDP `connect()` 和 `sendto()` 会被改写到这个 listener，每个 DNS payload 再通过同一套 SOCKS5 / HTTP / direct 选择策略，以 TCP 方式转发到配置的上游 DNS 服务器。
 
+启用通用 UDP 代理时，`mgraftcp` 会启动另一个内嵌 UDP listener。UDP `connect()`、`sendto()` 和 `sendmsg()` 的目标地址会被改写成 loopback token endpoint；内嵌 listener 再把 token 映射回原始目标地址，并在选中 SOCKS5 时通过 SOCKS5 UDP ASSOCIATE 转发，或在 `direct` 模式和 fallback 场景下用 direct UDP 转发。
+
 ## 说明
 
 - 仅支持 Linux。
 - 仍然受 `ptrace(2)` 权限限制；如果跟踪失败，请检查 Yama `ptrace_scope`、能力集或是否需要 root。
 - 默认忽略本地目标地址；如果希望本地连接也走代理，使用 `--not-ignore-local`。
 - DNS 代理默认关闭；使用 `--enable-dns` 启用 UDP/53 DNS-over-TCP 路径，使用 `--dns-server` 指定上游服务器。
-- DNS 支持有意限定为 DNS-only；当前不实现通用 UDP 代理，也不实现 SOCKS5 UDP ASSOCIATE。
+- 通用 UDP 代理默认关闭；使用 `--enable-udp` 启用。
+- HTTP 代理模式不支持通用 UDP。`auto` 会优先尝试 SOCKS5 UDP，失败时回退 direct UDP；`only_http_proxy` 会拒绝通用 UDP session。
+- 同时启用 DNS 和通用 UDP 时，UDP/53 优先走 DNS-over-TCP 路径。
 - 配置文件支持代理地址和常见路由选项；命令行参数仍然覆盖配置文件。
 - 当前分支不会虚拟化 `getpeername()` / `getsockname()`，程序也可能在原始 `connect()` 缓冲区里看到 fake loopback endpoint。
-- DNS 路径同样采用弱语义改写 `connect()` / `sendto()` 缓冲区；如果客户端强依赖 `recvfrom()` 返回原始 DNS 服务器地址，透明性可能不完整。
+- UDP 路径同样采用弱语义改写 socket 地址缓冲区；如果客户端强依赖 `recvfrom()` 返回原始远端地址，透明性可能不完整。
+- UDP syscall 覆盖 `connect()`、`sendto()` 和 `sendmsg()`；批量发送的 `sendmmsg()` 当前不覆盖。
 - IPv6 故意统一走 IPv4-mapped loopback；依赖 `IPV6_V6ONLY=1` 的 socket 不在当前设计目标内。
 - socket 跟踪是按 `(pid, fd)` 做的 best-effort，而不是按共享 fd table 建模；`dup*`、`close_range()`、跨线程共享 socket 等场景都属于有意不覆盖的边界。
 - loopback token 只会在本地 listener 成功 `accept()` 后回收；失败或放弃的连接可能留下残留条目，等待 token wrap-around 覆盖。
