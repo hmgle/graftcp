@@ -38,6 +38,9 @@ type Local struct {
 	socks5Dialer    proxy.Dialer
 	httpProxyDialer proxy.Dialer
 	directDialer    proxy.Dialer
+	socks5Addr      string
+	socks5Username  string
+	socks5Password  string
 
 	routes    *RouteRegistry
 	udpRoutes *DatagramRouteRegistry
@@ -81,6 +84,9 @@ func NewLocal(listenAddr, socks5Addr, socks5Username, socks5PassWord, httpProxyA
 				log.Errorf("proxy.SOCKS5(%s) fail: %s", socks5TCPAddr.String(), err.Error())
 			} else {
 				local.socks5Dialer = dialerSocks5
+				local.socks5Addr = socks5TCPAddr.String()
+				local.socks5Username = socks5Username
+				local.socks5Password = socks5PassWord
 			}
 		}
 	}

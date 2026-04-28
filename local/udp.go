@@ -237,7 +237,16 @@ func (l *Local) newUDPForwarder(proxy *UDPProxy, clientAddr *net.UDPAddr, tokenI
 		return nil, fmt.Errorf("HTTP proxy mode does not support UDP")
 	case DirectMode:
 		return newDirectUDPForwarder(proxy, clientAddr, tokenIP, destAddr)
+	case OnlySocks5Mode:
+		return l.newSocks5UDPForwarder(proxy, clientAddr, tokenIP, destAddr)
 	default:
+		if l.socks5Addr != "" {
+			forwarder, err := l.newSocks5UDPForwarder(proxy, clientAddr, tokenIP, destAddr)
+			if err == nil {
+				return forwarder, nil
+			}
+			log.Infof("SOCKS5 UDP associate failed for %s, fallback direct: %s", destAddr, err.Error())
+		}
 		return newDirectUDPForwarder(proxy, clientAddr, tokenIP, destAddr)
 	}
 }
