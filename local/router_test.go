@@ -3,6 +3,7 @@ package local
 import (
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestRouteRegistryRegisterConsumeIPv4(t *testing.T) {
@@ -74,5 +75,51 @@ func TestRouteRegistryWrapAroundReusesTokens(t *testing.T) {
 	}
 	if destAddr != "3.3.3.3:80" {
 		t.Fatalf("Consume() destAddr after wrap = %q, want %q", destAddr, "3.3.3.3:80")
+	}
+}
+
+func TestDatagramRouteRegistryReusesTokenForSameDestination(t *testing.T) {
+	registry := NewDatagramRouteRegistry()
+
+	firstToken, err := registry.Register(syscall.AF_INET, "198.51.100.1", 5353)
+	if err != nil {
+		t.Fatalf("Register() first error = %v", err)
+	}
+	secondToken, err := registry.Register(syscall.AF_INET, "198.51.100.1", 5353)
+	if err != nil {
+		t.Fatalf("Register() second error = %v", err)
+	}
+	if firstToken != secondToken {
+		t.Fatalf("Register() returned different tokens for the same UDP destination: %v and %v", firstToken, secondToken)
+	}
+
+	destAddr, ok := registry.Lookup(tokenToIP(firstToken))
+	if !ok {
+		t.Fatal("Lookup() did not find reused token")
+	}
+	if destAddr != "198.51.100.1:5353" {
+		t.Fatalf("Lookup() destAddr = %q, want %q", destAddr, "198.51.100.1:5353")
+	}
+}
+
+func TestDatagramRouteRegistrySweepIdle(t *testing.T) {
+	registry := NewDatagramRouteRegistry()
+
+	token, err := registry.Register(syscall.AF_INET, "198.51.100.2", 5353)
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+
+	registry.SweepIdle(time.Now().Add(time.Minute), time.Second)
+	if _, ok := registry.Lookup(tokenToIP(token)); ok {
+		t.Fatal("Lookup() found route after idle sweep")
+	}
+
+	nextToken, err := registry.Register(syscall.AF_INET, "198.51.100.2", 5353)
+	if err != nil {
+		t.Fatalf("Register() after sweep error = %v", err)
+	}
+	if nextToken == token {
+		t.Fatalf("Register() reused swept destination token immediately: %v", token)
 	}
 }

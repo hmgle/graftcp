@@ -256,6 +256,7 @@ void socket_pre_handle(struct proc_info *pinfp)
 {
 	int domain = get_syscall_arg(pinfp->pid, 0);
 	int type = get_syscall_arg(pinfp->pid, 1);
+	int protocol = get_syscall_arg(pinfp->pid, 2);
 	int socket_type = type & SOCK_TYPE_MASK;
 
 	if (domain != AF_INET && domain != AF_INET6)
@@ -263,6 +264,8 @@ void socket_pre_handle(struct proc_info *pinfp)
 	if (socket_type != SOCK_STREAM &&
 	    ((DNS_PROXY_PORT == 0 && UDP_PROXY_PORT == 0) ||
 	     socket_type != SOCK_DGRAM))
+		return;
+	if (socket_type == SOCK_DGRAM && protocol != 0 && protocol != IPPROTO_UDP)
 		return;
 	pinfp->pending_socket = true;
 	pinfp->pending_socket_domain = domain;

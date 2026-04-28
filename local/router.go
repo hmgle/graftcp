@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 )
 
 const (
@@ -129,13 +130,20 @@ func tokenToIP(token uint32) net.IP {
 // loopback endpoint.
 type DatagramRouteRegistry struct {
 	mu        sync.Mutex
-	routes    map[uint32]string
+	routes    map[uint32]datagramRoute
+	tokens    map[string]uint32
 	allocator *LoopbackGen
+}
+
+type datagramRoute struct {
+	destAddr string
+	lastSeen time.Time
 }
 
 func NewDatagramRouteRegistry() *DatagramRouteRegistry {
 	return &DatagramRouteRegistry{
-		routes:    make(map[uint32]string),
+		routes:    make(map[uint32]datagramRoute),
+		tokens:    make(map[string]uint32),
 		allocator: newLoopbackGen(loopbackStartToken, loopbackEndToken),
 	}
 }
@@ -149,12 +157,29 @@ func (r *DatagramRouteRegistry) Register(family int, host string, port uint16) (
 		return 0, err
 	}
 
-	token := r.allocator.nextToken()
+	now := time.Now()
 	r.mu.Lock()
 	if r.routes == nil {
-		r.routes = make(map[uint32]string)
+		r.routes = make(map[uint32]datagramRoute)
 	}
-	r.routes[token] = destAddr
+	if r.tokens == nil {
+		r.tokens = make(map[string]uint32)
+	}
+	if token, ok := r.tokens[destAddr]; ok {
+		route := r.routes[token]
+		route.destAddr = destAddr
+		route.lastSeen = now
+		r.routes[token] = route
+		r.mu.Unlock()
+		return token, nil
+	}
+
+	token := r.allocator.nextToken()
+	if oldRoute, ok := r.routes[token]; ok {
+		delete(r.tokens, oldRoute.destAddr)
+	}
+	r.routes[token] = datagramRoute{destAddr: destAddr, lastSeen: now}
+	r.tokens[destAddr] = token
 	r.mu.Unlock()
 	return token, nil
 }
@@ -169,7 +194,26 @@ func (r *DatagramRouteRegistry) Lookup(localIP net.IP) (string, bool) {
 	}
 
 	r.mu.Lock()
-	destAddr, ok := r.routes[token]
+	route, ok := r.routes[token]
+	if ok {
+		route.lastSeen = time.Now()
+		r.routes[token] = route
+	}
 	r.mu.Unlock()
-	return destAddr, ok
+	return route.destAddr, ok
+}
+
+func (r *DatagramRouteRegistry) SweepIdle(now time.Time, maxIdle time.Duration) {
+	if r == nil || maxIdle <= 0 {
+		return
+	}
+
+	r.mu.Lock()
+	for token, route := range r.routes {
+		if now.Sub(route.lastSeen) > maxIdle {
+			delete(r.routes, token)
+			delete(r.tokens, route.destAddr)
+		}
+	}
+	r.mu.Unlock()
 }

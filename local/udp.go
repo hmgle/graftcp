@@ -28,6 +28,8 @@ type udpSession struct {
 	tokenIP    net.IP
 	destAddr   string
 	forwarder  udpForwarder
+	ready      chan struct{}
+	initErr    error
 	lastSeen   time.Time
 }
 
@@ -87,8 +89,10 @@ func (p *UDPProxy) Close() error {
 
 	var closeErr error
 	for _, session := range sessions {
-		if err := session.forwarder.Close(); err != nil && closeErr == nil {
-			closeErr = err
+		if session.forwarder != nil {
+			if err := session.forwarder.Close(); err != nil && closeErr == nil {
+				closeErr = err
+			}
 		}
 	}
 	if err := p.conn.Close(); err != nil && closeErr == nil {
@@ -123,7 +127,7 @@ func (p *UDPProxy) serve() {
 		}
 		payload := make([]byte, n)
 		copy(payload, buf[:n])
-		p.handlePacket(clientAddr, tokenIP, payload)
+		go p.handlePacket(clientAddr, tokenIP, payload)
 	}
 }
 
@@ -137,6 +141,19 @@ func (p *UDPProxy) handlePacket(clientAddr *net.UDPAddr, tokenIP net.IP, payload
 	session, err := p.getSession(clientAddr, tokenIP, destAddr)
 	if err != nil {
 		log.Errorf("UDP proxy session for %s -> %s err: %s", clientAddr.String(), destAddr, err.Error())
+		return
+	}
+	select {
+	case <-session.ready:
+	case <-p.closed:
+		return
+	}
+	if session.initErr != nil {
+		log.Errorf("UDP proxy session for %s -> %s err: %s", clientAddr.String(), destAddr, session.initErr.Error())
+		return
+	}
+	if session.forwarder == nil {
+		log.Errorf("UDP proxy session for %s -> %s has no forwarder", clientAddr.String(), destAddr)
 		return
 	}
 	if err := session.forwarder.Write(payload); err != nil {
@@ -155,31 +172,44 @@ func (p *UDPProxy) getSession(clientAddr *net.UDPAddr, tokenIP net.IP, destAddr 
 		p.mu.Unlock()
 		return session, nil
 	}
-	p.mu.Unlock()
-
-	forwarder, err := p.local.newUDPForwarder(p, clientAddr, tokenIP, destAddr)
-	if err != nil {
-		return nil, err
-	}
 	session := &udpSession{
 		key:        key,
 		clientAddr: cloneUDPAddr(clientAddr),
 		tokenIP:    cloneIP(tokenIP),
 		destAddr:   destAddr,
-		forwarder:  forwarder,
+		ready:      make(chan struct{}),
 		lastSeen:   now,
-	}
-
-	p.mu.Lock()
-	if existing, ok := p.sessions[key]; ok {
-		existing.lastSeen = now
-		p.mu.Unlock()
-		_ = forwarder.Close()
-		return existing, nil
 	}
 	p.sessions[key] = session
 	p.mu.Unlock()
+
+	go p.initSession(session)
 	return session, nil
+}
+
+func (p *UDPProxy) initSession(session *udpSession) {
+	forwarder, err := p.local.newUDPForwarder(p, session.clientAddr, session.tokenIP, session.destAddr)
+
+	p.mu.Lock()
+	current := p.sessions[session.key] == session
+	if current {
+		session.forwarder = forwarder
+		session.initErr = err
+	}
+	p.mu.Unlock()
+
+	if !current {
+		if forwarder != nil {
+			_ = forwarder.Close()
+		}
+		close(session.ready)
+		return
+	}
+
+	close(session.ready)
+	if err != nil {
+		p.removeSession(session.key)
+	}
 }
 
 func (p *UDPProxy) sendToClient(payload []byte, tokenIP net.IP, clientAddr *net.UDPAddr) error {
@@ -196,7 +226,9 @@ func (p *UDPProxy) removeSession(key string) {
 	}
 	p.mu.Unlock()
 	if ok {
-		_ = session.forwarder.Close()
+		if session.forwarder != nil {
+			_ = session.forwarder.Close()
+		}
 	}
 }
 
@@ -227,8 +259,11 @@ func (p *UDPProxy) closeIdleSessions(now time.Time) {
 
 	for _, session := range expired {
 		log.Infof("UDP proxy session idle timeout: %s -> %s", session.clientAddr.String(), session.destAddr)
-		_ = session.forwarder.Close()
+		if session.forwarder != nil {
+			_ = session.forwarder.Close()
+		}
 	}
+	p.local.udpRoutes.SweepIdle(now, udpSessionIdle)
 }
 
 func (l *Local) newUDPForwarder(proxy *UDPProxy, clientAddr *net.UDPAddr, tokenIP net.IP, destAddr string) (udpForwarder, error) {
@@ -236,9 +271,17 @@ func (l *Local) newUDPForwarder(proxy *UDPProxy, clientAddr *net.UDPAddr, tokenI
 	case OnlyHTTPProxyMode:
 		return nil, fmt.Errorf("HTTP proxy mode does not support UDP")
 	case DirectMode:
-		return newDirectUDPForwarder(proxy, clientAddr, tokenIP, destAddr)
+		forwarder, err := newDirectUDPForwarder(proxy, clientAddr, tokenIP, destAddr)
+		if err != nil {
+			return nil, err
+		}
+		return forwarder, nil
 	case OnlySocks5Mode:
-		return l.newSocks5UDPForwarder(proxy, clientAddr, tokenIP, destAddr)
+		forwarder, err := l.newSocks5UDPForwarder(proxy, clientAddr, tokenIP, destAddr)
+		if err != nil {
+			return nil, err
+		}
+		return forwarder, nil
 	default:
 		if l.socks5Addr != "" {
 			forwarder, err := l.newSocks5UDPForwarder(proxy, clientAddr, tokenIP, destAddr)
@@ -247,7 +290,11 @@ func (l *Local) newUDPForwarder(proxy *UDPProxy, clientAddr *net.UDPAddr, tokenI
 			}
 			log.Infof("SOCKS5 UDP associate failed for %s, fallback direct: %s", destAddr, err.Error())
 		}
-		return newDirectUDPForwarder(proxy, clientAddr, tokenIP, destAddr)
+		forwarder, err := newDirectUDPForwarder(proxy, clientAddr, tokenIP, destAddr)
+		if err != nil {
+			return nil, err
+		}
+		return forwarder, nil
 	}
 }
 
