@@ -44,6 +44,10 @@
 #include <fcntl.h>
 #include <assert.h>
 
+#ifndef SOCK_TYPE_MASK
+#define SOCK_TYPE_MASK 0xf
+#endif
+
 #if defined(__arm__) || defined(__arm64__) || defined(__aarch64__)
 
 #ifndef SYS_socket
@@ -109,7 +113,7 @@ int get_retval(pid_t pid);
 void set_retval(pid_t pid, long new_val);
 long get_syscall_arg(pid_t pid, int order);
 
-void getdata(pid_t child, long addr, char *dst, int len);
-void putdata(pid_t child, long addr, char *src, int len);
+int getdata(pid_t child, long addr, void *dst, size_t len);
+int putdata(pid_t child, long addr, const void *src, size_t len);
 
 #endif

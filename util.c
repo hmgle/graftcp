@@ -155,32 +155,36 @@ int get_syscall_number(pid_t pid)
 	errno = 0;
 	int offset = offsetof(struct user, regs.orig_rax);
 	long val = ptrace(PTRACE_PEEKUSER, pid, offset);
-	assert(errno == 0);
+	if (errno != 0)
+		return -1;
 	return (int)val;
 #else			/* another way */
 	struct user_regs_struct regs;
-	ptrace(PTRACE_GETREGS, pid, 0, &regs);
-	assert(errno == 0);
+	errno = 0;
+	if (ptrace(PTRACE_GETREGS, pid, 0, &regs) < 0)
+		return -1;
 	return regs.orig_rax;
 #endif
 #elif defined(__i386__)
 	struct user_regs_struct regs;
-	ptrace(PTRACE_GETREGS, pid, 0, &regs);
-	assert(errno == 0);
+	errno = 0;
+	if (ptrace(PTRACE_GETREGS, pid, 0, &regs) < 0)
+		return -1;
 	return regs.orig_eax;
 #elif defined(__arm__)
 	errno = 0;
 	struct pt_regs regs;
-	ptrace(PTRACE_GETREGS, pid, 0, &regs);
-	assert(errno == 0);
+	if (ptrace(PTRACE_GETREGS, pid, 0, &regs) < 0)
+		return -1;
 	return regs.ARM_r7;
 #elif defined(__arm64__) || defined(__aarch64__)
 	struct iovec iov = {
 		.iov_base = &arm_regs_union,
 		.iov_len = sizeof(struct user_pt_regs)
 	};
-	ptrace(PTRACE_GETREGSET, pid, NT_PRSTATUS, &iov);
-	assert(errno == 0);
+	errno = 0;
+	if (ptrace(PTRACE_GETREGSET, pid, NT_PRSTATUS, &iov) < 0)
+		return -1;
 	switch (iov.iov_len) {
 	case sizeof(struct user_pt_regs):
 		return arm_regs_union.aarch64_r.regs[8];
@@ -198,29 +202,36 @@ int get_retval(pid_t pid)
 	errno = 0;
 	int offset = offsetof(struct user, regs.rax);
 	long val = ptrace(PTRACE_PEEKUSER, pid, offset);
+	if (errno != 0)
+		return -1;
 	return (int)val;
 #else			/* another way */
 	struct user_regs_struct regs;
-	ptrace(PTRACE_GETREGS, pid, 0, &regs);
+	errno = 0;
+	if (ptrace(PTRACE_GETREGS, pid, 0, &regs) < 0)
+		return -1;
 	return regs.rax;
 #endif
 #elif defined(__i386__)
 	errno = 0;
 	struct user_regs_struct regs;
-	ptrace(PTRACE_GETREGS, pid, 0, &regs);
+	if (ptrace(PTRACE_GETREGS, pid, 0, &regs) < 0)
+		return -1;
 	return regs.eax;
 #elif defined(__arm__)
 	errno = 0;
 	struct pt_regs regs;
-	ptrace(PTRACE_GETREGS, pid, 0, &regs);
+	if (ptrace(PTRACE_GETREGS, pid, 0, &regs) < 0)
+		return -1;
 	return regs.ARM_r0;
 #elif defined(__arm64__) || defined(__aarch64__)
 	struct iovec iov = {
 		.iov_base = &arm_regs_union,
 		.iov_len = sizeof(struct user_pt_regs)
 	};
-	ptrace(PTRACE_GETREGSET, pid, NT_PRSTATUS, &iov);
-	assert(errno == 0);
+	errno = 0;
+	if (ptrace(PTRACE_GETREGSET, pid, NT_PRSTATUS, &iov) < 0)
+		return -1;
 	switch (iov.iov_len) {
 	case sizeof(struct user_pt_regs):
 		return arm_regs_union.aarch64_r.regs[0];
@@ -235,38 +246,35 @@ void set_retval(pid_t pid, long new_val)
 {
 #if defined(__x86_64__)
 	struct user_regs_struct regs;
-	ptrace(PTRACE_GETREGS, pid, 0, &regs);
-	assert(errno == 0);
+	if (ptrace(PTRACE_GETREGS, pid, 0, &regs) < 0)
+		return;
 	if ((long)regs.rax == new_val)
 		return;
 	regs.rax = new_val;
-	ptrace(PTRACE_SETREGS, pid, 0, &regs);
-	assert(errno == 0);
+	(void)ptrace(PTRACE_SETREGS, pid, 0, &regs);
 #elif defined(__i386__)
 	struct user_regs_struct regs;
-	ptrace(PTRACE_GETREGS, pid, 0, &regs);
-	assert(errno == 0);
+	if (ptrace(PTRACE_GETREGS, pid, 0, &regs) < 0)
+		return;
 	if ((long)regs.eax == new_val)
 		return;
 	regs.eax = new_val;
-	ptrace(PTRACE_SETREGS, pid, 0, &regs);
-	assert(errno == 0);
+	(void)ptrace(PTRACE_SETREGS, pid, 0, &regs);
 #elif defined(__arm__)
 	struct pt_regs regs;
-	ptrace(PTRACE_GETREGS, pid, 0, &regs);
-	assert(errno == 0);
+	if (ptrace(PTRACE_GETREGS, pid, 0, &regs) < 0)
+		return;
 	if ((long)regs.ARM_r0 == new_val)
 		return;
 	regs.ARM_r0 = new_val;
-	ptrace(PTRACE_SETREGS, pid, 0, &regs);
-	assert(errno == 0);
+	(void)ptrace(PTRACE_SETREGS, pid, 0, &regs);
 #elif defined(__arm64__) || defined(__aarch64__)
 	struct iovec iov = {
 		.iov_base = &arm_regs_union,
 		.iov_len = sizeof(struct user_pt_regs)
 	};
-	ptrace(PTRACE_GETREGSET, pid, NT_PRSTATUS, &iov);
-	assert(errno == 0);
+	if (ptrace(PTRACE_GETREGSET, pid, NT_PRSTATUS, &iov) < 0)
+		return;
 	switch (iov.iov_len) {
 	case sizeof(struct user_pt_regs):
 		arm_regs_union.aarch64_r.regs[0] = new_val;
@@ -277,8 +285,7 @@ void set_retval(pid_t pid, long new_val)
 	default:
 		return;
 	}
-	ptrace(PTRACE_SETREGSET, pid, NT_PRSTATUS, &iov);
-	assert(errno == 0);
+	(void)ptrace(PTRACE_SETREGSET, pid, NT_PRSTATUS, &iov);
 #endif
 }
 
@@ -312,10 +319,13 @@ long get_syscall_arg(pid_t pid, int order)
 	}
 	errno = 0;
 	val = ptrace(PTRACE_PEEKUSER, pid, offset);
-	assert(errno == 0);
+	if (errno != 0)
+		return -1;
 #elif defined(__i386__)
 	struct user_regs_struct regs;
-	ptrace(PTRACE_GETREGS, pid, 0, &regs);
+	errno = 0;
+	if (ptrace(PTRACE_GETREGS, pid, 0, &regs) < 0)
+		return -1;
 	switch (order) {
 	case 0:
 		val = regs.ebx;
@@ -340,7 +350,9 @@ long get_syscall_arg(pid_t pid, int order)
 	}
 #elif defined(__arm__)
 	struct pt_regs regs;
-	ptrace(PTRACE_GETREGS, pid, 0, &regs);
+	errno = 0;
+	if (ptrace(PTRACE_GETREGS, pid, 0, &regs) < 0)
+		return -1;
 	switch (order) {
 	case 0:
 		val = regs.ARM_ORIG_r0;
@@ -390,58 +402,79 @@ long get_syscall_arg(pid_t pid, int order)
 	return val;
 }
 
-void getdata(pid_t child, long addr, char *dst, int len)
+int getdata(pid_t child, long addr, void *dst, size_t len)
 {
 	char *laddr;
-	int i, j;
+	size_t i, j;
 	union u {
 		long val;
 		char chars[sizeof(long)];
 	} data;
 
+	if (addr == 0 || dst == NULL)
+		return -1;
+
 	i = 0;
 	j = len / sizeof(long);
 	laddr = dst;
 	while (i < j) {
+		errno = 0;
 		data.val = ptrace(PTRACE_PEEKDATA, child,
 				  addr + i * (long)sizeof(long), NULL);
+		if (errno != 0)
+			return -1;
 		memcpy(laddr, data.chars, sizeof(long));
 		++i;
 		laddr += sizeof(long);
 	}
 	j = len % sizeof(long);
 	if (j != 0) {
+		errno = 0;
 		data.val = ptrace(PTRACE_PEEKDATA, child,
 				  addr + i * (long)sizeof(long), NULL);
+		if (errno != 0)
+			return -1;
 		memcpy(laddr, data.chars, j);
 	}
+	return 0;
 }
 
-void putdata(pid_t child, long addr, char *src, int len)
+int putdata(pid_t child, long addr, const void *src, size_t len)
 {
-	char *laddr;
-	int i, j;
+	const char *laddr;
+	size_t i, j;
 	union u {
 		long val;
 		char chars[sizeof(long)];
 	} data;
+
+	if (addr == 0 || src == NULL)
+		return -1;
 
 	i = 0;
 	j = len / sizeof(long);
 	laddr = src;
 	while (i < j) {
 		memcpy(data.chars, laddr, sizeof(long));
-		ptrace(PTRACE_POKEDATA, child,
-		       addr + i * (long)sizeof(long), data.val);
+		errno = 0;
+		if (ptrace(PTRACE_POKEDATA, child,
+			   addr + i * (long)sizeof(long), data.val) < 0)
+			return -1;
 		++i;
 		laddr += sizeof(long);
 	}
 	j = len % sizeof(long);
 	if (j != 0) {
+		errno = 0;
 		data.val = ptrace(PTRACE_PEEKDATA, child,
 				  addr + i * (long)sizeof(long), NULL);
+		if (errno != 0)
+			return -1;
 		memcpy(data.chars, laddr, j);
-		ptrace(PTRACE_POKEDATA, child,
-		       addr + i * (long)sizeof(long), data.val);
+		errno = 0;
+		if (ptrace(PTRACE_POKEDATA, child,
+			   addr + i * (long)sizeof(long), data.val) < 0)
+			return -1;
 	}
+	return 0;
 }

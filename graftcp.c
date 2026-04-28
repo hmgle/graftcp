@@ -152,40 +152,20 @@ static bool ip6_is_ignore(uint8_t *ip)
 static void install_seccomp()
 {
 	/*
-	 * syscalls to trace, sort by frequency in desc order for most cases:
-	 *   close(...),
-	 *   socket([AF_INET | AF_INET6], SOCK_STREAM, ...),
-	 *   connect(...),
-	 *   clone([CLONE_UNTRACED], ...) (only for x86_64)
+	 * Keep the filter deliberately small. The syscall handlers do the
+	 * detailed argument filtering after ptrace has access to registers.
 	 */
 	struct sock_filter filter[] = {
 		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
 				(offsetof(struct seccomp_data, nr))),
 #if defined(__x86_64__)
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close, 10, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket, 0, 5),
-		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
-				offsetof(struct seccomp_data, args[0])),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AF_INET, 1, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AF_INET6, 0, 7),
-		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
-				offsetof(struct seccomp_data, args[1])),
-		BPF_JUMP(BPF_JMP | BPF_JSET | BPF_K, SOCK_STREAM, 4, 5),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect, 3, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_clone, 0, 3),
-		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
-				offsetof(struct seccomp_data, args[0])),
-		BPF_JUMP(BPF_JMP | BPF_JSET | BPF_K, CLONE_UNTRACED, 0, 1),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close, 3, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket, 2, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect, 1, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_clone, 0, 1),
 #else
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close, 7, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket, 0, 5),
-		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
-				offsetof(struct seccomp_data, args[0])),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AF_INET, 1, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AF_INET6, 0, 4),
-		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
-				offsetof(struct seccomp_data, args[1])),
-		BPF_JUMP(BPF_JMP | BPF_JSET | BPF_K, SOCK_STREAM, 1, 2),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close, 2, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket, 1, 0),
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect, 0, 1),
 #endif
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
@@ -222,16 +202,14 @@ static void install_seccomp()
 
 void socket_pre_handle(struct proc_info *pinfp)
 {
-#ifndef ENABLE_SECCOMP_BPF
 	int domain = get_syscall_arg(pinfp->pid, 0);
 	int type = get_syscall_arg(pinfp->pid, 1);
 
 	/* If not TCP socket, ignore */
-	if ((type & SOCK_STREAM) < 1
-	     || (domain != AF_INET && domain != AF_INET6)) {
+	if ((type & SOCK_TYPE_MASK) != SOCK_STREAM
+	    || (domain != AF_INET && domain != AF_INET6)) {
 		return;
 	}
-#endif
 	pinfp->pending_socket = true;
 }
 
@@ -242,26 +220,39 @@ void connect_pre_handle(struct proc_info *pinfp)
 		return;
 
 	long addr = get_syscall_arg(pinfp->pid, 1);
+	long addrlen = get_syscall_arg(pinfp->pid, 2);
+	sa_family_t family;
 	struct sockaddr_in dest_sa;
 	struct sockaddr_in6 dest_sa6;
 	struct sockaddr_in proxy_sa;
 	struct sockaddr_in6 proxy_sa6;
 	unsigned short dest_ip_port;
-	struct in_addr dest_ip_addr;
 	char *dest_ip_addr_str;
 	char dest_str[INET6_ADDRSTRLEN];
 	uint32_t loopback_token;
 
-	getdata(pinfp->pid, addr, (char *)&dest_sa, sizeof(dest_sa));
+	if (addrlen < (long)sizeof(family))
+		return;
+	if (getdata(pinfp->pid, addr, &family, sizeof(family)) < 0)
+		return;
 
-	if (dest_sa.sin_family == AF_INET) { /* IPv4 */
-		dest_ip_port = SOCKPORT(dest_sa);
-		dest_ip_addr.s_addr = SOCKADDR(dest_sa);
-		dest_ip_addr_str = inet_ntoa(dest_ip_addr);
-		if (ip4_is_ignore(dest_ip_addr.s_addr))
+	if (family == AF_INET) { /* IPv4 */
+		if (addrlen < (long)sizeof(dest_sa))
 			return;
-	} else if (dest_sa.sin_family == AF_INET6) { /* IPv6 */
-		getdata(pinfp->pid, addr, (char *)&dest_sa6, sizeof(dest_sa6));
+		if (getdata(pinfp->pid, addr, &dest_sa, sizeof(dest_sa)) < 0)
+			return;
+		dest_ip_port = SOCKPORT(dest_sa);
+		if (inet_ntop(AF_INET, &dest_sa.sin_addr, dest_str,
+			      sizeof(dest_str)) == NULL)
+			return;
+		dest_ip_addr_str = dest_str;
+		if (ip4_is_ignore(dest_sa.sin_addr.s_addr))
+			return;
+	} else if (family == AF_INET6) { /* IPv6 */
+		if (addrlen < (long)sizeof(dest_sa6))
+			return;
+		if (getdata(pinfp->pid, addr, &dest_sa6, sizeof(dest_sa6)) < 0)
+			return;
 		dest_ip_port = SOCKPORT6(dest_sa6);
 		if (ip6_is_ignore(dest_sa6.sin6_addr.s6_addr))
 			return;
@@ -271,7 +262,7 @@ void connect_pre_handle(struct proc_info *pinfp)
 		return;
 	}
 
-	loopback_token = mgraftcp_register_connect(dest_sa.sin_family,
+	loopback_token = mgraftcp_register_connect(family,
 						   dest_ip_addr_str,
 						   ntohs(dest_ip_port));
 	if (loopback_token == 0) {
@@ -280,14 +271,18 @@ void connect_pre_handle(struct proc_info *pinfp)
 		return;
 	}
 
-	if (dest_sa.sin_family == AF_INET) { /* IPv4 */
+	if (family == AF_INET) { /* IPv4 */
 		build_loopback_sockaddr4(&proxy_sa, loopback_token,
-					 LOCAL_PROXY_PORT);
-		putdata(pinfp->pid, addr, (char *)&proxy_sa, sizeof(proxy_sa));
+						 LOCAL_PROXY_PORT);
+		if (putdata(pinfp->pid, addr, &proxy_sa, sizeof(proxy_sa)) < 0)
+			fprintf(stderr, "mgraftcp rewrite connect failed for %s:%d\n",
+				dest_ip_addr_str, ntohs(dest_ip_port));
 	} else { /* IPv6 */
 		build_loopback_sockaddr6(&proxy_sa6, loopback_token,
-					 LOCAL_PROXY_PORT);
-		putdata(pinfp->pid, addr, (char *)&proxy_sa6, sizeof(proxy_sa6));
+						 LOCAL_PROXY_PORT);
+		if (putdata(pinfp->pid, addr, &proxy_sa6, sizeof(proxy_sa6)) < 0)
+			fprintf(stderr, "mgraftcp rewrite connect failed for %s:%d\n",
+				dest_ip_addr_str, ntohs(dest_ip_port));
 	}
 }
 
