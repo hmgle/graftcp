@@ -121,3 +121,55 @@ func tokenToIP(token uint32) net.IP {
 	binary.BigEndian.PutUint32(buf[:], token)
 	return net.IPv4(buf[0], buf[1], buf[2], buf[3]).To4()
 }
+
+// DatagramRouteRegistry stores persistent UDP destination mappings.
+//
+// Unlike TCP routes, UDP routes are not consumed after the first packet because
+// connected UDP sockets and multi-packet exchanges can reuse the same fake
+// loopback endpoint.
+type DatagramRouteRegistry struct {
+	mu        sync.Mutex
+	routes    map[uint32]string
+	allocator *LoopbackGen
+}
+
+func NewDatagramRouteRegistry() *DatagramRouteRegistry {
+	return &DatagramRouteRegistry{
+		routes:    make(map[uint32]string),
+		allocator: newLoopbackGen(loopbackStartToken, loopbackEndToken),
+	}
+}
+
+func (r *DatagramRouteRegistry) Register(family int, host string, port uint16) (uint32, error) {
+	if r == nil || r.allocator == nil {
+		return 0, fmt.Errorf("datagram route registry is not initialized")
+	}
+	destAddr, err := normalizeDestAddr(family, host, port)
+	if err != nil {
+		return 0, err
+	}
+
+	token := r.allocator.nextToken()
+	r.mu.Lock()
+	if r.routes == nil {
+		r.routes = make(map[uint32]string)
+	}
+	r.routes[token] = destAddr
+	r.mu.Unlock()
+	return token, nil
+}
+
+func (r *DatagramRouteRegistry) Lookup(localIP net.IP) (string, bool) {
+	if r == nil {
+		return "", false
+	}
+	token, ok := ipToToken(localIP)
+	if !ok {
+		return "", false
+	}
+
+	r.mu.Lock()
+	destAddr, ok := r.routes[token]
+	r.mu.Unlock()
+	return destAddr, ok
+}

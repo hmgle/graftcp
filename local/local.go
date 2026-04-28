@@ -39,7 +39,8 @@ type Local struct {
 	httpProxyDialer proxy.Dialer
 	directDialer    proxy.Dialer
 
-	routes *RouteRegistry
+	routes    *RouteRegistry
+	udpRoutes *DatagramRouteRegistry
 
 	selectMode modeT
 }
@@ -59,6 +60,7 @@ func NewLocal(listenAddr, socks5Addr, socks5Username, socks5PassWord, httpProxyA
 		faddr:       listenTCPAddr,
 		faddrString: listenAddr,
 		routes:      NewRouteRegistry(),
+		udpRoutes:   NewDatagramRouteRegistry(),
 	}
 	local.directDialer = proxy.Direct
 
@@ -105,6 +107,14 @@ func (l *Local) Registry() *RouteRegistry {
 		return nil
 	}
 	return l.routes
+}
+
+// UDPRegistry exposes the datagram route registry used by the local UDP proxy.
+func (l *Local) UDPRegistry() *DatagramRouteRegistry {
+	if l == nil {
+		return nil
+	}
+	return l.udpRoutes
 }
 
 // SetSelectMode set the select mode for l.
