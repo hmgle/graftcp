@@ -20,6 +20,9 @@ type appConfig struct {
 	socks5User      string
 	socks5Pwd       string
 	configFile      string
+	dnsProxy        bool
+	disableDNS      bool
+	dnsServer       string
 
 	blackIPFile    string
 	whiteIPFile    string
@@ -35,6 +38,7 @@ func defaultConfig() appConfig {
 	return appConfig{
 		selectProxyMode: "auto",
 		socks5Addr:      "127.0.0.1:1080",
+		dnsServer:       "1.1.1.1:53",
 	}
 }
 
@@ -44,6 +48,9 @@ func (c *appConfig) registerFlags() {
 	getopt.FlagLong(&c.socks5Addr, "socks5", 0, "SOCKS5 address")
 	getopt.FlagLong(&c.socks5User, "socks5_username", 0, "SOCKS5 username")
 	getopt.FlagLong(&c.socks5Pwd, "socks5_password", 0, "SOCKS5 password")
+	getopt.FlagLong(&c.dnsProxy, "enable-dns", 0, "Enable DNS proxy for UDP/53 queries")
+	getopt.FlagLong(&c.disableDNS, "disable-dns", 0, "Disable DNS proxy")
+	getopt.FlagLong(&c.dnsServer, "dns-server", 0, "DNS upstream server address, e.g.: 1.1.1.1:53")
 	getopt.FlagLong(&c.enableDebugLog, "enable-debug-log", 0, "Enable debug log")
 	getopt.FlagLong(&c.configFile, "config", 0, "Path to the configuration file")
 
@@ -67,6 +74,10 @@ func (c *appConfig) set(key, val string) {
 		c.httpProxyAddr = val
 	case "select_proxy_mode":
 		c.selectProxyMode = val
+	case "dns_proxy", "enable_dns":
+		c.dnsProxy = parseBool(val, false)
+	case "dns_server", "dns-server":
+		c.dnsServer = val
 	case "blackip_file_path", "blackip-file":
 		c.blackIPFile = val
 	case "whiteip_file_path", "whiteip-file":
@@ -104,6 +115,10 @@ func configKeyOverriddenByFlag(flagset map[string]bool, key string) bool {
 		return flagset["whiteip-file"]
 	case "ignore_local", "not_ignore_local":
 		return flagset["not-ignore-local"]
+	case "dns_proxy", "enable_dns":
+		return flagset["enable-dns"] || flagset["disable-dns"]
+	case "dns_server":
+		return flagset["dns-server"]
 	default:
 		return false
 	}
@@ -196,8 +211,11 @@ loadConf:
 	return nil
 }
 
-func (c appConfig) clientArgs(port int, args []string) []string {
+func (c appConfig) clientArgs(port int, dnsPort int, args []string) []string {
 	fixArgs := []string{os.Args[0], "-p", strconv.Itoa(port)}
+	if c.dnsProxy {
+		fixArgs = append(fixArgs, "--dns-port", strconv.Itoa(dnsPort))
+	}
 	if c.blackIPFile != "" {
 		fixArgs = append(fixArgs, "-b", c.blackIPFile)
 	}

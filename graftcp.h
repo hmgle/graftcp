@@ -58,6 +58,10 @@
 #define SYS_connect __NR_connect
 #endif
 
+#ifndef SYS_sendto
+#define SYS_sendto __NR_sendto
+#endif
+
 #ifndef SYS_close
 #define SYS_close __NR_close
 #endif
@@ -90,14 +94,22 @@
 
 #define TRACKED_SOCKET_INITIAL_CAP 8U
 
+struct tracked_socket {
+	int fd;
+	int domain;
+	int type;
+};
+
 struct proc_info {
 	pid_t pid;
 	int flags;
 	int csn;		/* current syscall number */
 	bool pending_socket;
+	int pending_socket_domain;
+	int pending_socket_type;
 	unsigned int tracked_socket_count;
 	unsigned int tracked_socket_cap;
-	int *tracked_socket_fds;
+	struct tracked_socket *tracked_sockets;
 	struct proc_info *next;
 };
 
@@ -105,8 +117,10 @@ struct proc_info *find_proc_info(pid_t pid);
 struct proc_info *alloc_proc_info(pid_t pid);
 void free_proc_info(struct proc_info *p);
 
-int track_socket_fd(struct proc_info *pinfp, int fd);
+int track_socket_fd(struct proc_info *pinfp, int fd, int domain, int type);
 bool is_tracked_socket_fd(struct proc_info *pinfp, int fd);
+bool is_tracked_stream_socket_fd(struct proc_info *pinfp, int fd);
+bool is_tracked_dgram_socket_fd(struct proc_info *pinfp, int fd);
 void untrack_socket_fd(struct proc_info *pinfp, int fd);
 
 int get_syscall_number(pid_t pid);

@@ -47,6 +47,7 @@ extern uint32_t mgraftcp_register_connect(int family, const char *addr,
 uint16_t DEFAULT_LOCAL_PORT      = 2233;
 bool DEFAULT_IGNORE_LOCAL        = true;
 uint16_t LOCAL_PROXY_PORT;
+uint16_t DNS_PROXY_PORT;
 
 cidr_trie_t *BLACKLIST_IP     = NULL;
 cidr_trie_t *WHITELIST_IP = NULL;
@@ -80,6 +81,14 @@ static void build_loopback_sockaddr6(struct sockaddr_in6 *sa6, uint32_t token,
 	sa6->sin6_addr.s6_addr[11] = 0xff;
 	memcpy(sa6->sin6_addr.s6_addr + 12, &token_network,
 	       sizeof(token_network));
+}
+
+static void build_dns_sockaddr6(struct sockaddr_in6 *sa6, uint16_t port)
+{
+	memset(sa6, 0, sizeof(*sa6));
+	sa6->sin6_family = AF_INET6;
+	sa6->sin6_port = htons(port);
+	sa6->sin6_addr.s6_addr[15] = 1;
 }
 
 static void load_ip_file(char *path, cidr_trie_t **trie)
@@ -189,6 +198,30 @@ static void install_seccomp()
 		.len = (unsigned short)ARRAY_SIZE(filter),
 		.filter = filter,
 	};
+	struct sock_filter dns_filter[] = {
+		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
+				(offsetof(struct seccomp_data, nr))),
+#if defined(__x86_64__)
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close, 4, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket, 3, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect, 2, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendto, 1, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_clone, 0, 1),
+#else
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close, 3, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket, 2, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect, 1, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendto, 0, 1),
+#endif
+		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
+		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+	};
+	struct sock_fprog dns_prog = {
+		.len = (unsigned short)ARRAY_SIZE(dns_filter),
+		.filter = dns_filter,
+	};
+	if (DNS_PROXY_PORT != 0)
+		prog = dns_prog;
 	if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog) == 0)
 		return;
 	if (errno == EACCES) {
@@ -218,21 +251,64 @@ void socket_pre_handle(struct proc_info *pinfp)
 {
 	int domain = get_syscall_arg(pinfp->pid, 0);
 	int type = get_syscall_arg(pinfp->pid, 1);
+	int socket_type = type & SOCK_TYPE_MASK;
 
-	/* If not TCP socket, ignore */
-	if ((type & SOCK_TYPE_MASK) != SOCK_STREAM
-	    || (domain != AF_INET && domain != AF_INET6)) {
+	if (domain != AF_INET && domain != AF_INET6)
 		return;
-	}
+	if (socket_type != SOCK_STREAM &&
+	    (DNS_PROXY_PORT == 0 || socket_type != SOCK_DGRAM))
+		return;
 	pinfp->pending_socket = true;
+	pinfp->pending_socket_domain = domain;
+	pinfp->pending_socket_type = socket_type;
 }
 
-void connect_pre_handle(struct proc_info *pinfp)
+static bool rewrite_dns_sockaddr(pid_t pid, long addr, long addrlen)
 {
-	int socket_fd = get_syscall_arg(pinfp->pid, 0);
-	if (!is_tracked_socket_fd(pinfp, socket_fd))
-		return;
+	sa_family_t family;
+	struct sockaddr_in dest_sa;
+	struct sockaddr_in6 dest_sa6;
+	struct sockaddr_in dns_sa;
+	struct sockaddr_in6 dns_sa6;
+	unsigned short dest_ip_port;
 
+	if (DNS_PROXY_PORT == 0 || addr == 0)
+		return false;
+	if (addrlen < (long)sizeof(family))
+		return false;
+	if (getdata(pid, addr, &family, sizeof(family)) < 0)
+		return false;
+
+	if (family == AF_INET) {
+		if (addrlen < (long)sizeof(dest_sa))
+			return false;
+		if (getdata(pid, addr, &dest_sa, sizeof(dest_sa)) < 0)
+			return false;
+		dest_ip_port = SOCKPORT(dest_sa);
+		if (ntohs(dest_ip_port) != 53)
+			return false;
+		build_loopback_sockaddr4(&dns_sa, 0x7f000001, DNS_PROXY_PORT);
+		if (putdata(pid, addr, &dns_sa, sizeof(dns_sa)) < 0)
+			fprintf(stderr, "mgraftcp rewrite DNS connect failed\n");
+		return true;
+	} else if (family == AF_INET6) {
+		if (addrlen < (long)sizeof(dest_sa6))
+			return false;
+		if (getdata(pid, addr, &dest_sa6, sizeof(dest_sa6)) < 0)
+			return false;
+		dest_ip_port = SOCKPORT6(dest_sa6);
+		if (ntohs(dest_ip_port) != 53)
+			return false;
+		build_dns_sockaddr6(&dns_sa6, DNS_PROXY_PORT);
+		if (putdata(pid, addr, &dns_sa6, sizeof(dns_sa6)) < 0)
+			fprintf(stderr, "mgraftcp rewrite DNS connect failed\n");
+		return true;
+	}
+	return false;
+}
+
+static void tcp_connect_pre_handle(struct proc_info *pinfp)
+{
 	long addr = get_syscall_arg(pinfp->pid, 1);
 	long addrlen = get_syscall_arg(pinfp->pid, 2);
 	sa_family_t family;
@@ -300,6 +376,37 @@ void connect_pre_handle(struct proc_info *pinfp)
 	}
 }
 
+void connect_pre_handle(struct proc_info *pinfp)
+{
+	int socket_fd = get_syscall_arg(pinfp->pid, 0);
+	long addr;
+	long addrlen;
+
+	if (is_tracked_stream_socket_fd(pinfp, socket_fd)) {
+		tcp_connect_pre_handle(pinfp);
+		return;
+	}
+	if (!is_tracked_dgram_socket_fd(pinfp, socket_fd))
+		return;
+
+	addr = get_syscall_arg(pinfp->pid, 1);
+	addrlen = get_syscall_arg(pinfp->pid, 2);
+	rewrite_dns_sockaddr(pinfp->pid, addr, addrlen);
+}
+
+void sendto_pre_handle(struct proc_info *pinfp)
+{
+	int socket_fd = get_syscall_arg(pinfp->pid, 0);
+	long addr;
+	long addrlen;
+
+	if (!is_tracked_dgram_socket_fd(pinfp, socket_fd))
+		return;
+	addr = get_syscall_arg(pinfp->pid, 4);
+	addrlen = get_syscall_arg(pinfp->pid, 5);
+	rewrite_dns_sockaddr(pinfp->pid, addr, addrlen);
+}
+
 void close_pre_handle(struct proc_info *pinfp)
 {
 	int fd = get_syscall_arg(pinfp->pid, 0);
@@ -326,7 +433,8 @@ void socket_exiting_handle(struct proc_info *pinfp, int fd)
 	pinfp->pending_socket = false;
 	if (fd < 0)
 		return;
-	if (track_socket_fd(pinfp, fd) < 0)
+	if (track_socket_fd(pinfp, fd, pinfp->pending_socket_domain,
+			    pinfp->pending_socket_type) < 0)
 		fprintf(stderr, "mgraftcp failed to track socket fd %d\n", fd);
 }
 
@@ -410,6 +518,9 @@ int trace_syscall_entering(struct proc_info *pinfp)
 		break;
 	case SYS_connect:
 		connect_pre_handle(pinfp);
+		break;
+	case SYS_sendto:
+		sendto_pre_handle(pinfp);
 		break;
 	case SYS_close:
 		close_pre_handle(pinfp);
@@ -581,6 +692,8 @@ static void usage(char **argv)
 		"                    option will redirect it to SOCKS5\n"
 		"  -u --user=<username>\n"
 		"                    Run command as USERNAME handling setuid and/or setgid\n"
+		"  -D --dns-port=<embedded-dns-port>\n"
+		"                    Redirect UDP/53 queries to the embedded DNS listener\n"
 		"  -V --version\n"
 		"                    Show version\n"
 		"  -h --help\n"
@@ -596,10 +709,12 @@ int client_main(int argc, char **argv)
 	char *username = NULL;
 	bool ignore_local = DEFAULT_IGNORE_LOCAL;
 	uint16_t local_proxy_port = DEFAULT_LOCAL_PORT;
+	uint16_t dns_proxy_port = 0;
 	struct option long_opts[] = {
 		{"help", no_argument, 0, 'h'},
 		{"version", no_argument, 0, 'V'},
 		{"local-port", required_argument, 0, 'p'},
+		{"dns-port", required_argument, 0, 'D'},
 		{"blackip-file", required_argument, 0, 'b'},
 		{"whiteip-file", required_argument, 0, 'w'},
 		{"user", required_argument, 0, 'u'},
@@ -607,11 +722,14 @@ int client_main(int argc, char **argv)
 		{0, 0, 0, 0}
 	};
 
-	while ((opt = getopt_long(argc, argv, "+Vhp:b:w:u:n", long_opts,
+	while ((opt = getopt_long(argc, argv, "+Vhp:D:b:w:u:n", long_opts,
 				    	&index)) != -1) {
 		switch (opt) {
 		case 'p':
 			local_proxy_port = atoi(optarg);
+			break;
+		case 'D':
+			dns_proxy_port = atoi(optarg);
 			break;
 		case 'b':
 			blackip_file_path = strdup(optarg);
@@ -667,6 +785,7 @@ int client_main(int argc, char **argv)
 		}
 	}
 	LOCAL_PROXY_PORT = local_proxy_port;
+	DNS_PROXY_PORT = dns_proxy_port;
 
 	if (username) {
 		struct passwd *pent;

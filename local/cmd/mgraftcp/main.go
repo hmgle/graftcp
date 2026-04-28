@@ -83,6 +83,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "mgraftcp: %v\n", err)
 		os.Exit(1)
 	}
+	if cfg.disableDNS && cfg.dnsProxy {
+		fmt.Fprintln(os.Stderr, "mgraftcp: --enable-dns and --disable-dns cannot be used together")
+		os.Exit(1)
+	}
+	if cfg.disableDNS {
+		cfg.dnsProxy = false
+	}
 	activeRegistry = l.Registry()
 
 	ln, err := l.StartListen()
@@ -92,7 +99,18 @@ func main() {
 	go l.StartService(ln)
 	defer ln.Close()
 
+	dnsPort := 0
+	if cfg.dnsProxy {
+		dnsProxy, port, err := l.StartDNSProxy(cfg.dnsServer)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "mgraftcp: %v\n", err)
+			os.Exit(1)
+		}
+		defer dnsProxy.Close()
+		dnsPort = port
+	}
+
 	_, faddr := l.GetFAddr()
 
-	retCode = clientMain(cfg.clientArgs(faddr.Port, args))
+	retCode = clientMain(cfg.clientArgs(faddr.Port, dnsPort, args))
 }

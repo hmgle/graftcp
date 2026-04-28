@@ -24,39 +24,64 @@ static int find_tracked_socket_fd(const struct proc_info *pinfp, int fd)
 		return -1;
 
 	for (i = 0; i < pinfp->tracked_socket_count; i++) {
-		if (pinfp->tracked_socket_fds[i] == fd)
+		if (pinfp->tracked_sockets[i].fd == fd)
 			return (int)i;
 	}
 	return -1;
 }
 
-int track_socket_fd(struct proc_info *pinfp, int fd)
+int track_socket_fd(struct proc_info *pinfp, int fd, int domain, int type)
 {
-	int *fds;
+	struct tracked_socket *sockets;
 	unsigned int new_cap;
+	int idx;
 
 	if (pinfp == NULL || fd < 0)
 		return -1;
-	if (find_tracked_socket_fd(pinfp, fd) >= 0)
+	idx = find_tracked_socket_fd(pinfp, fd);
+	if (idx >= 0) {
+		pinfp->tracked_sockets[idx].domain = domain;
+		pinfp->tracked_sockets[idx].type = type;
 		return 0;
+	}
 	if (pinfp->tracked_socket_count >= pinfp->tracked_socket_cap) {
 		new_cap = pinfp->tracked_socket_cap ?
 			  pinfp->tracked_socket_cap * 2 : TRACKED_SOCKET_INITIAL_CAP;
-		fds = realloc(pinfp->tracked_socket_fds,
-			      new_cap * sizeof(*pinfp->tracked_socket_fds));
-		if (fds == NULL)
+		sockets = realloc(pinfp->tracked_sockets,
+			      new_cap * sizeof(*pinfp->tracked_sockets));
+		if (sockets == NULL)
 			return -1;
-		pinfp->tracked_socket_fds = fds;
+		pinfp->tracked_sockets = sockets;
 		pinfp->tracked_socket_cap = new_cap;
 	}
 
-	pinfp->tracked_socket_fds[pinfp->tracked_socket_count++] = fd;
+	pinfp->tracked_sockets[pinfp->tracked_socket_count++] =
+		(struct tracked_socket){fd, domain, type};
 	return 0;
 }
 
 bool is_tracked_socket_fd(struct proc_info *pinfp, int fd)
 {
 	return find_tracked_socket_fd(pinfp, fd) >= 0;
+}
+
+static bool is_tracked_socket_type(struct proc_info *pinfp, int fd, int type)
+{
+	int idx = find_tracked_socket_fd(pinfp, fd);
+
+	if (idx < 0)
+		return false;
+	return (pinfp->tracked_sockets[idx].type & SOCK_TYPE_MASK) == type;
+}
+
+bool is_tracked_stream_socket_fd(struct proc_info *pinfp, int fd)
+{
+	return is_tracked_socket_type(pinfp, fd, SOCK_STREAM);
+}
+
+bool is_tracked_dgram_socket_fd(struct proc_info *pinfp, int fd)
+{
+	return is_tracked_socket_type(pinfp, fd, SOCK_DGRAM);
 }
 
 void untrack_socket_fd(struct proc_info *pinfp, int fd)
@@ -67,8 +92,8 @@ void untrack_socket_fd(struct proc_info *pinfp, int fd)
 	if (idx < 0)
 		return;
 
-	pinfp->tracked_socket_fds[idx] =
-		pinfp->tracked_socket_fds[--pinfp->tracked_socket_count];
+	pinfp->tracked_sockets[idx] =
+		pinfp->tracked_sockets[--pinfp->tracked_socket_count];
 }
 
 static struct proc_info *PROC_INFO_LIST = NULL;
@@ -124,6 +149,6 @@ void free_proc_info(struct proc_info *p)
 	if (p == NULL)
 		return;
 	del_proc_info(p);
-	free(p->tracked_socket_fds);
+	free(p->tracked_sockets);
 	free(p);
 }
