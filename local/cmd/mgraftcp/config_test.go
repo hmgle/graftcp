@@ -26,6 +26,18 @@ func TestConfigDNSOptions(t *testing.T) {
 	}
 }
 
+func TestConfigUDPOptions(t *testing.T) {
+	cfg := defaultConfig()
+
+	if cfg.udpProxy {
+		t.Fatal("defaultConfig() enabled UDP proxy")
+	}
+	cfg.set("udp_proxy", "true")
+	if !cfg.udpProxy {
+		t.Fatal("udp_proxy=true did not enable UDP proxy")
+	}
+}
+
 func TestDNSConfigFlagOverrides(t *testing.T) {
 	flagset := map[string]bool{"enable-dns": true}
 	if !configKeyOverriddenByFlag(flagset, "dns_proxy") {
@@ -41,18 +53,29 @@ func TestDNSConfigFlagOverrides(t *testing.T) {
 	if !configKeyOverriddenByFlag(flagset, "dns_server") {
 		t.Fatal("dns-server did not override dns_server config")
 	}
+
+	flagset = map[string]bool{"enable-udp": true}
+	if !configKeyOverriddenByFlag(flagset, "udp_proxy") {
+		t.Fatal("enable-udp did not override udp_proxy config")
+	}
+
+	flagset = map[string]bool{"disable-udp": true}
+	if !configKeyOverriddenByFlag(flagset, "enable_udp") {
+		t.Fatal("disable-udp did not override enable_udp config")
+	}
 }
 
-func TestClientArgsIncludesDNSPortWhenEnabled(t *testing.T) {
+func TestClientArgsIncludesProxyPortsWhenEnabled(t *testing.T) {
 	oldArgs := os.Args
 	os.Args = []string{"mgraftcp"}
 	defer func() { os.Args = oldArgs }()
 
 	cfg := defaultConfig()
 	cfg.dnsProxy = true
+	cfg.udpProxy = true
 
-	got := cfg.clientArgs(2233, 5353, []string{"curl", "example.com"})
-	want := []string{"mgraftcp", "-p", "2233", "--dns-port", "5353", "curl", "example.com"}
+	got := cfg.clientArgs(2233, 5353, 5354, []string{"curl", "example.com"})
+	want := []string{"mgraftcp", "-p", "2233", "--dns-port", "5353", "--udp-port", "5354", "curl", "example.com"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("clientArgs() = %v, want %v", got, want)
 	}

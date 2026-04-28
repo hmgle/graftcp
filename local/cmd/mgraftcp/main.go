@@ -90,7 +90,15 @@ func main() {
 	if cfg.disableDNS {
 		cfg.dnsProxy = false
 	}
+	if cfg.disableUDP && cfg.udpProxy {
+		fmt.Fprintln(os.Stderr, "mgraftcp: --enable-udp and --disable-udp cannot be used together")
+		os.Exit(1)
+	}
+	if cfg.disableUDP {
+		cfg.udpProxy = false
+	}
 	activeRegistry = l.Registry()
+	activeUDPRegistry = l.UDPRegistry()
 
 	ln, err := l.StartListen()
 	if err != nil {
@@ -109,8 +117,18 @@ func main() {
 		defer dnsProxy.Close()
 		dnsPort = port
 	}
+	udpPort := 0
+	if cfg.udpProxy {
+		udpProxy, port, err := l.StartUDPProxy()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "mgraftcp: %v\n", err)
+			os.Exit(1)
+		}
+		defer udpProxy.Close()
+		udpPort = port
+	}
 
 	_, faddr := l.GetFAddr()
 
-	retCode = clientMain(cfg.clientArgs(faddr.Port, dnsPort, args))
+	retCode = clientMain(cfg.clientArgs(faddr.Port, dnsPort, udpPort, args))
 }

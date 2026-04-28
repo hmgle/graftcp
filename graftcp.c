@@ -43,11 +43,14 @@
 
 extern uint32_t mgraftcp_register_connect(int family, const char *addr,
 					  uint16_t port);
+extern uint32_t mgraftcp_register_udp(int family, const char *addr,
+				      uint16_t port);
 
 uint16_t DEFAULT_LOCAL_PORT      = 2233;
 bool DEFAULT_IGNORE_LOCAL        = true;
 uint16_t LOCAL_PROXY_PORT;
 uint16_t DNS_PROXY_PORT;
+uint16_t UDP_PROXY_PORT;
 
 cidr_trie_t *BLACKLIST_IP     = NULL;
 cidr_trie_t *WHITELIST_IP = NULL;
@@ -198,30 +201,32 @@ static void install_seccomp()
 		.len = (unsigned short)ARRAY_SIZE(filter),
 		.filter = filter,
 	};
-	struct sock_filter dns_filter[] = {
+	struct sock_filter udp_filter[] = {
 		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
 				(offsetof(struct seccomp_data, nr))),
 #if defined(__x86_64__)
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close, 5, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket, 4, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect, 3, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendto, 2, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendmsg, 1, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_clone, 0, 1),
+#else
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close, 4, 0),
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket, 3, 0),
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect, 2, 0),
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendto, 1, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_clone, 0, 1),
-#else
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close, 3, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket, 2, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect, 1, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendto, 0, 1),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendmsg, 0, 1),
 #endif
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
 	};
-	struct sock_fprog dns_prog = {
-		.len = (unsigned short)ARRAY_SIZE(dns_filter),
-		.filter = dns_filter,
+	struct sock_fprog udp_prog = {
+		.len = (unsigned short)ARRAY_SIZE(udp_filter),
+		.filter = udp_filter,
 	};
-	if (DNS_PROXY_PORT != 0)
-		prog = dns_prog;
+	if (DNS_PROXY_PORT != 0 || UDP_PROXY_PORT != 0)
+		prog = udp_prog;
 	if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog) == 0)
 		return;
 	if (errno == EACCES) {
@@ -256,23 +261,29 @@ void socket_pre_handle(struct proc_info *pinfp)
 	if (domain != AF_INET && domain != AF_INET6)
 		return;
 	if (socket_type != SOCK_STREAM &&
-	    (DNS_PROXY_PORT == 0 || socket_type != SOCK_DGRAM))
+	    ((DNS_PROXY_PORT == 0 && UDP_PROXY_PORT == 0) ||
+	     socket_type != SOCK_DGRAM))
 		return;
 	pinfp->pending_socket = true;
 	pinfp->pending_socket_domain = domain;
 	pinfp->pending_socket_type = socket_type;
 }
 
-static bool rewrite_dns_sockaddr(pid_t pid, long addr, long addrlen)
+static bool rewrite_udp_sockaddr(pid_t pid, long addr, long addrlen)
 {
 	sa_family_t family;
 	struct sockaddr_in dest_sa;
 	struct sockaddr_in6 dest_sa6;
 	struct sockaddr_in dns_sa;
 	struct sockaddr_in6 dns_sa6;
+	struct sockaddr_in proxy_sa;
+	struct sockaddr_in6 proxy_sa6;
 	unsigned short dest_ip_port;
+	char dest_str[INET6_ADDRSTRLEN];
+	char *dest_ip_addr_str;
+	uint32_t loopback_token;
 
-	if (DNS_PROXY_PORT == 0 || addr == 0)
+	if ((DNS_PROXY_PORT == 0 && UDP_PROXY_PORT == 0) || addr == 0)
 		return false;
 	if (addrlen < (long)sizeof(family))
 		return false;
@@ -285,11 +296,31 @@ static bool rewrite_dns_sockaddr(pid_t pid, long addr, long addrlen)
 		if (getdata(pid, addr, &dest_sa, sizeof(dest_sa)) < 0)
 			return false;
 		dest_ip_port = SOCKPORT(dest_sa);
-		if (ntohs(dest_ip_port) != 53)
+		if (DNS_PROXY_PORT != 0 && ntohs(dest_ip_port) == 53) {
+			build_loopback_sockaddr4(&dns_sa, 0x7f000001, DNS_PROXY_PORT);
+			if (putdata(pid, addr, &dns_sa, sizeof(dns_sa)) < 0)
+				fprintf(stderr, "mgraftcp rewrite DNS UDP failed\n");
+			return true;
+		}
+		if (UDP_PROXY_PORT == 0 || ip4_is_ignore(dest_sa.sin_addr.s_addr))
 			return false;
-		build_loopback_sockaddr4(&dns_sa, 0x7f000001, DNS_PROXY_PORT);
-		if (putdata(pid, addr, &dns_sa, sizeof(dns_sa)) < 0)
-			fprintf(stderr, "mgraftcp rewrite DNS connect failed\n");
+		if (inet_ntop(AF_INET, &dest_sa.sin_addr, dest_str,
+			      sizeof(dest_str)) == NULL)
+			return false;
+		dest_ip_addr_str = dest_str;
+		loopback_token = mgraftcp_register_udp(family,
+						       dest_ip_addr_str,
+						       ntohs(dest_ip_port));
+		if (loopback_token == 0) {
+			fprintf(stderr, "mgraftcp register UDP failed for %s:%d\n",
+				dest_ip_addr_str, ntohs(dest_ip_port));
+			return false;
+		}
+		build_loopback_sockaddr4(&proxy_sa, loopback_token,
+					 UDP_PROXY_PORT);
+		if (putdata(pid, addr, &proxy_sa, sizeof(proxy_sa)) < 0)
+			fprintf(stderr, "mgraftcp rewrite UDP failed for %s:%d\n",
+				dest_ip_addr_str, ntohs(dest_ip_port));
 		return true;
 	} else if (family == AF_INET6) {
 		if (addrlen < (long)sizeof(dest_sa6))
@@ -297,11 +328,32 @@ static bool rewrite_dns_sockaddr(pid_t pid, long addr, long addrlen)
 		if (getdata(pid, addr, &dest_sa6, sizeof(dest_sa6)) < 0)
 			return false;
 		dest_ip_port = SOCKPORT6(dest_sa6);
-		if (ntohs(dest_ip_port) != 53)
+		if (DNS_PROXY_PORT != 0 && ntohs(dest_ip_port) == 53) {
+			build_dns_sockaddr6(&dns_sa6, DNS_PROXY_PORT);
+			if (putdata(pid, addr, &dns_sa6, sizeof(dns_sa6)) < 0)
+				fprintf(stderr, "mgraftcp rewrite DNS UDP failed\n");
+			return true;
+		}
+		if (UDP_PROXY_PORT == 0 ||
+		    ip6_is_ignore(dest_sa6.sin6_addr.s6_addr))
 			return false;
-		build_dns_sockaddr6(&dns_sa6, DNS_PROXY_PORT);
-		if (putdata(pid, addr, &dns_sa6, sizeof(dns_sa6)) < 0)
-			fprintf(stderr, "mgraftcp rewrite DNS connect failed\n");
+		if (inet_ntop(AF_INET6, &dest_sa6.sin6_addr, dest_str,
+			      sizeof(dest_str)) == NULL)
+			return false;
+		dest_ip_addr_str = dest_str;
+		loopback_token = mgraftcp_register_udp(family,
+						       dest_ip_addr_str,
+						       ntohs(dest_ip_port));
+		if (loopback_token == 0) {
+			fprintf(stderr, "mgraftcp register UDP failed for %s:%d\n",
+				dest_ip_addr_str, ntohs(dest_ip_port));
+			return false;
+		}
+		build_loopback_sockaddr6(&proxy_sa6, loopback_token,
+					 UDP_PROXY_PORT);
+		if (putdata(pid, addr, &proxy_sa6, sizeof(proxy_sa6)) < 0)
+			fprintf(stderr, "mgraftcp rewrite UDP failed for %s:%d\n",
+				dest_ip_addr_str, ntohs(dest_ip_port));
 		return true;
 	}
 	return false;
@@ -391,7 +443,7 @@ void connect_pre_handle(struct proc_info *pinfp)
 
 	addr = get_syscall_arg(pinfp->pid, 1);
 	addrlen = get_syscall_arg(pinfp->pid, 2);
-	rewrite_dns_sockaddr(pinfp->pid, addr, addrlen);
+	rewrite_udp_sockaddr(pinfp->pid, addr, addrlen);
 }
 
 void sendto_pre_handle(struct proc_info *pinfp)
@@ -404,7 +456,22 @@ void sendto_pre_handle(struct proc_info *pinfp)
 		return;
 	addr = get_syscall_arg(pinfp->pid, 4);
 	addrlen = get_syscall_arg(pinfp->pid, 5);
-	rewrite_dns_sockaddr(pinfp->pid, addr, addrlen);
+	rewrite_udp_sockaddr(pinfp->pid, addr, addrlen);
+}
+
+void sendmsg_pre_handle(struct proc_info *pinfp)
+{
+	int socket_fd = get_syscall_arg(pinfp->pid, 0);
+	long msg_addr = get_syscall_arg(pinfp->pid, 1);
+	struct msghdr msg;
+
+	if (!is_tracked_dgram_socket_fd(pinfp, socket_fd) || msg_addr == 0)
+		return;
+	if (getdata(pinfp->pid, msg_addr, &msg, sizeof(msg)) < 0)
+		return;
+	if (msg.msg_name == NULL)
+		return;
+	rewrite_udp_sockaddr(pinfp->pid, (long)msg.msg_name, msg.msg_namelen);
 }
 
 void close_pre_handle(struct proc_info *pinfp)
@@ -521,6 +588,9 @@ int trace_syscall_entering(struct proc_info *pinfp)
 		break;
 	case SYS_sendto:
 		sendto_pre_handle(pinfp);
+		break;
+	case SYS_sendmsg:
+		sendmsg_pre_handle(pinfp);
 		break;
 	case SYS_close:
 		close_pre_handle(pinfp);
@@ -694,6 +764,8 @@ static void usage(char **argv)
 		"                    Run command as USERNAME handling setuid and/or setgid\n"
 		"  -D --dns-port=<embedded-dns-port>\n"
 		"                    Redirect UDP/53 queries to the embedded DNS listener\n"
+		"  -U --udp-port=<embedded-udp-port>\n"
+		"                    Redirect generic UDP packets to the embedded UDP listener\n"
 		"  -V --version\n"
 		"                    Show version\n"
 		"  -h --help\n"
@@ -710,11 +782,13 @@ int client_main(int argc, char **argv)
 	bool ignore_local = DEFAULT_IGNORE_LOCAL;
 	uint16_t local_proxy_port = DEFAULT_LOCAL_PORT;
 	uint16_t dns_proxy_port = 0;
+	uint16_t udp_proxy_port = 0;
 	struct option long_opts[] = {
 		{"help", no_argument, 0, 'h'},
 		{"version", no_argument, 0, 'V'},
 		{"local-port", required_argument, 0, 'p'},
 		{"dns-port", required_argument, 0, 'D'},
+		{"udp-port", required_argument, 0, 'U'},
 		{"blackip-file", required_argument, 0, 'b'},
 		{"whiteip-file", required_argument, 0, 'w'},
 		{"user", required_argument, 0, 'u'},
@@ -722,7 +796,7 @@ int client_main(int argc, char **argv)
 		{0, 0, 0, 0}
 	};
 
-	while ((opt = getopt_long(argc, argv, "+Vhp:D:b:w:u:n", long_opts,
+	while ((opt = getopt_long(argc, argv, "+Vhp:D:U:b:w:u:n", long_opts,
 				    	&index)) != -1) {
 		switch (opt) {
 		case 'p':
@@ -730,6 +804,9 @@ int client_main(int argc, char **argv)
 			break;
 		case 'D':
 			dns_proxy_port = atoi(optarg);
+			break;
+		case 'U':
+			udp_proxy_port = atoi(optarg);
 			break;
 		case 'b':
 			blackip_file_path = strdup(optarg);
@@ -786,6 +863,7 @@ int client_main(int argc, char **argv)
 	}
 	LOCAL_PROXY_PORT = local_proxy_port;
 	DNS_PROXY_PORT = dns_proxy_port;
+	UDP_PROXY_PORT = udp_proxy_port;
 
 	if (username) {
 		struct passwd *pent;

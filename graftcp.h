@@ -62,6 +62,10 @@
 #define SYS_sendto __NR_sendto
 #endif
 
+#ifndef SYS_sendmsg
+#define SYS_sendmsg __NR_sendmsg
+#endif
+
 #ifndef SYS_close
 #define SYS_close __NR_close
 #endif
