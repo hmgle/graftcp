@@ -521,6 +521,16 @@ void do_child(const char *username, int argc, char **argv)
 		perror("ptrace(PTRACE_TRACEME)");
 		exit(errno);
 	}
+
+	pid = getpid();
+	/*
+	 * Induce a ptrace stop so the tracer can set PTRACE_O_TRACESECCOMP
+	 * before any seccomp trace events can fire.
+	 */
+	kill(pid, SIGSTOP);
+#ifdef ENABLE_SECCOMP_BPF
+	install_seccomp();
+#endif
 	if (username) {
 		if (initgroups(username, run_gid) < 0) {
 			perror("initgroups");
@@ -538,17 +548,6 @@ void do_child(const char *username, int argc, char **argv)
 		if (setenv("HOME", run_home, 1) < 0)
 			perror("setenv");
 	}
-
-	pid = getpid();
-	/*
-	 * Induce a ptrace stop. Tracer (our parent)
-	 * will resume us with PTRACE_SYSCALL and display
-	 * the immediately following execve syscall.
-	 */
-	kill(pid, SIGSTOP);
-#ifdef ENABLE_SECCOMP_BPF
-	install_seccomp();
-#endif
 	if (execvp(args[0], args) < 0) {
 		fprintf(stderr, "graftcp %s: %s\n", args[0], strerror(errno));
 		exit(errno);
