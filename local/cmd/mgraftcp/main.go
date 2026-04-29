@@ -17,7 +17,6 @@ import (
 	"unsafe"
 
 	"github.com/hmgle/graftcp/local"
-	"github.com/jedisct1/dlog"
 	"github.com/pborman/getopt/v2"
 )
 
@@ -60,6 +59,9 @@ func main() {
 		getopt.Usage()
 		return
 	}
+	if cfg.enableDebugLog {
+		local.SetLogger(appLogger)
+	}
 	if err := cfg.parseConfigFile(cfg.configFile); err != nil {
 		fmt.Fprintf(os.Stderr, "mgraftcp: %v\n", err)
 		os.Exit(1)
@@ -67,12 +69,6 @@ func main() {
 
 	retCode := 0
 	defer func() { os.Exit(retCode) }()
-
-	if cfg.enableDebugLog {
-		dlog.Init("mgraftcp", dlog.SeverityDebug, "")
-	} else {
-		local.SetLogger(noopLogger{})
-	}
 
 	l, err := local.NewLocal(":0", cfg.socks5Addr, cfg.socks5User, cfg.socks5Pwd, cfg.httpProxyAddr)
 	if err != nil {
@@ -102,7 +98,8 @@ func main() {
 
 	ln, err := l.StartListen()
 	if err != nil {
-		dlog.Fatalf("l.StartListen err: %s", err.Error())
+		fmt.Fprintf(os.Stderr, "mgraftcp: l.StartListen err: %s\n", err.Error())
+		os.Exit(1)
 	}
 	go l.StartService(ln)
 	defer ln.Close()

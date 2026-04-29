@@ -1,6 +1,13 @@
 package local
 
-import "github.com/jedisct1/dlog"
+import (
+	"fmt"
+	"io"
+	"os"
+	"strings"
+	"sync"
+	"time"
+)
 
 // Logger represents a general-purpose logger.
 type Logger interface {
@@ -20,31 +27,76 @@ type Logger interface {
 	Debugf(msg string, args ...interface{})
 }
 
-type dlogT struct{}
+type discardLogger struct{}
 
-func (d dlogT) Debugf(msg string, args ...interface{}) {
-	dlog.Debugf(msg, args...)
+func (d discardLogger) Debugf(msg string, args ...interface{}) {}
+func (d discardLogger) Infof(msg string, args ...interface{})  {}
+func (d discardLogger) Warnf(msg string, args ...interface{})  {}
+func (d discardLogger) Errorf(msg string, args ...interface{}) {}
+
+func (d discardLogger) Fatalf(msg string, args ...interface{}) {
+	os.Exit(255)
 }
 
-func (d dlogT) Infof(msg string, args ...interface{}) {
-	dlog.Infof(msg, args...)
+type writerLogger struct {
+	mu sync.Mutex
+	w  io.Writer
 }
 
-func (d dlogT) Warnf(msg string, args ...interface{}) {
-	dlog.Warnf(msg, args...)
+// NewLogger returns a logger that writes formatted log lines to w.
+func NewLogger(w io.Writer) Logger {
+	if w == nil {
+		return discardLogger{}
+	}
+	return &writerLogger{w: w}
 }
 
-func (d dlogT) Errorf(msg string, args ...interface{}) {
-	dlog.Errorf(msg, args...)
+// NewStderrLogger returns a logger that writes formatted log lines to stderr.
+func NewStderrLogger() Logger {
+	return NewLogger(os.Stderr)
 }
 
-func (d dlogT) Fatalf(msg string, args ...interface{}) {
-	dlog.Fatalf(msg, args...)
+func (l *writerLogger) Debugf(msg string, args ...interface{}) {
+	l.logf("DEBUG", msg, args...)
 }
 
-var log Logger = dlogT{}
+func (l *writerLogger) Infof(msg string, args ...interface{}) {
+	l.logf("INFO", msg, args...)
+}
+
+func (l *writerLogger) Warnf(msg string, args ...interface{}) {
+	l.logf("WARNING", msg, args...)
+}
+
+func (l *writerLogger) Errorf(msg string, args ...interface{}) {
+	l.logf("ERROR", msg, args...)
+}
+
+func (l *writerLogger) Fatalf(msg string, args ...interface{}) {
+	l.logf("FATAL", msg, args...)
+	os.Exit(255)
+}
+
+func (l *writerLogger) logf(level, msg string, args ...interface{}) {
+	message := fmt.Sprintf(msg, args...)
+	message = strings.TrimSpace(strings.TrimSuffix(message, "\n"))
+	if message == "" {
+		return
+	}
+
+	line := fmt.Sprintf("[%s] [%s] %s\n", time.Now().Local().Format("2006-01-02 15:04:05"), level, message)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	_, _ = io.WriteString(l.w, line)
+}
+
+var log Logger = discardLogger{}
 
 // SetLogger allows users to inject their own logger instead of the default one.
 func SetLogger(l Logger) {
+	if l == nil {
+		log = discardLogger{}
+		return
+	}
 	log = l
 }

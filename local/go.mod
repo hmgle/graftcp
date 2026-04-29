@@ -5,12 +5,8 @@ go 1.23.0
 toolchain go1.23.7
 
 require (
-	github.com/jedisct1/dlog v0.0.0-20210101122416-354ffe815216
 	github.com/pborman/getopt/v2 v2.1.0
 	golang.org/x/net v0.38.0
 )
 
-require (
-	github.com/hashicorp/go-syslog v1.0.0 // indirect
-	golang.org/x/sys v0.31.0 // indirect
-)
+require golang.org/x/sys v0.31.0 // indirect

@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/hmgle/graftcp/local"
-	"github.com/jedisct1/dlog"
 	"github.com/pborman/getopt/v2"
 )
 
@@ -150,7 +149,7 @@ func (c *appConfig) parseConfigFile(path string) error {
 		defaultConf := filepath.Dir(exePath) + "/mgraftcp.conf"
 		if _, err := os.Stat(defaultConf); err == nil {
 			if c.enableDebugLog {
-				dlog.Infof("find config: %s", defaultConf)
+				appLogger.Infof("find config: %s", defaultConf)
 			}
 			path = defaultConf
 			goto loadConf
@@ -164,7 +163,7 @@ func (c *appConfig) parseConfigFile(path string) error {
 		}
 		if _, err := os.Stat(dotConf); err == nil {
 			if c.enableDebugLog {
-				dlog.Infof("find config: %s", dotConf)
+				appLogger.Infof("find config: %s", dotConf)
 			}
 			path = dotConf
 			goto loadConf
@@ -173,7 +172,7 @@ func (c *appConfig) parseConfigFile(path string) error {
 		etcConf := "/etc/mgraftcp/mgraftcp.conf"
 		if _, err := os.Stat(etcConf); err == nil {
 			if c.enableDebugLog {
-				dlog.Infof("find config: %s", etcConf)
+				appLogger.Infof("find config: %s", etcConf)
 			}
 			path = etcConf
 		} else {
@@ -185,7 +184,7 @@ loadConf:
 	file, err := os.Open(path)
 	if err != nil {
 		if c.enableDebugLog {
-			dlog.Errorf("os.Open(%s) err: %s", path, err.Error())
+			appLogger.Errorf("os.Open(%s) err: %s", path, err.Error())
 		}
 		return err
 	}
@@ -207,7 +206,7 @@ loadConf:
 				break
 			}
 			if c.enableDebugLog {
-				dlog.Errorf("reader.ReadString('\\n') err: %s, path: %s", err.Error(), path)
+				appLogger.Errorf("reader.ReadString('\\n') err: %s, path: %s", err.Error(), path)
 			}
 			return err
 		}
