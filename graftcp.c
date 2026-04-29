@@ -63,6 +63,50 @@ static char *run_home;
 static int exit_code = 0;
 static pid_t root_pid = -1;
 
+static bool port_matches(uint16_t port, uint16_t expected)
+{
+	return expected != 0 && ntohs(port) == expected;
+}
+
+static bool is_loopback4(uint32_t ip)
+{
+	return (ntohl(ip) & 0xff000000U) == 0x7f000000U;
+}
+
+static bool is_internal_proxy_endpoint4(const struct sockaddr_in *sa,
+					bool stream)
+{
+	if (!is_loopback4(sa->sin_addr.s_addr))
+		return false;
+	if (stream)
+		return port_matches(sa->sin_port, LOCAL_PROXY_PORT);
+	return port_matches(sa->sin_port, DNS_PROXY_PORT) ||
+	       port_matches(sa->sin_port, UDP_PROXY_PORT);
+}
+
+static bool is_internal_proxy_endpoint6(const struct sockaddr_in6 *sa6,
+					bool stream)
+{
+	const struct in6_addr *addr = &sa6->sin6_addr;
+	uint32_t mapped4;
+	bool loopback;
+
+	if (IN6_IS_ADDR_LOOPBACK(addr))
+		loopback = true;
+	else if (IN6_IS_ADDR_V4MAPPED(addr)) {
+		memcpy(&mapped4, addr->s6_addr + 12, sizeof(mapped4));
+		loopback = is_loopback4(mapped4);
+	} else {
+		loopback = false;
+	}
+	if (!loopback)
+		return false;
+	if (stream)
+		return port_matches(sa6->sin6_port, LOCAL_PROXY_PORT);
+	return port_matches(sa6->sin6_port, DNS_PROXY_PORT) ||
+	       port_matches(sa6->sin6_port, UDP_PROXY_PORT);
+}
+
 static void build_loopback_sockaddr4(struct sockaddr_in *sa, uint32_t token,
 				     uint16_t port)
 {
@@ -299,6 +343,8 @@ static bool rewrite_udp_sockaddr(pid_t pid, long addr, long addrlen)
 		if (getdata(pid, addr, &dest_sa, sizeof(dest_sa)) < 0)
 			return false;
 		dest_ip_port = SOCKPORT(dest_sa);
+		if (is_internal_proxy_endpoint4(&dest_sa, false))
+			return false;
 		if (DNS_PROXY_PORT != 0 && ntohs(dest_ip_port) == 53) {
 			build_loopback_sockaddr4(&dns_sa, 0x7f000001, DNS_PROXY_PORT);
 			if (putdata(pid, addr, &dns_sa, sizeof(dns_sa)) < 0)
@@ -331,6 +377,8 @@ static bool rewrite_udp_sockaddr(pid_t pid, long addr, long addrlen)
 		if (getdata(pid, addr, &dest_sa6, sizeof(dest_sa6)) < 0)
 			return false;
 		dest_ip_port = SOCKPORT6(dest_sa6);
+		if (is_internal_proxy_endpoint6(&dest_sa6, false))
+			return false;
 		if (DNS_PROXY_PORT != 0 && ntohs(dest_ip_port) == 53) {
 			build_dns_sockaddr6(&dns_sa6, DNS_PROXY_PORT);
 			if (putdata(pid, addr, &dns_sa6, sizeof(dns_sa6)) < 0)
@@ -390,6 +438,8 @@ static void tcp_connect_pre_handle(struct proc_info *pinfp)
 		if (inet_ntop(AF_INET, &dest_sa.sin_addr, dest_str,
 			      sizeof(dest_str)) == NULL)
 			return;
+		if (is_internal_proxy_endpoint4(&dest_sa, true))
+			return;
 		dest_ip_addr_str = dest_str;
 		if (ip4_is_ignore(dest_sa.sin_addr.s_addr))
 			return;
@@ -399,9 +449,13 @@ static void tcp_connect_pre_handle(struct proc_info *pinfp)
 		if (getdata(pinfp->pid, addr, &dest_sa6, sizeof(dest_sa6)) < 0)
 			return;
 		dest_ip_port = SOCKPORT6(dest_sa6);
+		if (is_internal_proxy_endpoint6(&dest_sa6, true))
+			return;
 		if (ip6_is_ignore(dest_sa6.sin6_addr.s6_addr))
 			return;
-		inet_ntop(AF_INET6, &dest_sa6.sin6_addr, dest_str, INET6_ADDRSTRLEN);
+		if (inet_ntop(AF_INET6, &dest_sa6.sin6_addr, dest_str,
+			      sizeof(dest_str)) == NULL)
+			return;
 		dest_ip_addr_str = dest_str;
 	} else {
 		return;
@@ -528,15 +582,16 @@ void do_child(const char *username, int argc, char **argv)
 	 * before any seccomp trace events can fire.
 	 */
 	kill(pid, SIGSTOP);
-#ifdef ENABLE_SECCOMP_BPF
-	install_seccomp();
-#endif
 	if (username) {
 		if (initgroups(username, run_gid) < 0) {
 			perror("initgroups");
 			exit(errno);
 		}
-
+	}
+#ifdef ENABLE_SECCOMP_BPF
+	install_seccomp();
+#endif
+	if (username) {
 		if (setregid(run_gid, run_gid) < 0) {
 			perror("setregid");
 			exit(errno);

@@ -130,15 +130,16 @@ func newSocks5UDPAssociation(proxyAddr, username, password string) (*socks5UDPAs
 		_ = tcpConn.Close()
 		return nil, err
 	}
-	relayAddr, err := socks5UDPAssociate(tcpConn, proxyAddr)
-	if err != nil {
-		_ = tcpConn.Close()
-		return nil, err
-	}
-	udpConn, err := net.ListenUDP("udp", nil)
+	udpConn, err := listenSocks5UDP(proxyAddr)
 	if err != nil {
 		_ = tcpConn.Close()
 		return nil, fmt.Errorf("create SOCKS5 UDP socket: %w", err)
+	}
+	relayAddr, err := socks5UDPAssociate(tcpConn, proxyAddr, udpConn.LocalAddr().(*net.UDPAddr))
+	if err != nil {
+		_ = udpConn.Close()
+		_ = tcpConn.Close()
+		return nil, err
 	}
 	if err := tcpConn.SetDeadline(time.Time{}); err != nil {
 		_ = udpConn.Close()
@@ -150,6 +151,18 @@ func newSocks5UDPAssociation(proxyAddr, username, password string) (*socks5UDPAs
 		udp:       udpConn,
 		relayAddr: relayAddr,
 	}, nil
+}
+
+func listenSocks5UDP(proxyAddr string) (*net.UDPConn, error) {
+	network := "udp"
+	if tcpAddr, err := net.ResolveTCPAddr("tcp", proxyAddr); err == nil && tcpAddr.IP != nil {
+		if tcpAddr.IP.To4() != nil {
+			network = "udp4"
+		} else if tcpAddr.IP.To16() != nil {
+			network = "udp6"
+		}
+	}
+	return net.ListenUDP(network, nil)
 }
 
 func socks5NegotiateAuth(conn net.Conn, username, password string) error {
@@ -206,11 +219,10 @@ func socks5UsernamePasswordAuth(conn net.Conn, username, password string) error 
 	return nil
 }
 
-func socks5UDPAssociate(conn net.Conn, proxyAddr string) (*net.UDPAddr, error) {
-	req := []byte{
-		socks5Version, socks5CmdUDP, 0x00,
-		socks5AtypIPv4, 0x00, 0x00, 0x00, 0x00,
-		0x00, 0x00,
+func socks5UDPAssociate(conn net.Conn, proxyAddr string, bindAddr *net.UDPAddr) (*net.UDPAddr, error) {
+	req, err := encodeSocks5UDPAssociateRequest(bindAddr)
+	if err != nil {
+		return nil, err
 	}
 	if _, err := conn.Write(req); err != nil {
 		return nil, err
@@ -232,6 +244,30 @@ func socks5UDPAssociate(conn net.Conn, proxyAddr string) (*net.UDPAddr, error) {
 		}
 	}
 	return net.ResolveUDPAddr("udp", net.JoinHostPort(host, strconv.Itoa(port)))
+}
+
+func encodeSocks5UDPAssociateRequest(bindAddr *net.UDPAddr) ([]byte, error) {
+	req := []byte{socks5Version, socks5CmdUDP, 0x00}
+	port := 0
+	atyp := byte(socks5AtypIPv4)
+	addr := []byte{0x00, 0x00, 0x00, 0x00}
+	if bindAddr != nil {
+		port = bindAddr.Port
+		if ip4 := bindAddr.IP.To4(); ip4 != nil {
+			addr = ip4
+		} else if ip16 := bindAddr.IP.To16(); ip16 != nil {
+			atyp = socks5AtypIPv6
+			addr = ip16
+		} else if len(bindAddr.IP) != 0 {
+			return nil, fmt.Errorf("invalid SOCKS5 UDP bind IP %q", bindAddr.IP.String())
+		}
+	}
+	req = append(req, atyp)
+	req = append(req, addr...)
+	var portBuf [2]byte
+	binary.BigEndian.PutUint16(portBuf[:], uint16(port))
+	req = append(req, portBuf[:]...)
+	return req, nil
 }
 
 func readSocks5Reply(conn net.Conn) (byte, string, int, error) {

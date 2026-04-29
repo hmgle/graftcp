@@ -1,6 +1,7 @@
 package local
 
 import (
+	"bytes"
 	"io"
 	"net"
 	"sync"
@@ -58,6 +59,24 @@ func TestUDPProxyForwardsThroughSocks5UDPAssociate(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("SOCKS5 relay did not receive payload")
+	}
+}
+
+func TestEncodeSocks5UDPAssociateRequestUsesBindPort(t *testing.T) {
+	req, err := encodeSocks5UDPAssociateRequest(&net.UDPAddr{
+		IP:   net.IPv4zero,
+		Port: 12345,
+	})
+	if err != nil {
+		t.Fatalf("encodeSocks5UDPAssociateRequest() error = %v", err)
+	}
+	want := []byte{
+		socks5Version, socks5CmdUDP, 0x00,
+		socks5AtypIPv4, 0, 0, 0, 0,
+		0x30, 0x39,
+	}
+	if !bytes.Equal(req, want) {
+		t.Fatalf("encodeSocks5UDPAssociateRequest() = %v, want %v", req, want)
 	}
 }
 

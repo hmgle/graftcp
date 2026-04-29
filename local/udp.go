@@ -11,10 +11,11 @@ import (
 )
 
 const (
-	udpPacketMaxSize    = 65535
-	udpSessionIdle      = 2 * time.Minute
-	udpSessionGCPeriod  = 30 * time.Second
-	udpSessionReadLimit = 30 * time.Second
+	udpPacketMaxSize     = 65535
+	udpPacketConcurrency = 1024
+	udpSessionIdle       = 2 * time.Minute
+	udpSessionGCPeriod   = 30 * time.Second
+	udpSessionReadLimit  = 30 * time.Second
 )
 
 type udpForwarder interface {
@@ -40,9 +41,10 @@ type UDPProxy struct {
 	conn       *net.UDPConn
 	packetConn *ipv4.PacketConn
 
-	mu       sync.Mutex
-	sessions map[string]*udpSession
-	closed   chan struct{}
+	mu        sync.Mutex
+	sessions  map[string]*udpSession
+	closed    chan struct{}
+	packetSem chan struct{}
 }
 
 // StartUDPProxy starts a generic UDP listener for token-routed datagrams.
@@ -62,6 +64,7 @@ func (l *Local) StartUDPProxy() (*UDPProxy, int, error) {
 		packetConn: packetConn,
 		sessions:   make(map[string]*udpSession),
 		closed:     make(chan struct{}),
+		packetSem:  make(chan struct{}, udpPacketConcurrency),
 	}
 	go p.serve()
 	go p.gcLoop()
@@ -125,9 +128,25 @@ func (p *UDPProxy) serve() {
 			log.Errorf("UDP proxy got non-IPv4 destination %s", cm.Dst.String())
 			continue
 		}
+		if !isManagedLoopbackToken(tokenIP) {
+			log.Debugf("UDP proxy ignoring packet for non-token destination %s from %s",
+				tokenIP.String(), clientAddr.String())
+			continue
+		}
 		payload := make([]byte, n)
 		copy(payload, buf[:n])
-		go p.handlePacket(clientAddr, tokenIP, payload)
+		clientAddr = cloneUDPAddr(clientAddr)
+		tokenIP = cloneIP(tokenIP)
+		select {
+		case p.packetSem <- struct{}{}:
+			go func() {
+				defer func() { <-p.packetSem }()
+				p.handlePacket(clientAddr, tokenIP, payload)
+			}()
+		default:
+			log.Warnf("UDP proxy dropping packet for %s from %s: handlers busy",
+				tokenIP.String(), clientAddr.String())
+		}
 	}
 }
 
@@ -360,6 +379,11 @@ func (f *directUDPForwarder) readLoop() {
 
 func udpSessionKey(clientAddr *net.UDPAddr, tokenIP net.IP) string {
 	return clientAddr.String() + "|" + tokenIP.String()
+}
+
+func isManagedLoopbackToken(ip net.IP) bool {
+	token, ok := ipToToken(ip)
+	return ok && token >= loopbackStartToken && token <= loopbackEndToken
 }
 
 func cloneUDPAddr(addr *net.UDPAddr) *net.UDPAddr {
