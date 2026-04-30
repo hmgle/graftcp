@@ -20,6 +20,18 @@ type httpDialer struct {
 	forward proxy.Dialer
 }
 
+type bufferedConn struct {
+	net.Conn
+	r *bufio.Reader
+}
+
+func (c *bufferedConn) Read(b []byte) (int, error) {
+	if c.r.Buffered() > 0 {
+		return c.r.Read(b)
+	}
+	return c.Conn.Read(b)
+}
+
 func (h *httpDialer) Dial(network, addr string) (net.Conn, error) {
 	conn, err := h.forward.Dial("tcp", h.host)
 	if err != nil {
@@ -55,7 +67,7 @@ func (h *httpDialer) Dial(network, addr string) (net.Conn, error) {
 		conn.Close()
 		return nil, fmt.Errorf("connect proxy error: %v", strings.SplitN(resp.Status, " ", 2)[1])
 	}
-	return conn, nil
+	return &bufferedConn{Conn: conn, r: r}, nil
 }
 
 func newHTTPProxy(u *url.URL, forward proxy.Dialer) (proxy.Dialer, error) {
