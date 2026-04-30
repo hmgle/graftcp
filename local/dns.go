@@ -20,12 +20,13 @@ type DNSProxy struct {
 	local    *Local
 	upstream string
 
-	mu    sync.Mutex
-	conns []*net.UDPConn
+	startOnce sync.Once
+	mu        sync.Mutex
+	conns     []*net.UDPConn
 }
 
-// StartDNSProxy starts a DNS UDP listener on 127.0.0.1 and best-effort ::1.
-func (l *Local) StartDNSProxy(upstream string) (*DNSProxy, int, error) {
+// ListenDNSProxy binds DNS UDP listeners on 127.0.0.1 and best-effort ::1.
+func (l *Local) ListenDNSProxy(upstream string) (*DNSProxy, int, error) {
 	if upstream == "" {
 		return nil, 0, fmt.Errorf("empty DNS upstream")
 	}
@@ -50,11 +51,37 @@ func (l *Local) StartDNSProxy(upstream string) (*DNSProxy, int, error) {
 		log.Infof("DNS udp6 listener disabled on [::1]:%d: %s", port, err.Error())
 	}
 
-	for _, conn := range p.conns {
-		go p.serve(conn)
-	}
-	log.Infof("mgraftcp DNS proxy started on 127.0.0.1:%d, upstream %s", port, upstream)
 	return p, port, nil
+}
+
+// StartDNSProxy starts a DNS UDP listener on 127.0.0.1 and best-effort ::1.
+func (l *Local) StartDNSProxy(upstream string) (*DNSProxy, int, error) {
+	p, port, err := l.ListenDNSProxy(upstream)
+	if err != nil {
+		return nil, 0, err
+	}
+	p.Start()
+	return p, port, nil
+}
+
+// Start serves packets on listeners that were already bound by ListenDNSProxy.
+func (p *DNSProxy) Start() {
+	if p == nil {
+		return
+	}
+	p.startOnce.Do(func() {
+		p.mu.Lock()
+		conns := append([]*net.UDPConn(nil), p.conns...)
+		p.mu.Unlock()
+
+		for _, conn := range conns {
+			go p.serve(conn)
+		}
+		if len(conns) > 0 {
+			port := conns[0].LocalAddr().(*net.UDPAddr).Port
+			log.Infof("mgraftcp DNS proxy started on 127.0.0.1:%d, upstream %s", port, p.upstream)
+		}
+	})
 }
 
 // Close stops all UDP listeners owned by the DNS proxy.

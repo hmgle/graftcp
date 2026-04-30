@@ -59,9 +59,57 @@ cidr_trie_t *WHITELIST_IP = NULL;
 static uid_t run_uid;
 static gid_t run_gid;
 static char *run_home;
+static gid_t *run_groups;
+static int run_group_count;
 
 static int exit_code = 0;
 static pid_t root_pid = -1;
+
+static void child_write_str(const char *s)
+{
+	size_t len = 0;
+
+	while (s[len] != '\0')
+		len++;
+	while (len > 0) {
+		ssize_t written = write(STDERR_FILENO, s, len);
+
+		if (written <= 0)
+			return;
+		s += written;
+		len -= (size_t)written;
+	}
+}
+
+static void child_write_errno(int err)
+{
+	char buf[32];
+	size_t pos = sizeof(buf);
+	unsigned int val = err < 0 ? (unsigned int)-err : (unsigned int)err;
+
+	buf[--pos] = '\0';
+	if (val == 0) {
+		buf[--pos] = '0';
+	} else {
+		while (val > 0 && pos > 0) {
+			buf[--pos] = (char)('0' + (val % 10));
+			val /= 10;
+		}
+	}
+	child_write_str(&buf[pos]);
+}
+
+static void child_die_errno(const char *what)
+{
+	int err = errno;
+
+	child_write_str("graftcp: ");
+	child_write_str(what);
+	child_write_str(" failed: errno ");
+	child_write_errno(err);
+	child_write_str("\n");
+	_exit(err == 0 ? 1 : err);
+}
 
 static bool port_matches(uint16_t port, uint16_t expected)
 {
@@ -281,18 +329,13 @@ static void install_seccomp()
 		 *  Unprivileged users are therefore only allowed to install such filters
 		 *  if no_new_privs is set.
 		 */
-		if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) {
-			perror("prctl(PR_SET_NO_NEW_PRIVS)");
-			exit(errno);
-		}
-		if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog)) {
-			perror("prctl(PR_SET_SECCOMP)");
-			exit(errno);
-		}
+		if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0))
+			child_die_errno("prctl(PR_SET_NO_NEW_PRIVS)");
+		if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog))
+			child_die_errno("prctl(PR_SET_SECCOMP)");
 		return;
 	}
-	perror("prctl(PR_SET_SECCOMP)");
-	exit(errno);
+	child_die_errno("prctl(PR_SET_SECCOMP)");
 }
 #endif
 
@@ -571,45 +614,33 @@ void do_child(const char *username, int argc, char **argv)
 	for (i = 0; i < argc; i++)
 		args[i] = argv[i];
 	args[argc] = NULL;
-	if (ptrace(PTRACE_TRACEME, 0, NULL, NULL) < 0) {
-		perror("ptrace(PTRACE_TRACEME)");
-		exit(errno);
-	}
+	if (ptrace(PTRACE_TRACEME, 0, NULL, NULL) < 0)
+		child_die_errno("ptrace(PTRACE_TRACEME)");
 
 	pid = getpid();
 	/*
 	 * Induce a ptrace stop so the tracer can set PTRACE_O_TRACESECCOMP
 	 * before any seccomp trace events can fire.
 	 */
-	kill(pid, SIGSTOP);
-	if (username) {
-		if (initgroups(username, run_gid) < 0) {
-			perror("initgroups");
-			exit(errno);
-		}
-	}
+	if (kill(pid, SIGSTOP) < 0)
+		child_die_errno("kill(SIGSTOP)");
+	if (username && run_group_count > 0 &&
+	    setgroups((size_t)run_group_count, run_groups) < 0)
+		child_die_errno("setgroups");
 #ifdef ENABLE_SECCOMP_BPF
 	install_seccomp();
 #endif
 	if (username) {
-		if (setregid(run_gid, run_gid) < 0) {
-			perror("setregid");
-			exit(errno);
-		}
-		if (setreuid(run_uid, run_uid) < 0) {
-			perror("setreuid");
-			exit(errno);
-		}
-		if (setenv("HOME", run_home, 1) < 0)
-			perror("setenv");
+		if (setregid(run_gid, run_gid) < 0)
+			child_die_errno("setregid");
+		if (setreuid(run_uid, run_uid) < 0)
+			child_die_errno("setreuid");
 	}
-	if (execvp(args[0], args) < 0) {
-		fprintf(stderr, "graftcp %s: %s\n", args[0], strerror(errno));
-		exit(errno);
-	}
+	if (execvp(args[0], args) < 0)
+		child_die_errno("execvp");
 }
 
-void init(const char *username, int argc, char **argv)
+void start_tracee(const char *username, int argc, char **argv)
 {
 	pid_t child;
 	struct proc_info *pi;
@@ -830,12 +861,47 @@ static void usage(char **argv)
 		"\n", argv[0]);
 }
 
-int client_main(int argc, char **argv)
+static void prepare_run_groups(const char *username, gid_t gid)
+{
+	gid_t *groups;
+	int ngroups = 16;
+
+	for (;;) {
+		int requested = ngroups;
+
+		groups = calloc((size_t)ngroups, sizeof(*groups));
+		if (groups == NULL) {
+			perror("calloc");
+			exit(1);
+		}
+		if (getgrouplist(username, gid, groups, &requested) >= 0) {
+			free(run_groups);
+			run_groups = groups;
+			run_group_count = requested;
+			return;
+		}
+		free(groups);
+		if (requested > ngroups) {
+			ngroups = requested;
+			continue;
+		}
+		if (ngroups > INT_MAX / 2) {
+			fprintf(stderr, "too many groups for user '%s'\n",
+				username);
+			exit(1);
+		}
+		ngroups *= 2;
+	}
+}
+
+int client_prepare(int argc, char **argv)
 {
 	int opt, index;
 	char *blackip_file_path = NULL;
 	char *whiteip_file_path = NULL;
 	char *username = NULL;
+	char *saved_home = NULL;
+	bool unset_home = false;
 	bool ignore_local = DEFAULT_IGNORE_LOCAL;
 	uint16_t local_proxy_port = DEFAULT_LOCAL_PORT;
 	uint16_t dns_proxy_port = 0;
@@ -852,6 +918,11 @@ int client_main(int argc, char **argv)
 		{"not-ignore-local", no_argument, 0, 'n'},
 		{0, 0, 0, 0}
 	};
+
+	optind = 1;
+	optarg = NULL;
+	exit_code = 0;
+	root_pid = -1;
 
 	while ((opt = getopt_long(argc, argv, "+Vhp:D:U:b:w:u:n", long_opts,
 				    	&index)) != -1) {
@@ -892,12 +963,16 @@ int client_main(int argc, char **argv)
 		case 'V':
 			fprintf(stderr, "graftcp %s\n", VERSION);
 			exit(0);
-			case 0:
-			case 'h':
-			default:
-				usage(argv);
-				exit(0);
-			}
+		case 0:
+		case 'h':
+		default:
+			usage(argv);
+			exit(0);
+		}
+	}
+	if (optind >= argc) {
+		usage(argv);
+		exit(1);
 	}
 
 	if (blackip_file_path)
@@ -924,6 +999,7 @@ int client_main(int argc, char **argv)
 
 	if (username) {
 		struct passwd *pent;
+		char *home;
 
 		if (geteuid() != 0) {
 			fprintf(stderr, "You must be root to use the -u option\n");
@@ -936,18 +1012,56 @@ int client_main(int argc, char **argv)
 		}
 		run_gid = pent->pw_gid;
 		run_uid = pent->pw_uid;
-			run_home = strdup(pent->pw_dir);
-			if (run_home == NULL) {
+		home = getenv("HOME");
+		if (home) {
+			saved_home = strdup(home);
+			if (saved_home == NULL) {
 				perror("strdup");
 				exit(1);
 			}
+		} else {
+			unset_home = true;
 		}
+		free(run_home);
+		run_home = strdup(pent->pw_dir);
+		if (run_home == NULL) {
+			perror("strdup");
+			exit(1);
+		}
+		prepare_run_groups(username, run_gid);
+		if (setenv("HOME", run_home, 1) < 0) {
+			perror("setenv");
+			exit(1);
+		}
+	}
 
-	init(username, argc - optind, argv + optind);
+	start_tracee(username, argc - optind, argv + optind);
+	if (saved_home) {
+		if (setenv("HOME", saved_home, 1) < 0)
+			perror("setenv");
+	} else if (unset_home && unsetenv("HOME") < 0) {
+		perror("unsetenv");
+	}
 	free(blackip_file_path);
 	free(whiteip_file_path);
 	free(username);
+	free(saved_home);
+	return 0;
+}
+
+int client_trace(void)
+{
 	if (do_trace() < 0)
 		return -1;
 	return exit_code;
+}
+
+int client_main(int argc, char **argv)
+{
+	int ret;
+
+	ret = client_prepare(argc, argv);
+	if (ret != 0)
+		return ret;
+	return client_trace();
 }

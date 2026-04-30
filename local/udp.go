@@ -41,14 +41,15 @@ type UDPProxy struct {
 	conn       *net.UDPConn
 	packetConn *ipv4.PacketConn
 
+	startOnce sync.Once
 	mu        sync.Mutex
 	sessions  map[string]*udpSession
 	closed    chan struct{}
 	packetSem chan struct{}
 }
 
-// StartUDPProxy starts a generic UDP listener for token-routed datagrams.
-func (l *Local) StartUDPProxy() (*UDPProxy, int, error) {
+// ListenUDPProxy binds a generic UDP listener for token-routed datagrams.
+func (l *Local) ListenUDPProxy() (*UDPProxy, int, error) {
 	udp4, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero})
 	if err != nil {
 		return nil, 0, fmt.Errorf("listen UDP proxy: %w", err)
@@ -66,12 +67,32 @@ func (l *Local) StartUDPProxy() (*UDPProxy, int, error) {
 		closed:     make(chan struct{}),
 		packetSem:  make(chan struct{}, udpPacketConcurrency),
 	}
-	go p.serve()
-	go p.gcLoop()
 
 	port := udp4.LocalAddr().(*net.UDPAddr).Port
-	log.Infof("mgraftcp UDP proxy started on 0.0.0.0:%d", port)
 	return p, port, nil
+}
+
+// StartUDPProxy starts a generic UDP listener for token-routed datagrams.
+func (l *Local) StartUDPProxy() (*UDPProxy, int, error) {
+	p, port, err := l.ListenUDPProxy()
+	if err != nil {
+		return nil, 0, err
+	}
+	p.Start()
+	return p, port, nil
+}
+
+// Start serves packets on a listener that was already bound by ListenUDPProxy.
+func (p *UDPProxy) Start() {
+	if p == nil {
+		return
+	}
+	p.startOnce.Do(func() {
+		go p.serve()
+		go p.gcLoop()
+		port := p.conn.LocalAddr().(*net.UDPAddr).Port
+		log.Infof("mgraftcp UDP proxy started on 0.0.0.0:%d", port)
+	})
 }
 
 func (p *UDPProxy) Close() error {

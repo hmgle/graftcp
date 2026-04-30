@@ -53,8 +53,8 @@ func (l *Local) GetFAddr() (faddrString string, faddr *net.TCPAddr) {
 	return l.faddrString, l.faddr
 }
 
-// NewLocal ...
-func NewLocal(listenAddr, socks5Addr, socks5Username, socks5PassWord, httpProxyAddr string) (*Local, error) {
+// NewLocalListener creates a Local with only its frontend listener address and registries.
+func NewLocalListener(listenAddr string) (*Local, error) {
 	listenTCPAddr, err := net.ResolveTCPAddr("tcp", listenAddr)
 	if err != nil {
 		return nil, fmt.Errorf("resolve frontend %q: %w", listenAddr, err)
@@ -66,6 +66,27 @@ func NewLocal(listenAddr, socks5Addr, socks5Username, socks5PassWord, httpProxyA
 		udpRoutes:   NewDatagramRouteRegistry(),
 	}
 	local.directDialer = proxy.Direct
+
+	return local, nil
+}
+
+// NewLocal ...
+func NewLocal(listenAddr, socks5Addr, socks5Username, socks5PassWord, httpProxyAddr string) (*Local, error) {
+	local, err := NewLocalListener(listenAddr)
+	if err != nil {
+		return nil, err
+	}
+	local.ConfigureProxy(socks5Addr, socks5Username, socks5PassWord, httpProxyAddr)
+	return local, nil
+}
+
+// ConfigureProxy configures the upstream proxy dialers used by the local listener.
+func (l *Local) ConfigureProxy(socks5Addr, socks5Username, socks5PassWord, httpProxyAddr string) {
+	l.socks5Dialer = nil
+	l.httpProxyDialer = nil
+	l.socks5Addr = ""
+	l.socks5Username = ""
+	l.socks5Password = ""
 
 	if socks5Addr != "" {
 		socks5TCPAddr, err := net.ResolveTCPAddr("tcp", socks5Addr)
@@ -83,10 +104,10 @@ func NewLocal(listenAddr, socks5Addr, socks5Username, socks5PassWord, httpProxyA
 			if err != nil {
 				log.Errorf("proxy.SOCKS5(%s) fail: %s", socks5TCPAddr.String(), err.Error())
 			} else {
-				local.socks5Dialer = dialerSocks5
-				local.socks5Addr = socks5TCPAddr.String()
-				local.socks5Username = socks5Username
-				local.socks5Password = socks5PassWord
+				l.socks5Dialer = dialerSocks5
+				l.socks5Addr = socks5TCPAddr.String()
+				l.socks5Username = socks5Username
+				l.socks5Password = socks5PassWord
 			}
 		}
 	}
@@ -100,11 +121,10 @@ func NewLocal(listenAddr, socks5Addr, socks5Username, socks5PassWord, httpProxyA
 			if err != nil {
 				log.Errorf("proxy.FromURL(%v) err: %s", httpProxyURI, err.Error())
 			} else {
-				local.httpProxyDialer = dialerHTTPProxy
+				l.httpProxyDialer = dialerHTTPProxy
 			}
 		}
 	}
-	return local, nil
 }
 
 // Registry exposes the route registry used by the local proxy listener.

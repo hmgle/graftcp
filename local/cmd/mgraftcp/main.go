@@ -8,7 +8,8 @@ package main
 //              return calloc(len, sizeof(char*));
 // }
 //
-// int client_main(int argc, char **argv);
+// int client_prepare(int argc, char **argv);
+// int client_trace(void);
 import "C"
 
 import (
@@ -20,7 +21,7 @@ import (
 	"github.com/pborman/getopt/v2"
 )
 
-func clientMain(args []string) int {
+func clientPrepare(args []string) int {
 	argc := C.int(len(args))
 
 	argv := (**C.char)(C.alloc_string_slice(argc + 1))
@@ -36,8 +37,12 @@ func clientMain(args []string) int {
 		defer C.free(unsafe.Pointer(argvSlice[i]))
 	}
 
-	returnValue := C.client_main(argc, argv)
+	returnValue := C.client_prepare(argc, argv)
 	return int(returnValue)
+}
+
+func clientTrace() int {
+	return int(C.client_trace())
 }
 
 var version = "v0.7"
@@ -70,7 +75,7 @@ func main() {
 	retCode := 0
 	defer func() { os.Exit(retCode) }()
 
-	l, err := local.NewLocal(":0", cfg.socks5Addr, cfg.socks5User, cfg.socks5Pwd, cfg.httpProxyAddr)
+	l, err := local.NewLocalListener(":0")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mgraftcp: %v\n", err)
 		os.Exit(1)
@@ -101,12 +106,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "mgraftcp: l.StartListen err: %s\n", err.Error())
 		os.Exit(1)
 	}
-	go l.StartService(ln)
 	defer ln.Close()
 
 	dnsPort := 0
+	var dnsProxy *local.DNSProxy
 	if cfg.dnsProxy {
-		dnsProxy, port, err := l.StartDNSProxy(cfg.dnsServer)
+		var port int
+		dnsProxy, port, err = l.ListenDNSProxy(cfg.dnsServer)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "mgraftcp: %v\n", err)
 			os.Exit(1)
@@ -115,8 +121,10 @@ func main() {
 		dnsPort = port
 	}
 	udpPort := 0
+	var udpProxy *local.UDPProxy
 	if cfg.udpProxy {
-		udpProxy, port, err := l.StartUDPProxy()
+		var port int
+		udpProxy, port, err = l.ListenUDPProxy()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "mgraftcp: %v\n", err)
 			os.Exit(1)
@@ -127,5 +135,19 @@ func main() {
 
 	_, faddr := l.GetFAddr()
 
-	retCode = clientMain(cfg.clientArgs(faddr.Port, dnsPort, udpPort, args))
+	retCode = clientPrepare(cfg.clientArgs(faddr.Port, dnsPort, udpPort, args))
+	if retCode != 0 {
+		return
+	}
+
+	l.ConfigureProxy(cfg.socks5Addr, cfg.socks5User, cfg.socks5Pwd, cfg.httpProxyAddr)
+	go l.StartService(ln)
+	if dnsProxy != nil {
+		dnsProxy.Start()
+	}
+	if udpProxy != nil {
+		udpProxy.Start()
+	}
+
+	retCode = clientTrace()
 }
