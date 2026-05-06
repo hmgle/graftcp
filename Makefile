@@ -96,6 +96,7 @@ libgraftcp.a: $(LIB_OBJS)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
 
 $(TARGET): libgraftcp.a $(GO_BUILD_FILES) $(LOCAL_DIR)/go.mod $(LOCAL_DIR)/go.sum
+	$(RM) $@
 	$(GO_ENV) $(GO) -C $(LOCAL_DIR) build -o $(notdir $@) -ldflags "$(GO_LDFLAGS) -X main.version=$(VERSION)" ./cmd/mgraftcp
 
 install: $(TARGET)

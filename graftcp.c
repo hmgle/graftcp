@@ -359,8 +359,41 @@ void socket_pre_handle(struct proc_info *pinfp)
 	pinfp->pending_socket_type = socket_type;
 }
 
-static bool rewrite_udp_sockaddr(pid_t pid, long addr, long addrlen)
+static void clear_sockaddr_restore(struct proc_info *pinfp)
 {
+	if (pinfp == NULL)
+		return;
+	pinfp->pending_sockaddr_restore = false;
+	pinfp->sockaddr_restore_addr = 0;
+	pinfp->sockaddr_restore_len = 0;
+}
+
+static void save_sockaddr_restore(struct proc_info *pinfp, long addr,
+				  const void *sockaddr, size_t len)
+{
+	if (pinfp == NULL || addr == 0 || sockaddr == NULL ||
+	    len > sizeof(pinfp->sockaddr_restore))
+		return;
+	pinfp->pending_sockaddr_restore = true;
+	pinfp->sockaddr_restore_addr = addr;
+	pinfp->sockaddr_restore_len = len;
+	memcpy(pinfp->sockaddr_restore, sockaddr, len);
+}
+
+static void restore_sockaddr_if_needed(struct proc_info *pinfp)
+{
+	if (pinfp == NULL || !pinfp->pending_sockaddr_restore)
+		return;
+	if (putdata(pinfp->pid, pinfp->sockaddr_restore_addr,
+		    pinfp->sockaddr_restore, pinfp->sockaddr_restore_len) < 0)
+		fprintf(stderr, "mgraftcp restore sockaddr failed\n");
+	clear_sockaddr_restore(pinfp);
+}
+
+static bool rewrite_udp_sockaddr(struct proc_info *pinfp, long addr,
+				 long addrlen)
+{
+	pid_t pid;
 	sa_family_t family;
 	struct sockaddr_in dest_sa;
 	struct sockaddr_in6 dest_sa6;
@@ -373,6 +406,9 @@ static bool rewrite_udp_sockaddr(pid_t pid, long addr, long addrlen)
 	char *dest_ip_addr_str;
 	uint32_t loopback_token;
 
+	if (pinfp == NULL)
+		return false;
+	pid = pinfp->pid;
 	if ((DNS_PROXY_PORT == 0 && UDP_PROXY_PORT == 0) || addr == 0)
 		return false;
 	if (addrlen < (long)sizeof(family))
@@ -390,8 +426,12 @@ static bool rewrite_udp_sockaddr(pid_t pid, long addr, long addrlen)
 			return false;
 		if (DNS_PROXY_PORT != 0 && ntohs(dest_ip_port) == 53) {
 			build_loopback_sockaddr4(&dns_sa, 0x7f000001, DNS_PROXY_PORT);
-			if (putdata(pid, addr, &dns_sa, sizeof(dns_sa)) < 0)
+			if (putdata(pid, addr, &dns_sa, sizeof(dns_sa)) < 0) {
 				fprintf(stderr, "mgraftcp rewrite DNS UDP failed\n");
+			} else {
+				save_sockaddr_restore(pinfp, addr,
+						      &dest_sa, sizeof(dest_sa));
+			}
 			return true;
 		}
 		if (UDP_PROXY_PORT == 0 || ip4_is_ignore(dest_sa.sin_addr.s_addr))
@@ -410,9 +450,13 @@ static bool rewrite_udp_sockaddr(pid_t pid, long addr, long addrlen)
 		}
 		build_loopback_sockaddr4(&proxy_sa, loopback_token,
 					 UDP_PROXY_PORT);
-		if (putdata(pid, addr, &proxy_sa, sizeof(proxy_sa)) < 0)
+		if (putdata(pid, addr, &proxy_sa, sizeof(proxy_sa)) < 0) {
 			fprintf(stderr, "mgraftcp rewrite UDP failed for %s:%d\n",
 				dest_ip_addr_str, ntohs(dest_ip_port));
+		} else {
+			save_sockaddr_restore(pinfp, addr, &dest_sa,
+					      sizeof(dest_sa));
+		}
 		return true;
 	} else if (family == AF_INET6) {
 		if (addrlen < (long)sizeof(dest_sa6))
@@ -424,8 +468,12 @@ static bool rewrite_udp_sockaddr(pid_t pid, long addr, long addrlen)
 			return false;
 		if (DNS_PROXY_PORT != 0 && ntohs(dest_ip_port) == 53) {
 			build_dns_sockaddr6(&dns_sa6, DNS_PROXY_PORT);
-			if (putdata(pid, addr, &dns_sa6, sizeof(dns_sa6)) < 0)
+			if (putdata(pid, addr, &dns_sa6, sizeof(dns_sa6)) < 0) {
 				fprintf(stderr, "mgraftcp rewrite DNS UDP failed\n");
+			} else {
+				save_sockaddr_restore(pinfp, addr,
+						      &dest_sa6, sizeof(dest_sa6));
+			}
 			return true;
 		}
 		if (UDP_PROXY_PORT == 0 ||
@@ -445,9 +493,13 @@ static bool rewrite_udp_sockaddr(pid_t pid, long addr, long addrlen)
 		}
 		build_loopback_sockaddr6(&proxy_sa6, loopback_token,
 					 UDP_PROXY_PORT);
-		if (putdata(pid, addr, &proxy_sa6, sizeof(proxy_sa6)) < 0)
+		if (putdata(pid, addr, &proxy_sa6, sizeof(proxy_sa6)) < 0) {
 			fprintf(stderr, "mgraftcp rewrite UDP failed for %s:%d\n",
 				dest_ip_addr_str, ntohs(dest_ip_port));
+		} else {
+			save_sockaddr_restore(pinfp, addr, &dest_sa6,
+					      sizeof(dest_sa6));
+		}
 		return true;
 	}
 	return false;
@@ -515,16 +567,24 @@ static void tcp_connect_pre_handle(struct proc_info *pinfp)
 
 	if (family == AF_INET) { /* IPv4 */
 		build_loopback_sockaddr4(&proxy_sa, loopback_token,
-						 LOCAL_PROXY_PORT);
-		if (putdata(pinfp->pid, addr, &proxy_sa, sizeof(proxy_sa)) < 0)
+							 LOCAL_PROXY_PORT);
+		if (putdata(pinfp->pid, addr, &proxy_sa, sizeof(proxy_sa)) < 0) {
 			fprintf(stderr, "mgraftcp rewrite connect failed for %s:%d\n",
 				dest_ip_addr_str, ntohs(dest_ip_port));
+		} else {
+			save_sockaddr_restore(pinfp, addr, &dest_sa,
+					      sizeof(dest_sa));
+		}
 	} else { /* IPv6 */
 		build_loopback_sockaddr6(&proxy_sa6, loopback_token,
-						 LOCAL_PROXY_PORT);
-		if (putdata(pinfp->pid, addr, &proxy_sa6, sizeof(proxy_sa6)) < 0)
+							 LOCAL_PROXY_PORT);
+		if (putdata(pinfp->pid, addr, &proxy_sa6, sizeof(proxy_sa6)) < 0) {
 			fprintf(stderr, "mgraftcp rewrite connect failed for %s:%d\n",
 				dest_ip_addr_str, ntohs(dest_ip_port));
+		} else {
+			save_sockaddr_restore(pinfp, addr, &dest_sa6,
+					      sizeof(dest_sa6));
+		}
 	}
 }
 
@@ -543,7 +603,7 @@ void connect_pre_handle(struct proc_info *pinfp)
 
 	addr = get_syscall_arg(pinfp->pid, 1);
 	addrlen = get_syscall_arg(pinfp->pid, 2);
-	rewrite_udp_sockaddr(pinfp->pid, addr, addrlen);
+	rewrite_udp_sockaddr(pinfp, addr, addrlen);
 }
 
 void sendto_pre_handle(struct proc_info *pinfp)
@@ -556,7 +616,7 @@ void sendto_pre_handle(struct proc_info *pinfp)
 		return;
 	addr = get_syscall_arg(pinfp->pid, 4);
 	addrlen = get_syscall_arg(pinfp->pid, 5);
-	rewrite_udp_sockaddr(pinfp->pid, addr, addrlen);
+	rewrite_udp_sockaddr(pinfp, addr, addrlen);
 }
 
 void sendmsg_pre_handle(struct proc_info *pinfp)
@@ -571,7 +631,7 @@ void sendmsg_pre_handle(struct proc_info *pinfp)
 		return;
 	if (msg.msg_name == NULL)
 		return;
-	rewrite_udp_sockaddr(pinfp->pid, (long)msg.msg_name, msg.msg_namelen);
+	rewrite_udp_sockaddr(pinfp, (long)msg.msg_name, msg.msg_namelen);
 }
 
 void close_pre_handle(struct proc_info *pinfp)
@@ -713,8 +773,16 @@ int trace_syscall_exiting(struct proc_info *pinfp)
 		}
 		socket_exiting_handle(pinfp, child_ret);
 		break;
+	case SYS_connect:
+	case SYS_sendto:
+	case SYS_sendmsg:
+		restore_sockaddr_if_needed(pinfp);
+		break;
 	}
 end:
+	if (pinfp->csn != SYS_connect && pinfp->csn != SYS_sendto &&
+	    pinfp->csn != SYS_sendmsg)
+		clear_sockaddr_restore(pinfp);
 	pinfp->flags &= ~FLAG_INSYSCALL;
 	return ret;
 }

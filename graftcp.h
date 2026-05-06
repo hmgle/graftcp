@@ -111,6 +111,10 @@ struct proc_info {
 	bool pending_socket;
 	int pending_socket_domain;
 	int pending_socket_type;
+	bool pending_sockaddr_restore;
+	long sockaddr_restore_addr;
+	size_t sockaddr_restore_len;
+	unsigned char sockaddr_restore[sizeof(struct sockaddr_in6)];
 	unsigned int tracked_socket_count;
 	unsigned int tracked_socket_cap;
 	struct tracked_socket *tracked_sockets;
