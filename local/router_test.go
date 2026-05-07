@@ -123,3 +123,37 @@ func TestDatagramRouteRegistrySweepIdle(t *testing.T) {
 		t.Fatalf("Register() reused swept destination token immediately: %v", token)
 	}
 }
+
+func TestRouteRegistryForgetReleasesToken(t *testing.T) {
+	registry := NewRouteRegistry()
+
+	token, err := registry.Register(syscall.AF_INET, "203.0.113.1", 80)
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	registry.Forget(token)
+
+	if _, ok := registry.Consume(tokenToIP(token)); ok {
+		t.Fatal("Consume() found route after Forget()")
+	}
+}
+
+func TestDatagramRouteRegistryForgetReleasesToken(t *testing.T) {
+	registry := NewDatagramRouteRegistry()
+
+	token, err := registry.Register(syscall.AF_INET, "203.0.113.2", 9999)
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	registry.Forget(token)
+
+	if _, ok := registry.Lookup(tokenToIP(token)); ok {
+		t.Fatal("Lookup() found route after Forget()")
+	}
+
+	// After Forget the destAddr->token mapping must also be cleared, so a
+	// subsequent Register may pick a different token.
+	if _, err := registry.Register(syscall.AF_INET, "203.0.113.2", 9999); err != nil {
+		t.Fatalf("Register() after Forget() error = %v", err)
+	}
+}

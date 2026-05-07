@@ -82,6 +82,10 @@ func (r *RouteRegistry) Register(family int, host string, port uint16) (uint32, 
 	if r.routes == nil {
 		r.routes = make(map[uint32]string)
 	}
+	if existing, ok := r.routes[token]; ok {
+		log.Warnf("route registry token %s wrapped around; dropping pending dest %s",
+			tokenToIP(token).String(), existing)
+	}
 	r.routes[token] = destAddr
 	r.mu.Unlock()
 	return token, nil
@@ -107,6 +111,18 @@ func (r *RouteRegistry) Consume(localIP net.IP) (string, bool) {
 	delete(r.routes, token)
 	r.mu.Unlock()
 	return destAddr, true
+}
+
+// Forget releases the entry for token without consuming it. Callers that
+// allocate a token but never end up using it (e.g. the C-side rewrite failed)
+// should call Forget so the slot does not linger until wrap-around.
+func (r *RouteRegistry) Forget(token uint32) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	delete(r.routes, token)
+	r.mu.Unlock()
 }
 
 func ipToToken(ip net.IP) (uint32, bool) {
@@ -201,6 +217,20 @@ func (r *DatagramRouteRegistry) Lookup(localIP net.IP) (string, bool) {
 	}
 	r.mu.Unlock()
 	return route.destAddr, ok
+}
+
+// Forget releases the entry for token. Use after a UDP rewrite has failed and
+// the token will never be observed by the embedded UDP listener.
+func (r *DatagramRouteRegistry) Forget(token uint32) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	if route, ok := r.routes[token]; ok {
+		delete(r.routes, token)
+		delete(r.tokens, route.destAddr)
+	}
+	r.mu.Unlock()
 }
 
 func (r *DatagramRouteRegistry) SweepIdle(now time.Time, maxIdle time.Duration) {

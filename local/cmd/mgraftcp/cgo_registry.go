@@ -39,3 +39,19 @@ func mgraftcp_register_udp(family C.int, addr *C.char, port C.uint16_t) C.uint32
 
 	return C.uint32_t(token)
 }
+
+//export mgraftcp_forget_connect
+func mgraftcp_forget_connect(token C.uint32_t) {
+	if activeRegistry == nil || token == 0 {
+		return
+	}
+	activeRegistry.Forget(uint32(token))
+}
+
+//export mgraftcp_forget_udp
+func mgraftcp_forget_udp(token C.uint32_t) {
+	if activeUDPRegistry == nil || token == 0 {
+		return
+	}
+	activeUDPRegistry.Forget(uint32(token))
+}

@@ -343,6 +343,9 @@ type directUDPForwarder struct {
 	clientAddr *net.UDPAddr
 	tokenIP    net.IP
 	conn       *net.UDPConn
+
+	closeOnce sync.Once
+	closed    chan struct{}
 }
 
 func newDirectUDPForwarder(proxy *UDPProxy, clientAddr *net.UDPAddr, tokenIP net.IP, destAddr string) (*directUDPForwarder, error) {
@@ -359,6 +362,7 @@ func newDirectUDPForwarder(proxy *UDPProxy, clientAddr *net.UDPAddr, tokenIP net
 		clientAddr: cloneUDPAddr(clientAddr),
 		tokenIP:    cloneIP(tokenIP),
 		conn:       conn,
+		closed:     make(chan struct{}),
 	}
 	go f.readLoop()
 	return f, nil
@@ -370,12 +374,22 @@ func (f *directUDPForwarder) Write(payload []byte) error {
 }
 
 func (f *directUDPForwarder) Close() error {
-	return f.conn.Close()
+	var err error
+	f.closeOnce.Do(func() {
+		close(f.closed)
+		err = f.conn.Close()
+	})
+	return err
 }
 
 func (f *directUDPForwarder) readLoop() {
 	buf := make([]byte, udpPacketMaxSize)
 	for {
+		select {
+		case <-f.closed:
+			return
+		default:
+		}
 		if err := f.conn.SetReadDeadline(time.Now().Add(udpSessionReadLimit)); err != nil {
 			return
 		}

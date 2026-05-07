@@ -45,6 +45,8 @@ extern uint32_t mgraftcp_register_connect(int family, const char *addr,
 					  uint16_t port);
 extern uint32_t mgraftcp_register_udp(int family, const char *addr,
 				      uint16_t port);
+extern void mgraftcp_forget_connect(uint32_t token);
+extern void mgraftcp_forget_udp(uint32_t token);
 
 uint16_t DEFAULT_LOCAL_PORT      = 2233;
 bool DEFAULT_IGNORE_LOCAL        = true;
@@ -453,6 +455,7 @@ static bool rewrite_udp_sockaddr(struct proc_info *pinfp, long addr,
 		if (putdata(pid, addr, &proxy_sa, sizeof(proxy_sa)) < 0) {
 			fprintf(stderr, "mgraftcp rewrite UDP failed for %s:%d\n",
 				dest_ip_addr_str, ntohs(dest_ip_port));
+			mgraftcp_forget_udp(loopback_token);
 		} else {
 			save_sockaddr_restore(pinfp, addr, &dest_sa,
 					      sizeof(dest_sa));
@@ -496,6 +499,7 @@ static bool rewrite_udp_sockaddr(struct proc_info *pinfp, long addr,
 		if (putdata(pid, addr, &proxy_sa6, sizeof(proxy_sa6)) < 0) {
 			fprintf(stderr, "mgraftcp rewrite UDP failed for %s:%d\n",
 				dest_ip_addr_str, ntohs(dest_ip_port));
+			mgraftcp_forget_udp(loopback_token);
 		} else {
 			save_sockaddr_restore(pinfp, addr, &dest_sa6,
 					      sizeof(dest_sa6));
@@ -571,6 +575,7 @@ static void tcp_connect_pre_handle(struct proc_info *pinfp)
 		if (putdata(pinfp->pid, addr, &proxy_sa, sizeof(proxy_sa)) < 0) {
 			fprintf(stderr, "mgraftcp rewrite connect failed for %s:%d\n",
 				dest_ip_addr_str, ntohs(dest_ip_port));
+			mgraftcp_forget_connect(loopback_token);
 		} else {
 			save_sockaddr_restore(pinfp, addr, &dest_sa,
 					      sizeof(dest_sa));
@@ -581,6 +586,7 @@ static void tcp_connect_pre_handle(struct proc_info *pinfp)
 		if (putdata(pinfp->pid, addr, &proxy_sa6, sizeof(proxy_sa6)) < 0) {
 			fprintf(stderr, "mgraftcp rewrite connect failed for %s:%d\n",
 				dest_ip_addr_str, ntohs(dest_ip_port));
+			mgraftcp_forget_connect(loopback_token);
 		} else {
 			save_sockaddr_restore(pinfp, addr, &dest_sa6,
 					      sizeof(dest_sa6));
