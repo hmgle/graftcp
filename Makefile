@@ -86,7 +86,7 @@ endif
 .DEFAULT_GOAL := all
 .SUFFIXES:
 
-.PHONY: all clean install uninstall test
+.PHONY: all clean install uninstall test test-go test-c
 all: $(TARGET)
 
 libgraftcp.a: $(LIB_OBJS)
@@ -105,10 +105,22 @@ install: $(TARGET)
 uninstall:
 	$(RM) $(DESTDIR)$(BINDIR)/mgraftcp
 
-test: libgraftcp.a
+test: test-c test-go
+
+test-go: libgraftcp.a
 	$(GO_ENV) $(GO) -C $(LOCAL_DIR) test ./...
 
+CIDR_TRIE_TEST_BIN := cidr-trie_test
+CIDR_TRIE_TEST_OBJS := cidr-trie_test.o cidr-trie.o
+
+$(CIDR_TRIE_TEST_BIN): $(CIDR_TRIE_TEST_OBJS)
+	$(CC) $(CFLAGS) -o $@ $^
+
+test-c: $(CIDR_TRIE_TEST_BIN)
+	./$(CIDR_TRIE_TEST_BIN)
+
 clean:
-	$(RM) $(LIB_OBJS) $(LIB_DEPS) libgraftcp.a $(TARGET)
+	$(RM) $(LIB_OBJS) $(LIB_DEPS) libgraftcp.a $(TARGET) \
+		$(CIDR_TRIE_TEST_BIN) $(CIDR_TRIE_TEST_OBJS) cidr-trie_test.d
 
 -include $(LIB_DEPS)

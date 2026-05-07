@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"io"
 	"net"
+	"strings"
 	"testing"
 	"time"
 )
@@ -77,4 +78,51 @@ func TestHTTPProxyDialPreservesBufferedTunnelData(t *testing.T) {
 	}
 
 	<-serverDone
+}
+
+// TestHTTPProxyDialNon200StatusReturnsErrorWithoutPanic guards against the
+// previous "strings.SplitN(resp.Status, ' ', 2)[1]" formatter, which panicked
+// when the proxy returned a non-standard status line lacking a space.
+func TestHTTPProxyDialNon200StatusReturnsErrorWithoutPanic(t *testing.T) {
+	cases := map[string]string{
+		"standard status":   "HTTP/1.1 502 Bad Gateway\r\n\r\n",
+		"single-token line": "HTTP/1.1 503\r\n\r\n",
+	}
+
+	for name, response := range cases {
+		t.Run(name, func(t *testing.T) {
+			serverConn, clientConn := net.Pipe()
+			defer serverConn.Close()
+
+			go func() {
+				defer clientConn.Close()
+				_ = clientConn.SetDeadline(time.Now().Add(2 * time.Second))
+				r := bufio.NewReader(clientConn)
+				for {
+					line, err := r.ReadString('\n')
+					if err != nil {
+						return
+					}
+					if line == "\r\n" {
+						break
+					}
+				}
+				_, _ = io.WriteString(clientConn, response)
+			}()
+
+			dialer := &httpDialer{
+				host: "proxy.test:8080",
+				forward: dialerFunc(func(network, addr string) (net.Conn, error) {
+					return serverConn, nil
+				}),
+			}
+			_, err := dialer.Dial("tcp", "target.test:443")
+			if err == nil {
+				t.Fatal("Dial() succeeded for non-200 response")
+			}
+			if !strings.Contains(err.Error(), "connect proxy error") {
+				t.Fatalf("err = %v, want connect proxy error", err)
+			}
+		})
+	}
 }
