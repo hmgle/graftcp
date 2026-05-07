@@ -310,7 +310,3 @@ func pipe(dst, src net.Conn, c chan int64) {
 	_ = src.SetDeadline(now)
 	c <- n
 }
-
-func init() {
-	rand.Seed(time.Now().UTC().UnixNano())
-}

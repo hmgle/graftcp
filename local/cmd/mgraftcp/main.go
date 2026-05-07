@@ -67,33 +67,39 @@ func main() {
 	if cfg.enableDebugLog {
 		local.SetLogger(appLogger)
 	}
-	if err := cfg.parseConfigFile(cfg.configFile); err != nil {
-		fmt.Fprintf(os.Stderr, "mgraftcp: %v\n", err)
-		os.Exit(1)
-	}
 
 	retCode := 0
 	defer func() { os.Exit(retCode) }()
 
+	if err := cfg.parseConfigFile(cfg.configFile); err != nil {
+		fmt.Fprintf(os.Stderr, "mgraftcp: %v\n", err)
+		retCode = 1
+		return
+	}
+
 	l, err := local.NewLocalListener(":0")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mgraftcp: %v\n", err)
-		os.Exit(1)
+		retCode = 1
+		return
 	}
 	if err := l.SetSelectMode(cfg.selectProxyMode); err != nil {
 		fmt.Fprintf(os.Stderr, "mgraftcp: %v\n", err)
-		os.Exit(1)
+		retCode = 1
+		return
 	}
 	if cfg.disableDNS && cfg.dnsProxy {
 		fmt.Fprintln(os.Stderr, "mgraftcp: --enable-dns and --disable-dns cannot be used together")
-		os.Exit(1)
+		retCode = 1
+		return
 	}
 	if cfg.disableDNS {
 		cfg.dnsProxy = false
 	}
 	if cfg.disableUDP && cfg.udpProxy {
 		fmt.Fprintln(os.Stderr, "mgraftcp: --enable-udp and --disable-udp cannot be used together")
-		os.Exit(1)
+		retCode = 1
+		return
 	}
 	if cfg.disableUDP {
 		cfg.udpProxy = false
@@ -104,7 +110,8 @@ func main() {
 	ln, err := l.StartListen()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mgraftcp: l.StartListen err: %s\n", err.Error())
-		os.Exit(1)
+		retCode = 1
+		return
 	}
 	defer ln.Close()
 
@@ -115,7 +122,8 @@ func main() {
 		dnsProxy, port, err = l.ListenDNSProxy(cfg.dnsServer)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "mgraftcp: %v\n", err)
-			os.Exit(1)
+			retCode = 1
+			return
 		}
 		defer dnsProxy.Close()
 		dnsPort = port
@@ -127,7 +135,8 @@ func main() {
 		udpProxy, port, err = l.ListenUDPProxy()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "mgraftcp: %v\n", err)
-			os.Exit(1)
+			retCode = 1
+			return
 		}
 		defer udpProxy.Close()
 		udpPort = port

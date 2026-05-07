@@ -2,6 +2,7 @@ package local
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -377,5 +378,5 @@ func parseSocks5UDPDatagram(packet []byte) ([]byte, error) {
 }
 
 func isClosedNetworkError(err error) bool {
-	return err != nil && (err == net.ErrClosed || err.Error() == "use of closed network connection")
+	return errors.Is(err, net.ErrClosed)
 }

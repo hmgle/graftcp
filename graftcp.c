@@ -204,8 +204,8 @@ static void load_ip_file(char *path, cidr_trie_t **trie)
 		while (read > 0 && isspace((unsigned char)line[read - 1]))
 			line[--read] = '\0';
 
-		/* 7 is the shortest ip: (x.x.x.x) */
-		if (read < 7)
+		/* skip empty lines; let the parser validate the rest */
+		if (read == 0)
 			continue;
 		if (*trie == NULL) {
 			*trie = cidr_trie_new();
@@ -830,7 +830,7 @@ int do_trace()
 		if (child < 0) {
 			if (errno == ECHILD)
 				return 0;
-			return 0;
+			return -1;
 		}
 		pinfp = find_proc_info(child);
 		if (!pinfp)

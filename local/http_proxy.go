@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"golang.org/x/net/proxy"
 )
@@ -65,7 +64,7 @@ func (h *httpDialer) Dial(network, addr string) (net.Conn, error) {
 	resp.Body.Close()
 	if resp.StatusCode != 200 {
 		conn.Close()
-		return nil, fmt.Errorf("connect proxy error: %v", strings.SplitN(resp.Status, " ", 2)[1])
+		return nil, fmt.Errorf("connect proxy error: %s", resp.Status)
 	}
 	return &bufferedConn{Conn: conn, r: r}, nil
 }
