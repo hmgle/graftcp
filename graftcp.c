@@ -188,6 +188,106 @@ static void build_dns_sockaddr6(struct sockaddr_in6 *sa6, uint16_t port)
 	sa6->sin6_addr.s6_addr[15] = 1;
 }
 
+static bool ip4_is_ignore(uint32_t ip);
+static bool ip6_is_ignore(uint8_t *ip);
+
+/* dest_endpoint normalizes a tracee's destination sockaddr. */
+struct dest_endpoint {
+	sa_family_t family;
+	union {
+		struct sockaddr_in v4;
+		struct sockaddr_in6 v6;
+	} sa;
+	socklen_t len;
+	uint16_t port;
+	char ipstr[INET6_ADDRSTRLEN];
+};
+
+/* read_dest_endpoint pulls a sockaddr from the tracee at addr/addrlen and
+ * fills the textual ip string for downstream registration. Returns false when
+ * the address family is unsupported or the read fails.
+ */
+static bool read_dest_endpoint(pid_t pid, long addr, long addrlen,
+			       struct dest_endpoint *out)
+{
+	sa_family_t family;
+
+	if (addr == 0 || addrlen < (long)sizeof(family))
+		return false;
+	if (getdata(pid, addr, &family, sizeof(family)) < 0)
+		return false;
+	memset(out, 0, sizeof(*out));
+	out->family = family;
+
+	switch (family) {
+	case AF_INET:
+		if (addrlen < (long)sizeof(out->sa.v4))
+			return false;
+		if (getdata(pid, addr, &out->sa.v4, sizeof(out->sa.v4)) < 0)
+			return false;
+		out->len = sizeof(out->sa.v4);
+		out->port = ntohs(SOCKPORT(out->sa.v4));
+		if (inet_ntop(AF_INET, &out->sa.v4.sin_addr, out->ipstr,
+			      sizeof(out->ipstr)) == NULL)
+			return false;
+		return true;
+	case AF_INET6:
+		if (addrlen < (long)sizeof(out->sa.v6))
+			return false;
+		if (getdata(pid, addr, &out->sa.v6, sizeof(out->sa.v6)) < 0)
+			return false;
+		out->len = sizeof(out->sa.v6);
+		out->port = ntohs(SOCKPORT6(out->sa.v6));
+		if (inet_ntop(AF_INET6, &out->sa.v6.sin6_addr, out->ipstr,
+			      sizeof(out->ipstr)) == NULL)
+			return false;
+		return true;
+	default:
+		return false;
+	}
+}
+
+/* dest_is_internal_proxy reports whether dest names one of the embedded
+ * loopback proxy listeners we just installed, so we don't recurse into
+ * ourselves.
+ */
+static bool dest_is_internal_proxy(const struct dest_endpoint *dest, bool stream)
+{
+	if (dest->family == AF_INET)
+		return is_internal_proxy_endpoint4(&dest->sa.v4, stream);
+	return is_internal_proxy_endpoint6(&dest->sa.v6, stream);
+}
+
+/* dest_is_in_ignore_list reports whether dest's address is on the user-supplied
+ * blacklist or outside the user-supplied whitelist.
+ */
+static bool dest_is_in_ignore_list(struct dest_endpoint *dest)
+{
+	if (dest->family == AF_INET)
+		return ip4_is_ignore(dest->sa.v4.sin_addr.s_addr);
+	return ip6_is_ignore(dest->sa.v6.sin6_addr.s6_addr);
+}
+
+/* write_loopback_token rewrites the tracee's destination sockaddr at addr to
+ * point at the loopback token, returning a pointer to the buffer that was
+ * written (so callers can save the original for restore_sockaddr_if_needed).
+ */
+static bool write_loopback_token(pid_t pid, long addr,
+				 const struct dest_endpoint *dest,
+				 uint32_t token, uint16_t loopback_port)
+{
+	if (dest->family == AF_INET) {
+		struct sockaddr_in proxy_sa;
+
+		build_loopback_sockaddr4(&proxy_sa, token, loopback_port);
+		return putdata(pid, addr, &proxy_sa, sizeof(proxy_sa)) == 0;
+	}
+	struct sockaddr_in6 proxy_sa6;
+
+	build_loopback_sockaddr6(&proxy_sa6, token, loopback_port);
+	return putdata(pid, addr, &proxy_sa6, sizeof(proxy_sa6)) == 0;
+}
+
 static void load_ip_file(char *path, cidr_trie_t **trie)
 {
 	FILE *f;
@@ -395,203 +495,89 @@ static void restore_sockaddr_if_needed(struct proc_info *pinfp)
 static bool rewrite_udp_sockaddr(struct proc_info *pinfp, long addr,
 				 long addrlen)
 {
-	pid_t pid;
-	sa_family_t family;
-	struct sockaddr_in dest_sa;
-	struct sockaddr_in6 dest_sa6;
-	struct sockaddr_in dns_sa;
-	struct sockaddr_in6 dns_sa6;
-	struct sockaddr_in proxy_sa;
-	struct sockaddr_in6 proxy_sa6;
-	unsigned short dest_ip_port;
-	char dest_str[INET6_ADDRSTRLEN];
-	char *dest_ip_addr_str;
+	struct dest_endpoint dest;
 	uint32_t loopback_token;
 
 	if (pinfp == NULL)
 		return false;
-	pid = pinfp->pid;
 	if ((DNS_PROXY_PORT == 0 && UDP_PROXY_PORT == 0) || addr == 0)
 		return false;
-	if (addrlen < (long)sizeof(family))
+	if (!read_dest_endpoint(pinfp->pid, addr, addrlen, &dest))
 		return false;
-	if (getdata(pid, addr, &family, sizeof(family)) < 0)
+	if (dest_is_internal_proxy(&dest, false))
 		return false;
 
-	if (family == AF_INET) {
-		if (addrlen < (long)sizeof(dest_sa))
-			return false;
-		if (getdata(pid, addr, &dest_sa, sizeof(dest_sa)) < 0)
-			return false;
-		dest_ip_port = SOCKPORT(dest_sa);
-		if (is_internal_proxy_endpoint4(&dest_sa, false))
-			return false;
-		if (DNS_PROXY_PORT != 0 && ntohs(dest_ip_port) == 53) {
+	if (DNS_PROXY_PORT != 0 && dest.port == 53) {
+		bool ok;
+
+		if (dest.family == AF_INET) {
+			struct sockaddr_in dns_sa;
+
 			build_loopback_sockaddr4(&dns_sa, 0x7f000001, DNS_PROXY_PORT);
-			if (putdata(pid, addr, &dns_sa, sizeof(dns_sa)) < 0) {
-				fprintf(stderr, "mgraftcp rewrite DNS UDP failed\n");
-			} else {
-				save_sockaddr_restore(pinfp, addr,
-						      &dest_sa, sizeof(dest_sa));
-			}
-			return true;
-		}
-		if (UDP_PROXY_PORT == 0 || ip4_is_ignore(dest_sa.sin_addr.s_addr))
-			return false;
-		if (inet_ntop(AF_INET, &dest_sa.sin_addr, dest_str,
-			      sizeof(dest_str)) == NULL)
-			return false;
-		dest_ip_addr_str = dest_str;
-		loopback_token = mgraftcp_register_udp(family,
-						       dest_ip_addr_str,
-						       ntohs(dest_ip_port));
-		if (loopback_token == 0) {
-			fprintf(stderr, "mgraftcp register UDP failed for %s:%d\n",
-				dest_ip_addr_str, ntohs(dest_ip_port));
-			return false;
-		}
-		build_loopback_sockaddr4(&proxy_sa, loopback_token,
-					 UDP_PROXY_PORT);
-		if (putdata(pid, addr, &proxy_sa, sizeof(proxy_sa)) < 0) {
-			fprintf(stderr, "mgraftcp rewrite UDP failed for %s:%d\n",
-				dest_ip_addr_str, ntohs(dest_ip_port));
-			mgraftcp_forget_udp(loopback_token);
+			ok = putdata(pinfp->pid, addr, &dns_sa, sizeof(dns_sa)) == 0;
 		} else {
-			save_sockaddr_restore(pinfp, addr, &dest_sa,
-					      sizeof(dest_sa));
-		}
-		return true;
-	} else if (family == AF_INET6) {
-		if (addrlen < (long)sizeof(dest_sa6))
-			return false;
-		if (getdata(pid, addr, &dest_sa6, sizeof(dest_sa6)) < 0)
-			return false;
-		dest_ip_port = SOCKPORT6(dest_sa6);
-		if (is_internal_proxy_endpoint6(&dest_sa6, false))
-			return false;
-		if (DNS_PROXY_PORT != 0 && ntohs(dest_ip_port) == 53) {
+			struct sockaddr_in6 dns_sa6;
+
 			build_dns_sockaddr6(&dns_sa6, DNS_PROXY_PORT);
-			if (putdata(pid, addr, &dns_sa6, sizeof(dns_sa6)) < 0) {
-				fprintf(stderr, "mgraftcp rewrite DNS UDP failed\n");
-			} else {
-				save_sockaddr_restore(pinfp, addr,
-						      &dest_sa6, sizeof(dest_sa6));
-			}
-			return true;
+			ok = putdata(pinfp->pid, addr, &dns_sa6, sizeof(dns_sa6)) == 0;
 		}
-		if (UDP_PROXY_PORT == 0 ||
-		    ip6_is_ignore(dest_sa6.sin6_addr.s6_addr))
-			return false;
-		if (inet_ntop(AF_INET6, &dest_sa6.sin6_addr, dest_str,
-			      sizeof(dest_str)) == NULL)
-			return false;
-		dest_ip_addr_str = dest_str;
-		loopback_token = mgraftcp_register_udp(family,
-						       dest_ip_addr_str,
-						       ntohs(dest_ip_port));
-		if (loopback_token == 0) {
-			fprintf(stderr, "mgraftcp register UDP failed for %s:%d\n",
-				dest_ip_addr_str, ntohs(dest_ip_port));
-			return false;
-		}
-		build_loopback_sockaddr6(&proxy_sa6, loopback_token,
-					 UDP_PROXY_PORT);
-		if (putdata(pid, addr, &proxy_sa6, sizeof(proxy_sa6)) < 0) {
-			fprintf(stderr, "mgraftcp rewrite UDP failed for %s:%d\n",
-				dest_ip_addr_str, ntohs(dest_ip_port));
-			mgraftcp_forget_udp(loopback_token);
+		if (!ok) {
+			fprintf(stderr, "mgraftcp rewrite DNS UDP failed\n");
 		} else {
-			save_sockaddr_restore(pinfp, addr, &dest_sa6,
-					      sizeof(dest_sa6));
+			save_sockaddr_restore(pinfp, addr, &dest.sa, dest.len);
 		}
 		return true;
 	}
-	return false;
+
+	if (UDP_PROXY_PORT == 0 || dest_is_in_ignore_list(&dest))
+		return false;
+
+	loopback_token = mgraftcp_register_udp(dest.family, dest.ipstr, dest.port);
+	if (loopback_token == 0) {
+		fprintf(stderr, "mgraftcp register UDP failed for %s:%d\n",
+			dest.ipstr, dest.port);
+		return false;
+	}
+	if (!write_loopback_token(pinfp->pid, addr, &dest, loopback_token,
+				  UDP_PROXY_PORT)) {
+		fprintf(stderr, "mgraftcp rewrite UDP failed for %s:%d\n",
+			dest.ipstr, dest.port);
+		mgraftcp_forget_udp(loopback_token);
+	} else {
+		save_sockaddr_restore(pinfp, addr, &dest.sa, dest.len);
+	}
+	return true;
 }
 
 static void tcp_connect_pre_handle(struct proc_info *pinfp)
 {
 	long addr = get_syscall_arg(pinfp->pid, 1);
 	long addrlen = get_syscall_arg(pinfp->pid, 2);
-	sa_family_t family;
-	struct sockaddr_in dest_sa;
-	struct sockaddr_in6 dest_sa6;
-	struct sockaddr_in proxy_sa;
-	struct sockaddr_in6 proxy_sa6;
-	unsigned short dest_ip_port;
-	char *dest_ip_addr_str;
-	char dest_str[INET6_ADDRSTRLEN];
+	struct dest_endpoint dest;
 	uint32_t loopback_token;
 
-	if (addrlen < (long)sizeof(family))
+	if (!read_dest_endpoint(pinfp->pid, addr, addrlen, &dest))
 		return;
-	if (getdata(pinfp->pid, addr, &family, sizeof(family)) < 0)
+	if (dest_is_internal_proxy(&dest, true))
+		return;
+	if (dest_is_in_ignore_list(&dest))
 		return;
 
-	if (family == AF_INET) { /* IPv4 */
-		if (addrlen < (long)sizeof(dest_sa))
-			return;
-		if (getdata(pinfp->pid, addr, &dest_sa, sizeof(dest_sa)) < 0)
-			return;
-		dest_ip_port = SOCKPORT(dest_sa);
-		if (inet_ntop(AF_INET, &dest_sa.sin_addr, dest_str,
-			      sizeof(dest_str)) == NULL)
-			return;
-		if (is_internal_proxy_endpoint4(&dest_sa, true))
-			return;
-		dest_ip_addr_str = dest_str;
-		if (ip4_is_ignore(dest_sa.sin_addr.s_addr))
-			return;
-	} else if (family == AF_INET6) { /* IPv6 */
-		if (addrlen < (long)sizeof(dest_sa6))
-			return;
-		if (getdata(pinfp->pid, addr, &dest_sa6, sizeof(dest_sa6)) < 0)
-			return;
-		dest_ip_port = SOCKPORT6(dest_sa6);
-		if (is_internal_proxy_endpoint6(&dest_sa6, true))
-			return;
-		if (ip6_is_ignore(dest_sa6.sin6_addr.s6_addr))
-			return;
-		if (inet_ntop(AF_INET6, &dest_sa6.sin6_addr, dest_str,
-			      sizeof(dest_str)) == NULL)
-			return;
-		dest_ip_addr_str = dest_str;
-	} else {
-		return;
-	}
-
-	loopback_token = mgraftcp_register_connect(family,
-						   dest_ip_addr_str,
-						   ntohs(dest_ip_port));
+	loopback_token = mgraftcp_register_connect(dest.family, dest.ipstr,
+						   dest.port);
 	if (loopback_token == 0) {
 		fprintf(stderr, "mgraftcp register connect failed for %s:%d\n",
-			dest_ip_addr_str, ntohs(dest_ip_port));
+			dest.ipstr, dest.port);
 		return;
 	}
-
-	if (family == AF_INET) { /* IPv4 */
-		build_loopback_sockaddr4(&proxy_sa, loopback_token,
-							 LOCAL_PROXY_PORT);
-		if (putdata(pinfp->pid, addr, &proxy_sa, sizeof(proxy_sa)) < 0) {
-			fprintf(stderr, "mgraftcp rewrite connect failed for %s:%d\n",
-				dest_ip_addr_str, ntohs(dest_ip_port));
-			mgraftcp_forget_connect(loopback_token);
-		} else {
-			save_sockaddr_restore(pinfp, addr, &dest_sa,
-					      sizeof(dest_sa));
-		}
-	} else { /* IPv6 */
-		build_loopback_sockaddr6(&proxy_sa6, loopback_token,
-							 LOCAL_PROXY_PORT);
-		if (putdata(pinfp->pid, addr, &proxy_sa6, sizeof(proxy_sa6)) < 0) {
-			fprintf(stderr, "mgraftcp rewrite connect failed for %s:%d\n",
-				dest_ip_addr_str, ntohs(dest_ip_port));
-			mgraftcp_forget_connect(loopback_token);
-		} else {
-			save_sockaddr_restore(pinfp, addr, &dest_sa6,
-					      sizeof(dest_sa6));
-		}
+	if (!write_loopback_token(pinfp->pid, addr, &dest, loopback_token,
+				  LOCAL_PROXY_PORT)) {
+		fprintf(stderr, "mgraftcp rewrite connect failed for %s:%d\n",
+			dest.ipstr, dest.port);
+		mgraftcp_forget_connect(loopback_token);
+		return;
 	}
+	save_sockaddr_restore(pinfp, addr, &dest.sa, dest.len);
 }
 
 void connect_pre_handle(struct proc_info *pinfp)

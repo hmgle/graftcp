@@ -51,20 +51,12 @@ static union {
 int get_syscall_number(pid_t pid)
 {
 #if defined(__x86_64__)
-#if 1
 	errno = 0;
 	int offset = offsetof(struct user, regs.orig_rax);
 	long val = ptrace(PTRACE_PEEKUSER, pid, offset);
 	if (errno != 0)
 		return -1;
 	return (int)val;
-#else			/* another way */
-	struct user_regs_struct regs;
-	errno = 0;
-	if (ptrace(PTRACE_GETREGS, pid, 0, &regs) < 0)
-		return -1;
-	return regs.orig_rax;
-#endif
 #elif defined(__i386__)
 	struct user_regs_struct regs;
 	errno = 0;
@@ -98,20 +90,12 @@ int get_syscall_number(pid_t pid)
 int get_retval(pid_t pid)
 {
 #if defined(__x86_64__)
-#if 1
 	errno = 0;
 	int offset = offsetof(struct user, regs.rax);
 	long val = ptrace(PTRACE_PEEKUSER, pid, offset);
 	if (errno != 0)
 		return -1;
 	return (int)val;
-#else			/* another way */
-	struct user_regs_struct regs;
-	errno = 0;
-	if (ptrace(PTRACE_GETREGS, pid, 0, &regs) < 0)
-		return -1;
-	return regs.rax;
-#endif
 #elif defined(__i386__)
 	errno = 0;
 	struct user_regs_struct regs;
@@ -193,32 +177,20 @@ long get_syscall_arg(pid_t pid, int order)
 {
 	long val;
 #if defined(__x86_64__)
-	int offset;
+	static const int x64_arg_offsets[] = {
+		offsetof(struct user, regs.rdi),
+		offsetof(struct user, regs.rsi),
+		offsetof(struct user, regs.rdx),
+		offsetof(struct user, regs.r10),
+		offsetof(struct user, regs.r8),
+		offsetof(struct user, regs.r9),
+	};
 
-	switch (order) {
-	case 0:
-		offset = offsetof(struct user, regs.rdi);
-		break;
-	case 1:
-		offset = offsetof(struct user, regs.rsi);
-		break;
-	case 2:
-		offset = offsetof(struct user, regs.rdx);
-		break;
-	case 3:
-		offset = offsetof(struct user, regs.r10);
-		break;
-	case 4:
-		offset = offsetof(struct user, regs.r8);
-		break;
-	case 5:
-		offset = offsetof(struct user, regs.r9);
-		break;
-	default:
+	if (order < 0 || order >= (int)(sizeof(x64_arg_offsets) /
+					sizeof(x64_arg_offsets[0])))
 		return -1;
-	}
 	errno = 0;
-	val = ptrace(PTRACE_PEEKUSER, pid, offset);
+	val = ptrace(PTRACE_PEEKUSER, pid, x64_arg_offsets[order]);
 	if (errno != 0)
 		return -1;
 #elif defined(__i386__)
