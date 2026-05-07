@@ -2,7 +2,7 @@ package main
 
 import (
 	"bufio"
-	"io"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -77,12 +77,12 @@ func (c *appConfig) set(key, val string) {
 		c.httpProxyAddr = val
 	case "select_proxy_mode":
 		c.selectProxyMode = val
-	case "dns_proxy", "enable_dns":
-		c.dnsProxy = parseBool(val, false)
+	case "dns_proxy", "enable_dns", "enable-dns":
+		setBoolField(&c.dnsProxy, val)
 	case "dns_server", "dns-server":
 		c.dnsServer = val
-	case "udp_proxy", "enable_udp":
-		c.udpProxy = parseBool(val, false)
+	case "udp_proxy", "enable_udp", "enable-udp":
+		setBoolField(&c.udpProxy, val)
 	case "blackip_file_path", "blackip-file":
 		c.blackIPFile = val
 	case "whiteip_file_path", "whiteip-file":
@@ -90,20 +90,29 @@ func (c *appConfig) set(key, val string) {
 	case "username":
 		c.userName = val
 	case "ignore_local":
-		c.notIgnoreLocal = !parseBool(val, true)
+		if b, ok := parseBool(val); ok {
+			c.notIgnoreLocal = !b
+		}
 	case "not_ignore_local", "not-ignore-local":
-		c.notIgnoreLocal = parseBool(val, false)
+		setBoolField(&c.notIgnoreLocal, val)
 	}
 }
 
-func parseBool(val string, defaultValue bool) bool {
+// parseBool reports the boolean meaning of val and whether it was recognized.
+func parseBool(val string) (bool, bool) {
 	switch strings.ToLower(strings.TrimSpace(val)) {
 	case "1", "true", "yes", "on":
-		return true
+		return true, true
 	case "0", "false", "no", "off":
-		return false
+		return false, true
 	default:
-		return defaultValue
+		return false, false
+	}
+}
+
+func setBoolField(dst *bool, val string) {
+	if b, ok := parseBool(val); ok {
+		*dst = b
 	}
 }
 
@@ -145,42 +154,12 @@ func parseLine(line string) (key, val string) {
 
 func (c *appConfig) parseConfigFile(path string) error {
 	if path == "" {
-		exePath := local.GetExePath()
-		defaultConf := filepath.Dir(exePath) + "/mgraftcp.conf"
-		if _, err := os.Stat(defaultConf); err == nil {
-			if c.enableDebugLog {
-				appLogger.Infof("find config: %s", defaultConf)
-			}
-			path = defaultConf
-			goto loadConf
-		}
-
-		var dotConf string
-		if xdgConfPath := os.Getenv("XDG_CONFIG_HOME"); xdgConfPath != "" {
-			dotConf = filepath.Join(xdgConfPath, "mgraftcp", "mgraftcp.conf")
-		} else if homeDir, err := os.UserHomeDir(); err == nil {
-			dotConf = filepath.Join(homeDir, ".config", "mgraftcp", "mgraftcp.conf")
-		}
-		if _, err := os.Stat(dotConf); err == nil {
-			if c.enableDebugLog {
-				appLogger.Infof("find config: %s", dotConf)
-			}
-			path = dotConf
-			goto loadConf
-		}
-
-		etcConf := "/etc/mgraftcp/mgraftcp.conf"
-		if _, err := os.Stat(etcConf); err == nil {
-			if c.enableDebugLog {
-				appLogger.Infof("find config: %s", etcConf)
-			}
-			path = etcConf
-		} else {
+		path = c.findDefaultConfigPath()
+		if path == "" {
 			return nil
 		}
 	}
 
-loadConf:
 	file, err := os.Open(path)
 	if err != nil {
 		if c.enableDebugLog {
@@ -195,27 +174,46 @@ loadConf:
 		flagset[opt.LongName()] = true
 		return true
 	})
-	reader := bufio.NewReader(file)
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			if err == io.EOF {
-				if k, v := parseLine(line); !configKeyOverriddenByFlag(flagset, k) {
-					c.set(k, v)
-				}
-				break
-			}
-			if c.enableDebugLog {
-				appLogger.Errorf("reader.ReadString('\\n') err: %s, path: %s", err.Error(), path)
-			}
-			return err
-		}
-		if k, v := parseLine(line); !configKeyOverriddenByFlag(flagset, k) {
-			c.set(k, v)
-		}
-	}
 
+	sc := bufio.NewScanner(file)
+	for sc.Scan() {
+		k, v := parseLine(sc.Text())
+		if k == "" || configKeyOverriddenByFlag(flagset, k) {
+			continue
+		}
+		c.set(k, v)
+	}
+	if err := sc.Err(); err != nil {
+		if c.enableDebugLog {
+			appLogger.Errorf("scan config %s err: %s", path, err.Error())
+		}
+		return fmt.Errorf("read config %s: %w", path, err)
+	}
 	return nil
+}
+
+// findDefaultConfigPath searches the conventional locations for an mgraftcp
+// configuration file and returns the first match, or "" when none exists.
+func (c *appConfig) findDefaultConfigPath() string {
+	candidates := []string{filepath.Join(filepath.Dir(local.GetExePath()), "mgraftcp.conf")}
+
+	if xdgConfPath := os.Getenv("XDG_CONFIG_HOME"); xdgConfPath != "" {
+		candidates = append(candidates, filepath.Join(xdgConfPath, "mgraftcp", "mgraftcp.conf"))
+	} else if homeDir, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates, filepath.Join(homeDir, ".config", "mgraftcp", "mgraftcp.conf"))
+	}
+	candidates = append(candidates, "/etc/mgraftcp/mgraftcp.conf")
+
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err != nil {
+			continue
+		}
+		if c.enableDebugLog {
+			appLogger.Infof("find config: %s", p)
+		}
+		return p
+	}
+	return ""
 }
 
 func (c appConfig) clientArgs(port int, dnsPort int, udpPort int, args []string) []string {

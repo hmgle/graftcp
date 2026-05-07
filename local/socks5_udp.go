@@ -228,23 +228,29 @@ func socks5UDPAssociate(conn net.Conn, proxyAddr string, bindAddr *net.UDPAddr) 
 	if _, err := conn.Write(req); err != nil {
 		return nil, err
 	}
-	atyp, host, port, err := readSocks5Reply(conn)
+	_, host, port, err := readSocks5Reply(conn)
 	if err != nil {
 		return nil, err
 	}
-	if host == "" || host == "0.0.0.0" || host == "::" {
+	if isUnspecifiedHost(host) {
 		if proxyHost, _, splitErr := net.SplitHostPort(proxyAddr); splitErr == nil {
 			host = proxyHost
 		}
 	}
-	if atyp == socks5AtypIPv4 {
-		if ip := net.ParseIP(host).To4(); ip != nil && ip.IsUnspecified() {
-			if proxyHost, _, splitErr := net.SplitHostPort(proxyAddr); splitErr == nil {
-				host = proxyHost
-			}
-		}
-	}
 	return net.ResolveUDPAddr("udp", net.JoinHostPort(host, strconv.Itoa(port)))
+}
+
+// isUnspecifiedHost reports whether host is empty or refers to the IPv4/IPv6
+// "any" address. The SOCKS5 spec lets relays advertise such addresses to mean
+// "use the same host you connected to me on".
+func isUnspecifiedHost(host string) bool {
+	if host == "" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
+		return true
+	}
+	return false
 }
 
 func encodeSocks5UDPAssociateRequest(bindAddr *net.UDPAddr) ([]byte, error) {
