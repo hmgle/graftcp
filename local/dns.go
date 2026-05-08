@@ -48,7 +48,7 @@ func (l *Local) ListenDNSProxy(upstream string) (*DNSProxy, int, error) {
 	if udp6, err := net.ListenUDP("udp6", &net.UDPAddr{IP: net.IPv6loopback, Port: port}); err == nil {
 		p.conns = append(p.conns, udp6)
 	} else {
-		log.Infof("DNS udp6 listener disabled on [::1]:%d: %s", port, err.Error())
+		log.Warnf("DNS udp6 listener disabled on [::1]:%d: %s", port, err.Error())
 	}
 
 	return p, port, nil

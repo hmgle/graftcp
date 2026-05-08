@@ -113,6 +113,20 @@ static void child_die_errno(const char *what)
 	_exit(err == 0 ? 1 : err);
 }
 
+/* xstrdup duplicates s and exits the process if allocation fails. The CLI
+ * setup paths are not in a position to recover from OOM and would otherwise
+ * each open-code the same perror+exit. */
+static char *xstrdup(const char *s)
+{
+	char *copy = strdup(s);
+
+	if (copy == NULL) {
+		perror("strdup");
+		exit(1);
+	}
+	return copy;
+}
+
 static bool port_matches(uint16_t port, uint16_t expected)
 {
 	return expected != 0 && ntohs(port) == expected;
@@ -322,16 +336,6 @@ static void load_ip_file(char *path, cidr_trie_t **trie)
 	}
 	free(line);
 	fclose(f);
-}
-
-static void load_blackip_file(char *path)
-{
-	load_ip_file(path, &BLACKLIST_IP);
-}
-
-static void load_whiteip_file(char *path)
-{
-	load_ip_file(path, &WHITELIST_IP);
 }
 
 static bool ip4_is_ignore(uint32_t ip)
@@ -997,28 +1001,16 @@ int client_prepare(int argc, char **argv)
 			udp_proxy_port = atoi(optarg);
 			break;
 		case 'b':
-			blackip_file_path = strdup(optarg);
-			if (blackip_file_path == NULL) {
-				perror("strdup");
-				exit(1);
-			}
+			blackip_file_path = xstrdup(optarg);
 			break;
 		case 'w':
-			whiteip_file_path = strdup(optarg);
-			if (whiteip_file_path == NULL) {
-				perror("strdup");
-				exit(1);
-			}
+			whiteip_file_path = xstrdup(optarg);
 			break;
 		case 'n':
 			ignore_local = false;
 			break;
 		case 'u':
-			username = strdup(optarg);
-			if (username == NULL) {
-				perror("strdup");
-				exit(1);
-			}
+			username = xstrdup(optarg);
 			break;
 		case 'V':
 			fprintf(stderr, "graftcp %s\n", VERSION);
@@ -1036,9 +1028,9 @@ int client_prepare(int argc, char **argv)
 	}
 
 	if (blackip_file_path)
-		load_blackip_file(blackip_file_path);
+		load_ip_file(blackip_file_path, &BLACKLIST_IP);
 	if (whiteip_file_path)
-		load_whiteip_file(whiteip_file_path);
+		load_ip_file(whiteip_file_path, &WHITELIST_IP);
 	if (ignore_local) {
 		if (BLACKLIST_IP == NULL)
 			BLACKLIST_IP = cidr_trie_new();
@@ -1074,20 +1066,12 @@ int client_prepare(int argc, char **argv)
 		run_uid = pent->pw_uid;
 		home = getenv("HOME");
 		if (home) {
-			saved_home = strdup(home);
-			if (saved_home == NULL) {
-				perror("strdup");
-				exit(1);
-			}
+			saved_home = xstrdup(home);
 		} else {
 			unset_home = true;
 		}
 		free(run_home);
-		run_home = strdup(pent->pw_dir);
-		if (run_home == NULL) {
-			perror("strdup");
-			exit(1);
-		}
+		run_home = xstrdup(pent->pw_dir);
 		prepare_run_groups(username, run_gid);
 		if (setenv("HOME", run_home, 1) < 0) {
 			perror("setenv");

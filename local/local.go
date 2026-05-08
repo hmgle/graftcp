@@ -147,17 +147,11 @@ func (l *Local) ConfigureHTTPProxy(addr string) {
 
 // Registry exposes the route registry used by the local proxy listener.
 func (l *Local) Registry() *RouteRegistry {
-	if l == nil {
-		return nil
-	}
 	return l.routes
 }
 
 // UDPRegistry exposes the datagram route registry used by the local UDP proxy.
 func (l *Local) UDPRegistry() *DatagramRouteRegistry {
-	if l == nil {
-		return nil
-	}
 	return l.udpRoutes
 }
 
@@ -180,9 +174,6 @@ func (l *Local) SetSelectMode(mode string) error {
 }
 
 func (l *Local) proxySelector() proxy.Dialer {
-	if l == nil {
-		return nil
-	}
 	switch l.selectMode {
 	case AutoSelectMode:
 		if l.socks5Dialer != nil {
