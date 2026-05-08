@@ -80,51 +80,69 @@ func NewLocal(listenAddr, socks5Addr, socks5Username, socks5PassWord, httpProxyA
 	return local, nil
 }
 
-// ConfigureProxy configures the upstream proxy dialers used by the local listener.
+// ConfigureProxy configures the upstream proxy dialers used by the local
+// listener. Both halves are independent; passing an empty address clears the
+// corresponding dialer without touching the other one. Errors in either
+// configuration step are logged and the dialer is left unset so the caller
+// can keep running with whatever upstreams remain.
 func (l *Local) ConfigureProxy(socks5Addr, socks5Username, socks5PassWord, httpProxyAddr string) {
+	l.ConfigureSOCKS5(socks5Addr, socks5Username, socks5PassWord)
+	l.ConfigureHTTPProxy(httpProxyAddr)
+}
+
+// ConfigureSOCKS5 installs (or clears) the SOCKS5 dialer.
+func (l *Local) ConfigureSOCKS5(addr, username, password string) {
 	l.socks5Dialer = nil
-	l.httpProxyDialer = nil
 	l.socks5Addr = ""
 	l.socks5Username = ""
 	l.socks5Password = ""
 
-	if socks5Addr != "" {
-		socks5TCPAddr, err := net.ResolveTCPAddr("tcp", socks5Addr)
-		if err != nil {
-			log.Errorf("resolve socks5 proxy %q: %s", socks5Addr, err.Error())
-		} else {
-			var auth *proxy.Auth
-			if socks5Username != "" {
-				auth = &proxy.Auth{
-					User:     socks5Username,
-					Password: socks5PassWord,
-				}
-			}
-			dialerSocks5, err := proxy.SOCKS5("tcp", socks5TCPAddr.String(), auth, proxy.Direct)
-			if err != nil {
-				log.Errorf("proxy.SOCKS5(%s) fail: %s", socks5TCPAddr.String(), err.Error())
-			} else {
-				l.socks5Dialer = dialerSocks5
-				l.socks5Addr = socks5TCPAddr.String()
-				l.socks5Username = socks5Username
-				l.socks5Password = socks5PassWord
-			}
-		}
+	if addr == "" {
+		return
 	}
-	if httpProxyAddr != "" {
-		httpProxyTCPAddr, err := net.ResolveTCPAddr("tcp", httpProxyAddr)
-		if err != nil {
-			log.Errorf("resolve http proxy %q: %s", httpProxyAddr, err.Error())
-		} else {
-			httpProxyURI, _ := url.Parse("http://" + httpProxyTCPAddr.String())
-			dialerHTTPProxy, err := proxy.FromURL(httpProxyURI, proxy.Direct)
-			if err != nil {
-				log.Errorf("proxy.FromURL(%v) err: %s", httpProxyURI, err.Error())
-			} else {
-				l.httpProxyDialer = dialerHTTPProxy
-			}
-		}
+	tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
+	if err != nil {
+		log.Errorf("resolve socks5 proxy %q: %s", addr, err.Error())
+		return
 	}
+	var auth *proxy.Auth
+	if username != "" {
+		auth = &proxy.Auth{User: username, Password: password}
+	}
+	dialer, err := proxy.SOCKS5("tcp", tcpAddr.String(), auth, proxy.Direct)
+	if err != nil {
+		log.Errorf("proxy.SOCKS5(%s) fail: %s", tcpAddr.String(), err.Error())
+		return
+	}
+	l.socks5Dialer = dialer
+	l.socks5Addr = tcpAddr.String()
+	l.socks5Username = username
+	l.socks5Password = password
+}
+
+// ConfigureHTTPProxy installs (or clears) the HTTP CONNECT dialer.
+func (l *Local) ConfigureHTTPProxy(addr string) {
+	l.httpProxyDialer = nil
+
+	if addr == "" {
+		return
+	}
+	tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
+	if err != nil {
+		log.Errorf("resolve http proxy %q: %s", addr, err.Error())
+		return
+	}
+	uri, err := url.Parse("http://" + tcpAddr.String())
+	if err != nil {
+		log.Errorf("parse http proxy URL: %s", err.Error())
+		return
+	}
+	dialer, err := proxy.FromURL(uri, proxy.Direct)
+	if err != nil {
+		log.Errorf("proxy.FromURL(%v) err: %s", uri, err.Error())
+		return
+	}
+	l.httpProxyDialer = dialer
 }
 
 // Registry exposes the route registry used by the local proxy listener.
@@ -143,22 +161,21 @@ func (l *Local) UDPRegistry() *DatagramRouteRegistry {
 	return l.udpRoutes
 }
 
+var selectModes = map[string]modeT{
+	"auto":            AutoSelectMode,
+	"random":          RandomSelectMode,
+	"only_http_proxy": OnlyHTTPProxyMode,
+	"only_socks5":     OnlySocks5Mode,
+	"direct":          DirectMode,
+}
+
 // SetSelectMode set the select mode for l.
 func (l *Local) SetSelectMode(mode string) error {
-	switch mode {
-	case "auto":
-		l.selectMode = AutoSelectMode
-	case "random":
-		l.selectMode = RandomSelectMode
-	case "only_http_proxy":
-		l.selectMode = OnlyHTTPProxyMode
-	case "only_socks5":
-		l.selectMode = OnlySocks5Mode
-	case "direct":
-		l.selectMode = DirectMode
-	default:
+	m, ok := selectModes[mode]
+	if !ok {
 		return fmt.Errorf("unknown proxy selection mode %q", mode)
 	}
+	l.selectMode = m
 	return nil
 }
 
@@ -282,31 +299,34 @@ func (l *Local) HandleConn(conn *net.TCPConn) error {
 		conn.Close()
 		return err
 	}
-	readChan, writeChan := make(chan int64), make(chan int64)
-	go pipe(conn, destConn, writeChan)
-	go pipe(destConn, conn, readChan)
-	<-writeChan
-	<-readChan
-	conn.Close()
-	destConn.Close()
+	defer conn.Close()
+	defer destConn.Close()
+	relay(conn, destConn)
 	return nil
 }
 
-func pipe(dst, src net.Conn, c chan int64) {
-	n, err := io.Copy(dst, src)
-	if err == nil || errors.Is(err, io.EOF) {
-		type closeWriter interface {
-			CloseWrite() error
-		}
-		if cw, ok := dst.(closeWriter); ok {
-			_ = cw.CloseWrite()
-		}
-		c <- n
-		return
-	}
+// relay copies bytes in both directions between a and b until both sides are
+// done. The first side to finish triggers a deadline on both connections so
+// the still-blocked Read returns promptly; the second receive then unblocks.
+func relay(a, b net.Conn) {
+	errc := make(chan error, 2)
+	go func() { errc <- copyAndCloseWrite(a, b) }()
+	go func() { errc <- copyAndCloseWrite(b, a) }()
 
+	<-errc
 	now := time.Now()
-	_ = dst.SetDeadline(now)
-	_ = src.SetDeadline(now)
-	c <- n
+	_ = a.SetDeadline(now)
+	_ = b.SetDeadline(now)
+	<-errc
+}
+
+func copyAndCloseWrite(dst, src net.Conn) error {
+	_, err := io.Copy(dst, src)
+	type closeWriter interface {
+		CloseWrite() error
+	}
+	if cw, ok := dst.(closeWriter); ok {
+		_ = cw.CloseWrite()
+	}
+	return err
 }

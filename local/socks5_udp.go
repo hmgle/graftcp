@@ -1,6 +1,7 @@
 package local
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -36,7 +37,7 @@ type socks5UDPAssociation struct {
 	relayAddr *net.UDPAddr
 }
 
-func (l *Local) newSocks5UDPForwarder(proxy *UDPProxy, clientAddr *net.UDPAddr, tokenIP net.IP, destAddr string) (*socks5UDPForwarder, error) {
+func (l *Local) newSocks5UDPForwarder(proxy *UDPProxy, clientAddr *net.UDPAddr, tokenIP net.IP, destAddr string) (udpForwarder, error) {
 	if l.socks5Addr == "" {
 		return nil, fmt.Errorf("SOCKS5 proxy is not configured")
 	}
@@ -254,12 +255,11 @@ func isUnspecifiedHost(host string) bool {
 }
 
 func encodeSocks5UDPAssociateRequest(bindAddr *net.UDPAddr) ([]byte, error) {
-	req := []byte{socks5Version, socks5CmdUDP, 0x00}
-	port := 0
+	var port uint16
 	atyp := byte(socks5AtypIPv4)
 	addr := []byte{0x00, 0x00, 0x00, 0x00}
 	if bindAddr != nil {
-		port = bindAddr.Port
+		port = uint16(bindAddr.Port)
 		if ip4 := bindAddr.IP.To4(); ip4 != nil {
 			addr = ip4
 		} else if ip16 := bindAddr.IP.To16(); ip16 != nil {
@@ -269,12 +269,15 @@ func encodeSocks5UDPAssociateRequest(bindAddr *net.UDPAddr) ([]byte, error) {
 			return nil, fmt.Errorf("invalid SOCKS5 UDP bind IP %q", bindAddr.IP.String())
 		}
 	}
-	req = append(req, atyp)
-	req = append(req, addr...)
-	var portBuf [2]byte
-	binary.BigEndian.PutUint16(portBuf[:], uint16(port))
-	req = append(req, portBuf[:]...)
-	return req, nil
+	var buf bytes.Buffer
+	buf.Grow(3 + 1 + len(addr) + 2)
+	buf.WriteByte(socks5Version)
+	buf.WriteByte(socks5CmdUDP)
+	buf.WriteByte(0x00)
+	buf.WriteByte(atyp)
+	buf.Write(addr)
+	_ = binary.Write(&buf, binary.BigEndian, port)
+	return buf.Bytes(), nil
 }
 
 func readSocks5Reply(conn net.Conn) (byte, string, int, error) {
@@ -333,21 +336,24 @@ func encodeSocks5UDPDatagram(dest *net.UDPAddr, payload []byte) ([]byte, error) 
 	if dest == nil {
 		return nil, fmt.Errorf("nil SOCKS5 UDP destination")
 	}
-	packet := []byte{0x00, 0x00, 0x00}
+	var atyp byte
+	var addr []byte
 	if ip4 := dest.IP.To4(); ip4 != nil {
-		packet = append(packet, socks5AtypIPv4)
-		packet = append(packet, ip4...)
+		atyp = socks5AtypIPv4
+		addr = ip4
 	} else if ip16 := dest.IP.To16(); ip16 != nil {
-		packet = append(packet, socks5AtypIPv6)
-		packet = append(packet, ip16...)
+		atyp = socks5AtypIPv6
+		addr = ip16
 	} else {
 		return nil, fmt.Errorf("invalid SOCKS5 UDP destination IP %q", dest.IP.String())
 	}
-	var portBuf [2]byte
-	binary.BigEndian.PutUint16(portBuf[:], uint16(dest.Port))
-	packet = append(packet, portBuf[:]...)
-	packet = append(packet, payload...)
-	return packet, nil
+	var buf bytes.Buffer
+	buf.Grow(3 + 1 + len(addr) + 2 + len(payload))
+	buf.Write([]byte{0x00, 0x00, 0x00, atyp})
+	buf.Write(addr)
+	_ = binary.Write(&buf, binary.BigEndian, uint16(dest.Port))
+	buf.Write(payload)
+	return buf.Bytes(), nil
 }
 
 func parseSocks5UDPDatagram(packet []byte) ([]byte, error) {

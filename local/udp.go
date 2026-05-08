@@ -311,17 +311,9 @@ func (l *Local) newUDPForwarder(proxy *UDPProxy, clientAddr *net.UDPAddr, tokenI
 	case OnlyHTTPProxyMode:
 		return nil, fmt.Errorf("HTTP proxy mode does not support UDP")
 	case DirectMode:
-		forwarder, err := newDirectUDPForwarder(proxy, clientAddr, tokenIP, destAddr)
-		if err != nil {
-			return nil, err
-		}
-		return forwarder, nil
+		return newDirectUDPForwarder(proxy, clientAddr, tokenIP, destAddr)
 	case OnlySocks5Mode:
-		forwarder, err := l.newSocks5UDPForwarder(proxy, clientAddr, tokenIP, destAddr)
-		if err != nil {
-			return nil, err
-		}
-		return forwarder, nil
+		return l.newSocks5UDPForwarder(proxy, clientAddr, tokenIP, destAddr)
 	default:
 		if l.socks5Addr != "" {
 			forwarder, err := l.newSocks5UDPForwarder(proxy, clientAddr, tokenIP, destAddr)
@@ -330,11 +322,7 @@ func (l *Local) newUDPForwarder(proxy *UDPProxy, clientAddr *net.UDPAddr, tokenI
 			}
 			log.Infof("SOCKS5 UDP associate failed for %s, fallback direct: %s", destAddr, err.Error())
 		}
-		forwarder, err := newDirectUDPForwarder(proxy, clientAddr, tokenIP, destAddr)
-		if err != nil {
-			return nil, err
-		}
-		return forwarder, nil
+		return newDirectUDPForwarder(proxy, clientAddr, tokenIP, destAddr)
 	}
 }
 
@@ -348,7 +336,7 @@ type directUDPForwarder struct {
 	closed    chan struct{}
 }
 
-func newDirectUDPForwarder(proxy *UDPProxy, clientAddr *net.UDPAddr, tokenIP net.IP, destAddr string) (*directUDPForwarder, error) {
+func newDirectUDPForwarder(proxy *UDPProxy, clientAddr *net.UDPAddr, tokenIP net.IP, destAddr string) (udpForwarder, error) {
 	destUDPAddr, err := net.ResolveUDPAddr("udp", destAddr)
 	if err != nil {
 		return nil, fmt.Errorf("resolve UDP destination %q: %w", destAddr, err)
