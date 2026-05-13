@@ -40,29 +40,46 @@ func TestConfigUDPOptions(t *testing.T) {
 }
 
 func TestDNSConfigFlagOverrides(t *testing.T) {
-	flagset := map[string]bool{"enable-dns": true}
-	if !configKeyOverriddenByFlag(flagset, "dns_proxy") {
-		t.Fatal("enable-dns did not override dns_proxy config")
+	cases := []struct {
+		name    string
+		flagset map[string]bool
+		keys    []string
+	}{
+		{
+			name:    "enable dns",
+			flagset: map[string]bool{"enable-dns": true},
+			keys:    []string{"dns_proxy", "enable_dns", "enable-dns"},
+		},
+		{
+			name:    "disable dns",
+			flagset: map[string]bool{"disable-dns": true},
+			keys:    []string{"dns_proxy", "enable_dns", "enable-dns"},
+		},
+		{
+			name:    "dns server",
+			flagset: map[string]bool{"dns-server": true},
+			keys:    []string{"dns_server", "dns-server"},
+		},
+		{
+			name:    "enable udp",
+			flagset: map[string]bool{"enable-udp": true},
+			keys:    []string{"udp_proxy", "enable_udp", "enable-udp"},
+		},
+		{
+			name:    "disable udp",
+			flagset: map[string]bool{"disable-udp": true},
+			keys:    []string{"udp_proxy", "enable_udp", "enable-udp"},
+		},
 	}
 
-	flagset = map[string]bool{"disable-dns": true}
-	if !configKeyOverriddenByFlag(flagset, "enable_dns") {
-		t.Fatal("disable-dns did not override enable_dns config")
-	}
-
-	flagset = map[string]bool{"dns-server": true}
-	if !configKeyOverriddenByFlag(flagset, "dns_server") {
-		t.Fatal("dns-server did not override dns_server config")
-	}
-
-	flagset = map[string]bool{"enable-udp": true}
-	if !configKeyOverriddenByFlag(flagset, "udp_proxy") {
-		t.Fatal("enable-udp did not override udp_proxy config")
-	}
-
-	flagset = map[string]bool{"disable-udp": true}
-	if !configKeyOverriddenByFlag(flagset, "enable_udp") {
-		t.Fatal("disable-udp did not override enable_udp config")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, key := range tc.keys {
+				if !configKeyOverriddenByFlag(tc.flagset, key) {
+					t.Fatalf("%v did not override %s config", tc.flagset, key)
+				}
+			}
+		})
 	}
 }
 

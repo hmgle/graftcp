@@ -122,7 +122,7 @@ func configKeyOverriddenByFlag(flagset map[string]bool, key string) bool {
 		return true
 	}
 
-	switch key {
+	switch strings.ReplaceAll(key, "-", "_") {
 	case "blackip_file_path":
 		return flagset["blackip-file"]
 	case "whiteip_file_path":
