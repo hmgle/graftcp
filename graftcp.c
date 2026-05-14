@@ -382,6 +382,8 @@ static bool ip6_is_ignore(uint8_t *ip)
 #endif
 #define SECCOMP_SOCKET_ARG_FILTER_LEN 7
 #define SECCOMP_JUMP_OFFSET(from, to) ((to) - (from) - 1)
+#define SECCOMP_LAYOUT_CHECK(name, expr)				\
+	enum { name = 1 / !!(expr) }
 /*
  * These checks only need the low 32 bits of seccomp_data.args[]. Keep
  * SECCOMP_SOCKET_ARG_FILTER_LEN in sync with this macro, and keep the macro
@@ -459,6 +461,8 @@ static void install_seccomp()
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
 	};
+	SECCOMP_LAYOUT_CHECK(filter_layout_check,
+			     ARRAY_SIZE(filter) == FILTER_RET_ALLOW + 1);
 	struct sock_fprog prog = {
 		.len = (unsigned short)ARRAY_SIZE(filter),
 		.filter = filter,
@@ -510,6 +514,9 @@ static void install_seccomp()
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
 	};
+	SECCOMP_LAYOUT_CHECK(udp_filter_layout_check,
+			     ARRAY_SIZE(udp_filter) ==
+			     UDP_FILTER_RET_ALLOW + 1);
 	struct sock_fprog udp_prog = {
 		.len = (unsigned short)ARRAY_SIZE(udp_filter),
 		.filter = udp_filter,
