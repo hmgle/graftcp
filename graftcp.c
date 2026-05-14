@@ -373,18 +373,61 @@ static bool ip6_is_ignore(uint8_t *ip)
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 #endif
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#define SECCOMP_ARG_LO32_OFFSET(arg)					\
+	(offsetof(struct seccomp_data, args[arg]) + sizeof(uint32_t))
+#else
+#define SECCOMP_ARG_LO32_OFFSET(arg)					\
+	offsetof(struct seccomp_data, args[arg])
+#endif
+#define SECCOMP_SOCKET_ARG_FILTER_LEN 7
+#define SECCOMP_JUMP_OFFSET(from, to) ((to) - (from) - 1)
+/*
+ * These checks only need the low 32 bits of seccomp_data.args[]. Keep
+ * SECCOMP_SOCKET_ARG_FILTER_LEN in sync with this macro, and keep the macro
+ * immediately followed by RET TRACE and then RET ALLOW: its internal jumps
+ * target those two return instructions by relative offset.
+ */
 #define SECCOMP_SOCKET_ARG_FILTER					\
 	BPF_STMT(BPF_LD | BPF_W | BPF_ABS,				\
-		 offsetof(struct seccomp_data, args[0])),		\
+		 SECCOMP_ARG_LO32_OFFSET(0)),				\
 	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AF_INET, 1, 0),		\
 	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AF_INET6, 0, 5),	\
 	BPF_STMT(BPF_LD | BPF_W | BPF_ABS,				\
-		 offsetof(struct seccomp_data, args[1])),		\
+		 SECCOMP_ARG_LO32_OFFSET(1)),				\
 	BPF_STMT(BPF_ALU | BPF_AND | BPF_K, SOCK_TYPE_MASK),		\
 	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SOCK_STREAM, 1, 0),	\
 	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SOCK_DGRAM, 0, 1)
 static void install_seccomp()
 {
+	enum {
+		FILTER_LD_NR,
+		FILTER_CLOSE,
+		FILTER_SOCKET,
+		FILTER_CONNECT,
+	#if defined(__x86_64__)
+		FILTER_CLONE,
+	#endif
+		FILTER_SOCKET_ARGS,
+		FILTER_RET_TRACE =
+			FILTER_SOCKET_ARGS + SECCOMP_SOCKET_ARG_FILTER_LEN,
+		FILTER_RET_ALLOW,
+	};
+	enum {
+		UDP_FILTER_LD_NR,
+		UDP_FILTER_CLOSE,
+		UDP_FILTER_SOCKET,
+		UDP_FILTER_CONNECT,
+		UDP_FILTER_SENDTO,
+		UDP_FILTER_SENDMSG,
+	#if defined(__x86_64__)
+		UDP_FILTER_CLONE,
+	#endif
+		UDP_FILTER_SOCKET_ARGS,
+		UDP_FILTER_RET_TRACE =
+			UDP_FILTER_SOCKET_ARGS + SECCOMP_SOCKET_ARG_FILTER_LEN,
+		UDP_FILTER_RET_ALLOW,
+	};
 	/*
 	 * Trace socket() only for IPv4/IPv6 stream or datagram sockets. The
 	 * syscall handlers still do the stateful checks after ptrace has access
@@ -394,14 +437,23 @@ static void install_seccomp()
 		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
 				(offsetof(struct seccomp_data, nr))),
 #if defined(__x86_64__)
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close, 10, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket, 2, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect, 8, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_clone, 7, 8),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close,
+			 SECCOMP_JUMP_OFFSET(FILTER_CLOSE, FILTER_RET_TRACE), 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket,
+			 SECCOMP_JUMP_OFFSET(FILTER_SOCKET, FILTER_SOCKET_ARGS), 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect,
+			 SECCOMP_JUMP_OFFSET(FILTER_CONNECT, FILTER_RET_TRACE), 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_clone,
+			 SECCOMP_JUMP_OFFSET(FILTER_CLONE, FILTER_RET_TRACE),
+			 SECCOMP_JUMP_OFFSET(FILTER_CLONE, FILTER_RET_ALLOW)),
 #else
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close, 9, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket, 1, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect, 7, 8),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close,
+			 SECCOMP_JUMP_OFFSET(FILTER_CLOSE, FILTER_RET_TRACE), 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket,
+			 SECCOMP_JUMP_OFFSET(FILTER_SOCKET, FILTER_SOCKET_ARGS), 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect,
+			 SECCOMP_JUMP_OFFSET(FILTER_CONNECT, FILTER_RET_TRACE),
+			 SECCOMP_JUMP_OFFSET(FILTER_CONNECT, FILTER_RET_ALLOW)),
 #endif
 		SECCOMP_SOCKET_ARG_FILTER,
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
@@ -415,18 +467,44 @@ static void install_seccomp()
 		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
 				(offsetof(struct seccomp_data, nr))),
 #if defined(__x86_64__)
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close, 12, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket, 4, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect, 10, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendto, 9, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendmsg, 8, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_clone, 7, 8),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close,
+			 SECCOMP_JUMP_OFFSET(UDP_FILTER_CLOSE,
+					     UDP_FILTER_RET_TRACE), 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket,
+			 SECCOMP_JUMP_OFFSET(UDP_FILTER_SOCKET,
+					     UDP_FILTER_SOCKET_ARGS), 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect,
+			 SECCOMP_JUMP_OFFSET(UDP_FILTER_CONNECT,
+					     UDP_FILTER_RET_TRACE), 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendto,
+			 SECCOMP_JUMP_OFFSET(UDP_FILTER_SENDTO,
+					     UDP_FILTER_RET_TRACE), 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendmsg,
+			 SECCOMP_JUMP_OFFSET(UDP_FILTER_SENDMSG,
+					     UDP_FILTER_RET_TRACE), 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_clone,
+			 SECCOMP_JUMP_OFFSET(UDP_FILTER_CLONE,
+					     UDP_FILTER_RET_TRACE),
+			 SECCOMP_JUMP_OFFSET(UDP_FILTER_CLONE,
+					     UDP_FILTER_RET_ALLOW)),
 #else
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close, 11, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket, 3, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect, 9, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendto, 8, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendmsg, 7, 8),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close,
+			 SECCOMP_JUMP_OFFSET(UDP_FILTER_CLOSE,
+					     UDP_FILTER_RET_TRACE), 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket,
+			 SECCOMP_JUMP_OFFSET(UDP_FILTER_SOCKET,
+					     UDP_FILTER_SOCKET_ARGS), 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect,
+			 SECCOMP_JUMP_OFFSET(UDP_FILTER_CONNECT,
+					     UDP_FILTER_RET_TRACE), 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendto,
+			 SECCOMP_JUMP_OFFSET(UDP_FILTER_SENDTO,
+					     UDP_FILTER_RET_TRACE), 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendmsg,
+			 SECCOMP_JUMP_OFFSET(UDP_FILTER_SENDMSG,
+					     UDP_FILTER_RET_TRACE),
+			 SECCOMP_JUMP_OFFSET(UDP_FILTER_SENDMSG,
+					     UDP_FILTER_RET_ALLOW)),
 #endif
 		SECCOMP_SOCKET_ARG_FILTER,
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
@@ -471,10 +549,12 @@ void socket_pre_handle(struct proc_info *pinfp)
 		return;
 #endif
 	if (socket_type == SOCK_DGRAM) {
-		int protocol = get_syscall_arg(pinfp->pid, 2);
+		int protocol;
 
 		if (DNS_PROXY_PORT == 0 && UDP_PROXY_PORT == 0)
 			return;
+
+		protocol = get_syscall_arg(pinfp->pid, 2);
 		if (protocol != 0 && protocol != IPPROTO_UDP)
 			return;
 	}
