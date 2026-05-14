@@ -96,51 +96,28 @@ void untrack_socket_fd(struct proc_info *pinfp, int fd)
 		pinfp->tracked_sockets[--pinfp->tracked_socket_count];
 }
 
-#define PROC_INFO_BUCKETS 256U
-
-static struct proc_info *PROC_INFO_BUCKETS_TBL[PROC_INFO_BUCKETS];
-
-static unsigned int proc_info_bucket(pid_t pid)
-{
-	return ((unsigned int)pid) & (PROC_INFO_BUCKETS - 1);
-}
-
-static struct proc_info **find_proc_info_slot(pid_t pid)
-{
-	struct proc_info **slot = &PROC_INFO_BUCKETS_TBL[proc_info_bucket(pid)];
-
-	while (*slot != NULL && (*slot)->pid != pid)
-		slot = &(*slot)->next;
-	return slot;
-}
+static struct proc_info *PROC_INFO_TAB;
 
 static void add_proc_info(struct proc_info *p)
 {
-	struct proc_info **head;
-
 	if (p == NULL)
 		return;
-	head = &PROC_INFO_BUCKETS_TBL[proc_info_bucket(p->pid)];
-	p->next = *head;
-	*head = p;
+	HASH_ADD(hh, PROC_INFO_TAB, pid, sizeof(p->pid), p);
 }
 
 static void del_proc_info(struct proc_info *p)
 {
-	struct proc_info **slot;
-
 	if (p == NULL)
 		return;
-	slot = find_proc_info_slot(p->pid);
-	if (*slot == p)
-		*slot = p->next;
+	HASH_DEL(PROC_INFO_TAB, p);
 }
 
 struct proc_info *find_proc_info(pid_t pid)
 {
-	struct proc_info **slot = find_proc_info_slot(pid);
+	struct proc_info *p;
 
-	return *slot;
+	HASH_FIND(hh, PROC_INFO_TAB, &pid, sizeof(pid), p);
+	return p;
 }
 
 struct proc_info *alloc_proc_info(pid_t pid)

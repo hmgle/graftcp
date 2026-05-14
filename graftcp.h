@@ -44,6 +44,8 @@
 #include <fcntl.h>
 #include <assert.h>
 
+#include "uthash.h"
+
 #ifndef SOCK_TYPE_MASK
 #define SOCK_TYPE_MASK 0xf
 #endif
@@ -118,7 +120,7 @@ struct proc_info {
 	unsigned int tracked_socket_count;
 	unsigned int tracked_socket_cap;
 	struct tracked_socket *tracked_sockets;
-	struct proc_info *next;
+	UT_hash_handle hh;
 };
 
 struct proc_info *find_proc_info(pid_t pid);
