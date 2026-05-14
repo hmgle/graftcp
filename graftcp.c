@@ -373,25 +373,37 @@ static bool ip6_is_ignore(uint8_t *ip)
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 #endif
+#define SECCOMP_SOCKET_ARG_FILTER					\
+	BPF_STMT(BPF_LD | BPF_W | BPF_ABS,				\
+		 offsetof(struct seccomp_data, args[0])),		\
+	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AF_INET, 1, 0),		\
+	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AF_INET6, 0, 5),	\
+	BPF_STMT(BPF_LD | BPF_W | BPF_ABS,				\
+		 offsetof(struct seccomp_data, args[1])),		\
+	BPF_STMT(BPF_ALU | BPF_AND | BPF_K, SOCK_TYPE_MASK),		\
+	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SOCK_STREAM, 1, 0),	\
+	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SOCK_DGRAM, 0, 1)
 static void install_seccomp()
 {
 	/*
-	 * Keep the filter deliberately small. The syscall handlers do the
-	 * detailed argument filtering after ptrace has access to registers.
+	 * Trace socket() only for IPv4/IPv6 stream or datagram sockets. The
+	 * syscall handlers still do the stateful checks after ptrace has access
+	 * to registers.
 	 */
 	struct sock_filter filter[] = {
 		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
 				(offsetof(struct seccomp_data, nr))),
 #if defined(__x86_64__)
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close, 3, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close, 10, 0),
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket, 2, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect, 1, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_clone, 0, 1),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect, 8, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_clone, 7, 8),
 #else
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close, 2, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close, 9, 0),
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket, 1, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect, 0, 1),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect, 7, 8),
 #endif
+		SECCOMP_SOCKET_ARG_FILTER,
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
 	};
@@ -403,19 +415,20 @@ static void install_seccomp()
 		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
 				(offsetof(struct seccomp_data, nr))),
 #if defined(__x86_64__)
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close, 5, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close, 12, 0),
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket, 4, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect, 3, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendto, 2, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendmsg, 1, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_clone, 0, 1),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect, 10, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendto, 9, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendmsg, 8, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_clone, 7, 8),
 #else
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close, 4, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close, 11, 0),
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket, 3, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect, 2, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendto, 1, 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendmsg, 0, 1),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect, 9, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendto, 8, 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendmsg, 7, 8),
 #endif
+		SECCOMP_SOCKET_ARG_FILTER,
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
 	};
@@ -449,17 +462,22 @@ void socket_pre_handle(struct proc_info *pinfp)
 {
 	int domain = get_syscall_arg(pinfp->pid, 0);
 	int type = get_syscall_arg(pinfp->pid, 1);
-	int protocol = get_syscall_arg(pinfp->pid, 2);
 	int socket_type = type & SOCK_TYPE_MASK;
 
+#ifndef ENABLE_SECCOMP_BPF
 	if (domain != AF_INET && domain != AF_INET6)
 		return;
-	if (socket_type != SOCK_STREAM &&
-	    ((DNS_PROXY_PORT == 0 && UDP_PROXY_PORT == 0) ||
-	     socket_type != SOCK_DGRAM))
+	if (socket_type != SOCK_STREAM && socket_type != SOCK_DGRAM)
 		return;
-	if (socket_type == SOCK_DGRAM && protocol != 0 && protocol != IPPROTO_UDP)
-		return;
+#endif
+	if (socket_type == SOCK_DGRAM) {
+		int protocol = get_syscall_arg(pinfp->pid, 2);
+
+		if (DNS_PROXY_PORT == 0 && UDP_PROXY_PORT == 0)
+			return;
+		if (protocol != 0 && protocol != IPPROTO_UDP)
+			return;
+	}
 	pinfp->pending_socket = true;
 	pinfp->pending_socket_domain = domain;
 	pinfp->pending_socket_type = socket_type;
