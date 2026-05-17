@@ -60,6 +60,35 @@ int track_socket_fd(struct proc_info *pinfp, int fd, int domain, int type)
 	return 0;
 }
 
+int copy_tracked_socket_fd(struct proc_info *dst, const struct proc_info *src,
+			   int oldfd, int newfd)
+{
+	int idx;
+
+	if (dst == NULL || src == NULL || oldfd < 0 || newfd < 0)
+		return -1;
+	idx = find_tracked_socket_fd(src, oldfd);
+	if (idx < 0)
+		return 0;
+	return track_socket_fd(dst, newfd, src->tracked_sockets[idx].domain,
+			       src->tracked_sockets[idx].type);
+}
+
+int copy_tracked_sockets(struct proc_info *dst, const struct proc_info *src)
+{
+	unsigned int i;
+
+	if (dst == NULL || src == NULL)
+		return -1;
+	for (i = 0; i < src->tracked_socket_count; i++) {
+		if (track_socket_fd(dst, src->tracked_sockets[i].fd,
+				    src->tracked_sockets[i].domain,
+				    src->tracked_sockets[i].type) < 0)
+			return -1;
+	}
+	return 0;
+}
+
 bool is_tracked_socket_fd(struct proc_info *pinfp, int fd)
 {
 	return find_tracked_socket_fd(pinfp, fd) >= 0;

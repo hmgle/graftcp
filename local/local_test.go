@@ -2,10 +2,9 @@ package local
 
 import (
 	"net"
+	"strings"
 	"sync/atomic"
 	"testing"
-
-	"golang.org/x/net/proxy"
 )
 
 type counterDialer struct {
@@ -96,7 +95,33 @@ func TestProxySelectorDirectMode(t *testing.T) {
 	if err := l.SetSelectMode("direct"); err != nil {
 		t.Fatalf("SetSelectMode() error = %v", err)
 	}
-	if got := l.proxySelector(); got != proxy.Direct {
-		t.Fatalf("proxySelector() = %T, want proxy.Direct", got)
+	if _, ok := l.proxySelector().(timeoutDialer); !ok {
+		t.Fatalf("proxySelector() = %T, want timeoutDialer", l.proxySelector())
+	}
+}
+
+func TestConfigureProxyValidatesForcedModes(t *testing.T) {
+	l, err := NewLocalListener(":0")
+	if err != nil {
+		t.Fatalf("NewLocalListener() error = %v", err)
+	}
+	if err := l.SetSelectMode("only_socks5"); err != nil {
+		t.Fatalf("SetSelectMode() error = %v", err)
+	}
+	if err := l.ConfigureProxy("", "", "", ""); err == nil {
+		t.Fatal("ConfigureProxy() succeeded without required SOCKS5 proxy")
+	}
+}
+
+func TestConfigureProxyReturnsAddressErrors(t *testing.T) {
+	l, err := NewLocalListener(":0")
+	if err != nil {
+		t.Fatalf("NewLocalListener() error = %v", err)
+	}
+	if err := l.ConfigureProxy("bad address", "", "", "also bad"); err == nil {
+		t.Fatal("ConfigureProxy() succeeded for invalid proxy addresses")
+	} else if msg := err.Error(); !strings.Contains(msg, "resolve socks5 proxy") ||
+		!strings.Contains(msg, "resolve http proxy") {
+		t.Fatalf("ConfigureProxy() err = %v, want both address errors", err)
 	}
 }

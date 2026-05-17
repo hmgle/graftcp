@@ -88,6 +88,11 @@ func main() {
 		retCode = 1
 		return
 	}
+	if err := l.ConfigureProxy(cfg.socks5Addr, cfg.socks5User, cfg.socks5Pwd, cfg.httpProxyAddr); err != nil {
+		fmt.Fprintf(os.Stderr, "mgraftcp: %v\n", err)
+		retCode = 1
+		return
+	}
 	if cfg.disableDNS && cfg.dnsProxy {
 		fmt.Fprintln(os.Stderr, "mgraftcp: --enable-dns and --disable-dns cannot be used together")
 		retCode = 1
@@ -149,7 +154,6 @@ func main() {
 		return
 	}
 
-	l.ConfigureProxy(cfg.socks5Addr, cfg.socks5User, cfg.socks5Pwd, cfg.httpProxyAddr)
 	go l.StartService(ln)
 	if dnsProxy != nil {
 		dnsProxy.Start()

@@ -17,6 +17,10 @@ type modeT int
 var errBadDialer = errors.New("bad dialer")
 
 const (
+	tcpDialTimeout = 30 * time.Second
+	tcpRouteIdle   = 2 * time.Minute
+	tcpRouteGC     = 30 * time.Second
+
 	// AutoSelectMode select socks5 if socks5 is reachable, else HTTP proxy
 	AutoSelectMode modeT = iota
 	// RandomSelectMode select the reachable proxy randomly
@@ -48,6 +52,14 @@ type Local struct {
 	selectMode modeT
 }
 
+type timeoutDialer struct {
+	timeout time.Duration
+}
+
+func (d timeoutDialer) Dial(network, addr string) (net.Conn, error) {
+	return net.DialTimeout(network, addr, d.timeout)
+}
+
 // GetFAddr return faddrString and faddr of l.
 func (l *Local) GetFAddr() (faddrString string, faddr *net.TCPAddr) {
 	return l.faddrString, l.faddr
@@ -65,7 +77,7 @@ func NewLocalListener(listenAddr string) (*Local, error) {
 		routes:      NewRouteRegistry(),
 		udpRoutes:   NewDatagramRouteRegistry(),
 	}
-	local.directDialer = proxy.Direct
+	local.directDialer = timeoutDialer{timeout: tcpDialTimeout}
 
 	return local, nil
 }
@@ -76,73 +88,88 @@ func NewLocal(listenAddr, socks5Addr, socks5Username, socks5PassWord, httpProxyA
 	if err != nil {
 		return nil, err
 	}
-	local.ConfigureProxy(socks5Addr, socks5Username, socks5PassWord, httpProxyAddr)
+	if err := local.ConfigureProxy(socks5Addr, socks5Username, socks5PassWord, httpProxyAddr); err != nil {
+		return nil, err
+	}
 	return local, nil
 }
 
 // ConfigureProxy configures the upstream proxy dialers used by the local
 // listener. Both halves are independent; passing an empty address clears the
-// corresponding dialer without touching the other one. Errors in either
-// configuration step are logged and the dialer is left unset so the caller
-// can keep running with whatever upstreams remain.
-func (l *Local) ConfigureProxy(socks5Addr, socks5Username, socks5PassWord, httpProxyAddr string) {
-	l.ConfigureSOCKS5(socks5Addr, socks5Username, socks5PassWord)
-	l.ConfigureHTTPProxy(httpProxyAddr)
+// corresponding dialer without touching the other one. Errors leave the
+// affected dialer unset and are returned to the caller.
+func (l *Local) ConfigureProxy(socks5Addr, socks5Username, socks5PassWord, httpProxyAddr string) error {
+	var errs []error
+	if err := l.ConfigureSOCKS5(socks5Addr, socks5Username, socks5PassWord); err != nil {
+		errs = append(errs, err)
+	}
+	if err := l.ConfigureHTTPProxy(httpProxyAddr); err != nil {
+		errs = append(errs, err)
+	}
+	if err := errors.Join(errs...); err != nil {
+		return err
+	}
+	return l.ValidateProxyConfig()
 }
 
 // ConfigureSOCKS5 installs (or clears) the SOCKS5 dialer.
-func (l *Local) ConfigureSOCKS5(addr, username, password string) {
+func (l *Local) ConfigureSOCKS5(addr, username, password string) error {
 	l.socks5Dialer = nil
 	l.socks5Addr = ""
 	l.socks5Username = ""
 	l.socks5Password = ""
 
 	if addr == "" {
-		return
+		return nil
 	}
 	tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
-		log.Errorf("resolve socks5 proxy %q: %s", addr, err.Error())
-		return
+		return fmt.Errorf("resolve socks5 proxy %q: %w", addr, err)
 	}
 	var auth *proxy.Auth
 	if username != "" {
 		auth = &proxy.Auth{User: username, Password: password}
 	}
-	dialer, err := proxy.SOCKS5("tcp", tcpAddr.String(), auth, proxy.Direct)
+	forward := l.directDialer
+	if forward == nil {
+		forward = timeoutDialer{timeout: tcpDialTimeout}
+	}
+	dialer, err := proxy.SOCKS5("tcp", tcpAddr.String(), auth, forward)
 	if err != nil {
-		log.Errorf("proxy.SOCKS5(%s) fail: %s", tcpAddr.String(), err.Error())
-		return
+		return fmt.Errorf("create SOCKS5 proxy %q: %w", tcpAddr.String(), err)
 	}
 	l.socks5Dialer = dialer
 	l.socks5Addr = tcpAddr.String()
 	l.socks5Username = username
 	l.socks5Password = password
+	return nil
 }
 
 // ConfigureHTTPProxy installs (or clears) the HTTP CONNECT dialer.
-func (l *Local) ConfigureHTTPProxy(addr string) {
+func (l *Local) ConfigureHTTPProxy(addr string) error {
 	l.httpProxyDialer = nil
 
 	if addr == "" {
-		return
+		return nil
 	}
 	tcpAddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
-		log.Errorf("resolve http proxy %q: %s", addr, err.Error())
-		return
+		return fmt.Errorf("resolve http proxy %q: %w", addr, err)
 	}
 	uri, err := url.Parse("http://" + tcpAddr.String())
 	if err != nil {
-		log.Errorf("parse http proxy URL: %s", err.Error())
-		return
+		return fmt.Errorf("parse http proxy URL %q: %w", tcpAddr.String(), err)
 	}
-	dialer, err := proxy.FromURL(uri, proxy.Direct)
+	forward := l.directDialer
+	if forward == nil {
+		forward = timeoutDialer{timeout: tcpDialTimeout}
+	}
+	dialer, err := proxy.FromURL(uri, forward)
 	if err != nil {
-		log.Errorf("proxy.FromURL(%v) err: %s", uri, err.Error())
-		return
+		return fmt.Errorf("create HTTP proxy %q: %w", uri.String(), err)
 	}
 	l.httpProxyDialer = dialer
+	return nil
 }
 
 // Registry exposes the route registry used by the local proxy listener.
@@ -170,6 +197,22 @@ func (l *Local) SetSelectMode(mode string) error {
 		return fmt.Errorf("unknown proxy selection mode %q", mode)
 	}
 	l.selectMode = m
+	return nil
+}
+
+// ValidateProxyConfig reports selection modes that cannot possibly dial with
+// the currently configured upstreams.
+func (l *Local) ValidateProxyConfig() error {
+	switch l.selectMode {
+	case OnlySocks5Mode:
+		if l.socks5Dialer == nil {
+			return fmt.Errorf("proxy selection mode only_socks5 requires --socks5")
+		}
+	case OnlyHTTPProxyMode:
+		if l.httpProxyDialer == nil {
+			return fmt.Errorf("proxy selection mode only_http_proxy requires --http_proxy")
+		}
+	}
 	return nil
 }
 
@@ -218,7 +261,7 @@ func (l *Local) dialTCP(destAddr string) (net.Conn, error) {
 		}
 		if err != nil {
 			log.Infof("dial %s direct", destAddr)
-			destConn, err = net.Dial("tcp", destAddr)
+			destConn, err = timeoutDialer{timeout: tcpDialTimeout}.Dial("tcp", destAddr)
 		}
 	}
 	return destConn, err
@@ -243,6 +286,10 @@ func (l *Local) StartListen() (ln *net.TCPListener, err error) {
 
 // StartService start service.
 func (l *Local) StartService(ln *net.TCPListener) {
+	done := make(chan struct{})
+	go l.gcRouteLoop(done)
+	defer close(done)
+
 	for {
 		conn, err := ln.AcceptTCP()
 		if err != nil {
@@ -252,6 +299,19 @@ func (l *Local) StartService(ln *net.TCPListener) {
 			break
 		}
 		go l.HandleConn(conn)
+	}
+}
+
+func (l *Local) gcRouteLoop(done <-chan struct{}) {
+	ticker := time.NewTicker(tcpRouteGC)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			l.routes.SweepIdle(time.Now(), tcpRouteIdle)
+		case <-done:
+			return
+		}
 	}
 }
 

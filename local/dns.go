@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	dnsPacketMaxSize = 65535
-	dnsTCPTimeout    = 10 * time.Second
+	dnsPacketMaxSize     = 65535
+	dnsTCPTimeout        = 10 * time.Second
+	dnsPacketConcurrency = 1024
 )
 
 // DNSProxy forwards local UDP DNS queries to an upstream DNS server over TCP.
@@ -23,6 +24,7 @@ type DNSProxy struct {
 	startOnce sync.Once
 	mu        sync.Mutex
 	conns     []*net.UDPConn
+	packetSem chan struct{}
 }
 
 // ListenDNSProxy binds DNS UDP listeners on 127.0.0.1 and best-effort ::1.
@@ -40,9 +42,10 @@ func (l *Local) ListenDNSProxy(upstream string) (*DNSProxy, int, error) {
 	}
 	port := udp4.LocalAddr().(*net.UDPAddr).Port
 	p := &DNSProxy{
-		local:    l,
-		upstream: upstream,
-		conns:    []*net.UDPConn{udp4},
+		local:     l,
+		upstream:  upstream,
+		conns:     []*net.UDPConn{udp4},
+		packetSem: make(chan struct{}, dnsPacketConcurrency),
 	}
 
 	if udp6, err := net.ListenUDP("udp6", &net.UDPAddr{IP: net.IPv6loopback, Port: port}); err == nil {
@@ -118,7 +121,15 @@ func (p *DNSProxy) serve(conn *net.UDPConn) {
 		}
 		query := make([]byte, n)
 		copy(query, buf[:n])
-		go p.handle(conn, addr, query)
+		select {
+		case p.packetSem <- struct{}{}:
+			go func() {
+				defer func() { <-p.packetSem }()
+				p.handle(conn, addr, query)
+			}()
+		default:
+			log.Warnf("DNS proxy dropping query from %s: handlers busy", addr.String())
+		}
 	}
 }
 

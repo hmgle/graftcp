@@ -76,6 +76,30 @@
 #define SYS_clone __NR_clone
 #endif
 
+#ifndef SYS_dup
+#define SYS_dup __NR_dup
+#endif
+
+#ifndef SYS_dup2
+#ifdef __NR_dup2
+#define SYS_dup2 __NR_dup2
+#endif
+#endif
+
+#ifndef SYS_dup3
+#define SYS_dup3 __NR_dup3
+#endif
+
+#ifndef SYS_fcntl
+#define SYS_fcntl __NR_fcntl
+#endif
+
+#ifndef SYS_fcntl64
+#ifdef __NR_fcntl64
+#define SYS_fcntl64 __NR_fcntl64
+#endif
+#endif
+
 #ifndef SYS_exit
 #define SYS_exit __NR_exit
 #endif
@@ -113,6 +137,10 @@ struct proc_info {
 	bool pending_socket;
 	int pending_socket_domain;
 	int pending_socket_type;
+	bool pending_dup;
+	int pending_dup_oldfd;
+	int pending_dup_newfd;
+	bool pending_dup_fixed;
 	bool pending_sockaddr_restore;
 	long sockaddr_restore_addr;
 	size_t sockaddr_restore_len;
@@ -128,6 +156,9 @@ struct proc_info *alloc_proc_info(pid_t pid);
 void free_proc_info(struct proc_info *p);
 
 int track_socket_fd(struct proc_info *pinfp, int fd, int domain, int type);
+int copy_tracked_socket_fd(struct proc_info *dst, const struct proc_info *src,
+			   int oldfd, int newfd);
+int copy_tracked_sockets(struct proc_info *dst, const struct proc_info *src);
 bool is_tracked_socket_fd(struct proc_info *pinfp, int fd);
 bool is_tracked_stream_socket_fd(struct proc_info *pinfp, int fd);
 bool is_tracked_dgram_socket_fd(struct proc_info *pinfp, int fd);

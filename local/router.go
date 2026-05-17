@@ -42,14 +42,19 @@ func (g *LoopbackGen) nextToken() uint32 {
 // RouteRegistry stores the original destination for each pending loopback token.
 type RouteRegistry struct {
 	mu        sync.Mutex
-	routes    map[uint32]string
+	routes    map[uint32]routeEntry
 	allocator *LoopbackGen
+}
+
+type routeEntry struct {
+	destAddr string
+	lastSeen time.Time
 }
 
 // NewRouteRegistry creates a registry backed by the 127.0.0.0/8 loopback range.
 func NewRouteRegistry() *RouteRegistry {
 	return &RouteRegistry{
-		routes:    make(map[uint32]string),
+		routes:    make(map[uint32]routeEntry),
 		allocator: newLoopbackGen(loopbackStartToken, loopbackEndToken),
 	}
 }
@@ -80,13 +85,13 @@ func (r *RouteRegistry) Register(family int, host string, port uint16) (uint32, 
 	token := r.allocator.nextToken()
 	r.mu.Lock()
 	if r.routes == nil {
-		r.routes = make(map[uint32]string)
+		r.routes = make(map[uint32]routeEntry)
 	}
 	if existing, ok := r.routes[token]; ok {
 		log.Warnf("route registry token %s wrapped around; dropping pending dest %s",
-			tokenToIP(token).String(), existing)
+			tokenToIP(token).String(), existing.destAddr)
 	}
-	r.routes[token] = destAddr
+	r.routes[token] = routeEntry{destAddr: destAddr, lastSeen: time.Now()}
 	r.mu.Unlock()
 	return token, nil
 }
@@ -103,14 +108,14 @@ func (r *RouteRegistry) Consume(localIP net.IP) (string, bool) {
 	}
 
 	r.mu.Lock()
-	destAddr, ok := r.routes[token]
+	route, ok := r.routes[token]
 	if !ok {
 		r.mu.Unlock()
 		return "", false
 	}
 	delete(r.routes, token)
 	r.mu.Unlock()
-	return destAddr, true
+	return route.destAddr, true
 }
 
 // Forget releases the entry for token without consuming it. Callers that
@@ -122,6 +127,20 @@ func (r *RouteRegistry) Forget(token uint32) {
 	}
 	r.mu.Lock()
 	delete(r.routes, token)
+	r.mu.Unlock()
+}
+
+func (r *RouteRegistry) SweepIdle(now time.Time, maxIdle time.Duration) {
+	if r == nil || maxIdle <= 0 {
+		return
+	}
+
+	r.mu.Lock()
+	for token, route := range r.routes {
+		if now.Sub(route.lastSeen) > maxIdle {
+			delete(r.routes, token)
+		}
+	}
 	r.mu.Unlock()
 }
 

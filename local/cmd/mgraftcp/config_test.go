@@ -17,8 +17,12 @@ func TestConfigDNSOptions(t *testing.T) {
 		t.Fatalf("default dnsServer = %q, want %q", cfg.dnsServer, "1.1.1.1:53")
 	}
 
-	cfg.set("dns_proxy", "true")
-	cfg.set("dns_server", "8.8.8.8:53")
+	if got := cfg.set("dns_proxy", "true"); got != configSetApplied {
+		t.Fatalf("set(dns_proxy) = %v, want configSetApplied", got)
+	}
+	if got := cfg.set("dns_server", "8.8.8.8:53"); got != configSetApplied {
+		t.Fatalf("set(dns_server) = %v, want configSetApplied", got)
+	}
 	if !cfg.dnsProxy {
 		t.Fatal("dns_proxy=true did not enable DNS proxy")
 	}
@@ -33,7 +37,9 @@ func TestConfigUDPOptions(t *testing.T) {
 	if cfg.udpProxy {
 		t.Fatal("defaultConfig() enabled UDP proxy")
 	}
-	cfg.set("udp_proxy", "true")
+	if got := cfg.set("udp_proxy", "true"); got != configSetApplied {
+		t.Fatalf("set(udp_proxy) = %v, want configSetApplied", got)
+	}
 	if !cfg.udpProxy {
 		t.Fatal("udp_proxy=true did not enable UDP proxy")
 	}
@@ -169,8 +175,38 @@ func TestParseConfigFileTrailingNewlineDoesNotDoubleParse(t *testing.T) {
 func TestParseBoolUnknownValueLeavesFieldUnchanged(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.dnsProxy = true
-	cfg.set("enable_dns", "garbage")
+	if got := cfg.set("enable_dns", "garbage"); got != configSetInvalid {
+		t.Fatalf("set(enable_dns) = %v, want configSetInvalid", got)
+	}
 	if !cfg.dnsProxy {
 		t.Fatal("invalid bool value should not flip enable_dns")
+	}
+}
+
+func TestConfigSetUnknownKey(t *testing.T) {
+	cfg := defaultConfig()
+	if got := cfg.set("typo_key", "true"); got != configSetUnknown {
+		t.Fatalf("set(typo_key) = %v, want configSetUnknown", got)
+	}
+}
+
+func TestFindDefaultConfigPathChecksHomeWhenXDGIsSet(t *testing.T) {
+	xdgDir := t.TempDir()
+	homeDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdgDir)
+	t.Setenv("HOME", homeDir)
+
+	homeConfigDir := filepath.Join(homeDir, ".config", "mgraftcp")
+	if err := os.MkdirAll(homeConfigDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	homeConfig := filepath.Join(homeConfigDir, "mgraftcp.conf")
+	if err := os.WriteFile(homeConfig, []byte("dns_proxy = true\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cfg := defaultConfig()
+	if got := cfg.findDefaultConfigPath(); got != homeConfig {
+		t.Fatalf("findDefaultConfigPath() = %q, want %q", got, homeConfig)
 	}
 }

@@ -127,6 +127,25 @@ static char *xstrdup(const char *s)
 	return copy;
 }
 
+static uint16_t parse_port(const char *value, const char *option)
+{
+	char *end;
+	unsigned long port;
+
+	if (value == NULL || *value == '\0') {
+		fprintf(stderr, "%s requires a port in 1..65535\n", option);
+		exit(1);
+	}
+	errno = 0;
+	port = strtoul(value, &end, 10);
+	if (errno != 0 || *end != '\0' || port == 0 || port > UINT16_MAX) {
+		fprintf(stderr, "%s invalid port '%s'; expected 1..65535\n",
+			option, value);
+		exit(1);
+	}
+	return (uint16_t)port;
+}
+
 static bool port_matches(uint16_t port, uint16_t expected)
 {
 	return expected != 0 && ntohs(port) == expected;
@@ -378,9 +397,32 @@ static bool ip6_is_ignore(uint8_t *ip)
 	(offsetof(struct seccomp_data, args[arg]) + sizeof(uint32_t))
 #else
 #define SECCOMP_ARG_LO32_OFFSET(arg)					\
-	offsetof(struct seccomp_data, args[arg])
+		offsetof(struct seccomp_data, args[arg])
 #endif
 #define SECCOMP_SOCKET_ARG_FILTER_LEN 7
+#ifdef SYS_dup2
+#define SECCOMP_TRACE_DUP2(base)					\
+	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_dup2,			\
+		 SECCOMP_JUMP_OFFSET(base##_DUP2, base##_RET_TRACE), 0),
+#else
+#define SECCOMP_TRACE_DUP2(base)
+#endif
+#ifdef SYS_fcntl64
+#define SECCOMP_TRACE_FCNTL64(base)					\
+	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_fcntl64,		\
+		 SECCOMP_JUMP_OFFSET(base##_FCNTL64, base##_RET_TRACE), 0),
+#else
+#define SECCOMP_TRACE_FCNTL64(base)
+#endif
+#define SECCOMP_TRACE_DUP_SYSCALLS(base)				\
+	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_dup,			\
+		 SECCOMP_JUMP_OFFSET(base##_DUP, base##_RET_TRACE), 0),	\
+	SECCOMP_TRACE_DUP2(base)					\
+	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_dup3,			\
+		 SECCOMP_JUMP_OFFSET(base##_DUP3, base##_RET_TRACE), 0), \
+	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_fcntl,			\
+		 SECCOMP_JUMP_OFFSET(base##_FCNTL, base##_RET_TRACE), 0), \
+	SECCOMP_TRACE_FCNTL64(base)
 #define SECCOMP_JUMP_OFFSET(from, to) ((to) - (from) - 1)
 #define SECCOMP_LAYOUT_CHECK(name, expr)				\
 	enum { name = 1 / !!(expr) }
@@ -410,6 +452,16 @@ static void install_seccomp()
 	#if defined(__x86_64__)
 		FILTER_CLONE,
 	#endif
+		FILTER_DUP,
+	#ifdef SYS_dup2
+		FILTER_DUP2,
+	#endif
+		FILTER_DUP3,
+		FILTER_FCNTL,
+	#ifdef SYS_fcntl64
+		FILTER_FCNTL64,
+	#endif
+		FILTER_ALLOW_JUMP,
 		FILTER_SOCKET_ARGS,
 		FILTER_RET_TRACE =
 			FILTER_SOCKET_ARGS + SECCOMP_SOCKET_ARG_FILTER_LEN,
@@ -425,6 +477,16 @@ static void install_seccomp()
 	#if defined(__x86_64__)
 		UDP_FILTER_CLONE,
 	#endif
+		UDP_FILTER_DUP,
+	#ifdef SYS_dup2
+		UDP_FILTER_DUP2,
+	#endif
+		UDP_FILTER_DUP3,
+		UDP_FILTER_FCNTL,
+	#ifdef SYS_fcntl64
+		UDP_FILTER_FCNTL64,
+	#endif
+		UDP_FILTER_ALLOW_JUMP,
 		UDP_FILTER_SOCKET_ARGS,
 		UDP_FILTER_RET_TRACE =
 			UDP_FILTER_SOCKET_ARGS + SECCOMP_SOCKET_ARG_FILTER_LEN,
@@ -446,17 +508,20 @@ static void install_seccomp()
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect,
 			 SECCOMP_JUMP_OFFSET(FILTER_CONNECT, FILTER_RET_TRACE), 0),
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_clone,
-			 SECCOMP_JUMP_OFFSET(FILTER_CLONE, FILTER_RET_TRACE),
-			 SECCOMP_JUMP_OFFSET(FILTER_CLONE, FILTER_RET_ALLOW)),
-#else
+			 SECCOMP_JUMP_OFFSET(FILTER_CLONE, FILTER_RET_TRACE), 0),
+		SECCOMP_TRACE_DUP_SYSCALLS(FILTER)
+	#else
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close,
 			 SECCOMP_JUMP_OFFSET(FILTER_CLOSE, FILTER_RET_TRACE), 0),
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket,
 			 SECCOMP_JUMP_OFFSET(FILTER_SOCKET, FILTER_SOCKET_ARGS), 0),
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect,
-			 SECCOMP_JUMP_OFFSET(FILTER_CONNECT, FILTER_RET_TRACE),
-			 SECCOMP_JUMP_OFFSET(FILTER_CONNECT, FILTER_RET_ALLOW)),
-#endif
+			 SECCOMP_JUMP_OFFSET(FILTER_CONNECT, FILTER_RET_TRACE), 0),
+		SECCOMP_TRACE_DUP_SYSCALLS(FILTER)
+	#endif
+		BPF_STMT(BPF_JMP | BPF_JA,
+			 SECCOMP_JUMP_OFFSET(FILTER_ALLOW_JUMP,
+					     FILTER_RET_ALLOW)),
 		SECCOMP_SOCKET_ARG_FILTER,
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
@@ -488,10 +553,9 @@ static void install_seccomp()
 					     UDP_FILTER_RET_TRACE), 0),
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_clone,
 			 SECCOMP_JUMP_OFFSET(UDP_FILTER_CLONE,
-					     UDP_FILTER_RET_TRACE),
-			 SECCOMP_JUMP_OFFSET(UDP_FILTER_CLONE,
-					     UDP_FILTER_RET_ALLOW)),
-#else
+					     UDP_FILTER_RET_TRACE), 0),
+		SECCOMP_TRACE_DUP_SYSCALLS(UDP_FILTER)
+	#else
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close,
 			 SECCOMP_JUMP_OFFSET(UDP_FILTER_CLOSE,
 					     UDP_FILTER_RET_TRACE), 0),
@@ -506,10 +570,12 @@ static void install_seccomp()
 					     UDP_FILTER_RET_TRACE), 0),
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendmsg,
 			 SECCOMP_JUMP_OFFSET(UDP_FILTER_SENDMSG,
-					     UDP_FILTER_RET_TRACE),
-			 SECCOMP_JUMP_OFFSET(UDP_FILTER_SENDMSG,
+					     UDP_FILTER_RET_TRACE), 0),
+		SECCOMP_TRACE_DUP_SYSCALLS(UDP_FILTER)
+	#endif
+		BPF_STMT(BPF_JMP | BPF_JA,
+			 SECCOMP_JUMP_OFFSET(UDP_FILTER_ALLOW_JUMP,
 					     UDP_FILTER_RET_ALLOW)),
-#endif
 		SECCOMP_SOCKET_ARG_FILTER,
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
@@ -568,6 +634,16 @@ void socket_pre_handle(struct proc_info *pinfp)
 	pinfp->pending_socket = true;
 	pinfp->pending_socket_domain = domain;
 	pinfp->pending_socket_type = socket_type;
+}
+
+static void clear_dup_tracking(struct proc_info *pinfp)
+{
+	if (pinfp == NULL)
+		return;
+	pinfp->pending_dup = false;
+	pinfp->pending_dup_oldfd = -1;
+	pinfp->pending_dup_newfd = -1;
+	pinfp->pending_dup_fixed = false;
 }
 
 static void clear_sockaddr_restore(struct proc_info *pinfp)
@@ -741,6 +817,63 @@ void close_pre_handle(struct proc_info *pinfp)
 	untrack_socket_fd(pinfp, fd);
 }
 
+void dup_pre_handle(struct proc_info *pinfp)
+{
+	int oldfd = get_syscall_arg(pinfp->pid, 0);
+
+	clear_dup_tracking(pinfp);
+	if (!is_tracked_socket_fd(pinfp, oldfd))
+		return;
+	pinfp->pending_dup = true;
+	pinfp->pending_dup_oldfd = oldfd;
+}
+
+void dup2_pre_handle(struct proc_info *pinfp)
+{
+	int oldfd = get_syscall_arg(pinfp->pid, 0);
+	int newfd = get_syscall_arg(pinfp->pid, 1);
+
+	clear_dup_tracking(pinfp);
+	if (oldfd == newfd)
+		return;
+	pinfp->pending_dup = true;
+	pinfp->pending_dup_oldfd = oldfd;
+	pinfp->pending_dup_newfd = newfd;
+	pinfp->pending_dup_fixed = true;
+}
+
+void fcntl_pre_handle(struct proc_info *pinfp)
+{
+	int oldfd = get_syscall_arg(pinfp->pid, 0);
+	int cmd = get_syscall_arg(pinfp->pid, 1);
+
+	clear_dup_tracking(pinfp);
+	if (cmd != F_DUPFD && cmd != F_DUPFD_CLOEXEC)
+		return;
+	if (!is_tracked_socket_fd(pinfp, oldfd))
+		return;
+	pinfp->pending_dup = true;
+	pinfp->pending_dup_oldfd = oldfd;
+}
+
+void dup_exiting_handle(struct proc_info *pinfp, int retfd)
+{
+	int newfd;
+
+	if (!pinfp->pending_dup)
+		return;
+	newfd = pinfp->pending_dup_fixed ? pinfp->pending_dup_newfd : retfd;
+	if (retfd >= 0 && newfd >= 0) {
+		if (pinfp->pending_dup_fixed)
+			untrack_socket_fd(pinfp, newfd);
+		if (copy_tracked_socket_fd(pinfp, pinfp,
+					   pinfp->pending_dup_oldfd, newfd) < 0)
+			fprintf(stderr, "mgraftcp failed to track duplicated socket fd %d\n",
+				newfd);
+	}
+	clear_dup_tracking(pinfp);
+}
+
 void clone_pre_handle(struct proc_info *pinfp)
 {
 #if defined(__x86_64__)
@@ -822,6 +955,30 @@ void start_tracee(const char *username, int argc, char **argv)
 	pi->flags |= FLAG_STARTUP;
 }
 
+static void inherit_child_proc_info(struct proc_info *parent, unsigned event)
+{
+	unsigned long new_pid = 0;
+	struct proc_info *child;
+
+	if (parent == NULL)
+		return;
+	if (event != PTRACE_EVENT_CLONE && event != PTRACE_EVENT_FORK &&
+	    event != PTRACE_EVENT_VFORK)
+		return;
+	if (ptrace(PTRACE_GETEVENTMSG, parent->pid, 0, &new_pid) < 0)
+		return;
+	if ((pid_t)new_pid <= 0)
+		return;
+	child = find_proc_info((pid_t)new_pid);
+	if (!child)
+		child = alloc_proc_info((pid_t)new_pid);
+	if (child == NULL)
+		return;
+	if (copy_tracked_sockets(child, parent) < 0)
+		fprintf(stderr, "mgraftcp failed to inherit tracked sockets for pid %lu\n",
+			new_pid);
+}
+
 int trace_syscall_entering(struct proc_info *pinfp)
 {
 	errno = 0;
@@ -847,6 +1004,25 @@ int trace_syscall_entering(struct proc_info *pinfp)
 	case SYS_clone:
 		clone_pre_handle(pinfp);
 		break;
+	case SYS_dup:
+		dup_pre_handle(pinfp);
+		break;
+#ifdef SYS_dup2
+	case SYS_dup2:
+		dup2_pre_handle(pinfp);
+		break;
+#endif
+	case SYS_dup3:
+		dup2_pre_handle(pinfp);
+		break;
+	case SYS_fcntl:
+		fcntl_pre_handle(pinfp);
+		break;
+#ifdef SYS_fcntl64
+	case SYS_fcntl64:
+		fcntl_pre_handle(pinfp);
+		break;
+#endif
 	}
 	pinfp->flags |= FLAG_INSYSCALL;
 	return 0;
@@ -878,6 +1054,24 @@ int trace_syscall_exiting(struct proc_info *pinfp)
 	case SYS_sendto:
 	case SYS_sendmsg:
 		restore_sockaddr_if_needed(pinfp);
+		break;
+	case SYS_dup:
+#ifdef SYS_dup2
+	case SYS_dup2:
+#endif
+	case SYS_dup3:
+	case SYS_fcntl:
+#ifdef SYS_fcntl64
+	case SYS_fcntl64:
+#endif
+		child_ret = get_retval(pinfp->pid);
+		if (errno) {
+			if (errno == ESRCH)
+				exit(0);
+			perror("ptrace");
+			exit(errno);
+		}
+		dup_exiting_handle(pinfp, child_ret);
 		break;
 	}
 end:
@@ -963,11 +1157,12 @@ int do_trace()
 
 		sig = 0;
 		if (event != 0) {
-#ifdef ENABLE_SECCOMP_BPF
+	#ifdef ENABLE_SECCOMP_BPF
 			if (event == PTRACE_EVENT_SECCOMP &&
 			    trace_syscall(pinfp) < 0)
 				perror("trace_syscall");
-#endif
+	#endif
+			inherit_child_proc_info(pinfp, event);
 			goto end;
 		}
 		if (is_syscall_stop(status)) {
@@ -1097,13 +1292,13 @@ int client_prepare(int argc, char **argv)
 				    	&index)) != -1) {
 		switch (opt) {
 		case 'p':
-			local_proxy_port = atoi(optarg);
+			local_proxy_port = parse_port(optarg, "--local-port");
 			break;
 		case 'D':
-			dns_proxy_port = atoi(optarg);
+			dns_proxy_port = parse_port(optarg, "--dns-port");
 			break;
 		case 'U':
-			udp_proxy_port = atoi(optarg);
+			udp_proxy_port = parse_port(optarg, "--udp-port");
 			break;
 		case 'b':
 			blackip_file_path = xstrdup(optarg);

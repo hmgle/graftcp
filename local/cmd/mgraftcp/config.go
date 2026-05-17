@@ -35,6 +35,14 @@ type appConfig struct {
 	showVersion bool
 }
 
+type configSetResult int
+
+const (
+	configSetApplied configSetResult = iota
+	configSetUnknown
+	configSetInvalid
+)
+
 func defaultConfig() appConfig {
 	return appConfig{
 		selectProxyMode: "auto",
@@ -65,7 +73,7 @@ func (c *appConfig) registerFlags() {
 	getopt.FlagLong(&c.showVersion, "version", 0, "Print the mgraftcp version information")
 }
 
-func (c *appConfig) set(key, val string) {
+func (c *appConfig) set(key, val string) configSetResult {
 	switch strings.ToLower(key) {
 	case "socks5":
 		c.socks5Addr = val
@@ -78,11 +86,11 @@ func (c *appConfig) set(key, val string) {
 	case "select_proxy_mode":
 		c.selectProxyMode = val
 	case "dns_proxy", "enable_dns", "enable-dns":
-		setBoolField(&c.dnsProxy, val)
+		return setBoolField(&c.dnsProxy, val)
 	case "dns_server", "dns-server":
 		c.dnsServer = val
 	case "udp_proxy", "enable_udp", "enable-udp":
-		setBoolField(&c.udpProxy, val)
+		return setBoolField(&c.udpProxy, val)
 	case "blackip_file_path", "blackip-file":
 		c.blackIPFile = val
 	case "whiteip_file_path", "whiteip-file":
@@ -92,10 +100,15 @@ func (c *appConfig) set(key, val string) {
 	case "ignore_local":
 		if b, ok := parseBool(val); ok {
 			c.notIgnoreLocal = !b
+		} else {
+			return configSetInvalid
 		}
 	case "not_ignore_local", "not-ignore-local":
-		setBoolField(&c.notIgnoreLocal, val)
+		return setBoolField(&c.notIgnoreLocal, val)
+	default:
+		return configSetUnknown
 	}
+	return configSetApplied
 }
 
 // parseBool reports the boolean meaning of val and whether it was recognized.
@@ -110,10 +123,12 @@ func parseBool(val string) (bool, bool) {
 	}
 }
 
-func setBoolField(dst *bool, val string) {
+func setBoolField(dst *bool, val string) configSetResult {
 	if b, ok := parseBool(val); ok {
 		*dst = b
+		return configSetApplied
 	}
+	return configSetInvalid
 }
 
 func configKeyOverriddenByFlag(flagset map[string]bool, key string) bool {
@@ -152,6 +167,16 @@ func parseLine(line string) (key, val string) {
 	return strings.TrimSpace(items[0]), strings.TrimSpace(items[1])
 }
 
+func currentFlagSet() map[string]bool {
+	flagset := make(map[string]bool)
+	getopt.Visit(func(opt getopt.Option) {
+		if longName := opt.LongName(); longName != "" {
+			flagset[longName] = true
+		}
+	})
+	return flagset
+}
+
 func (c *appConfig) parseConfigFile(path string) error {
 	if path == "" {
 		path = c.findDefaultConfigPath()
@@ -169,19 +194,26 @@ func (c *appConfig) parseConfigFile(path string) error {
 	}
 	defer file.Close()
 
-	flagset := make(map[string]bool)
-	getopt.Getopt(func(opt getopt.Option) bool {
-		flagset[opt.LongName()] = true
-		return true
-	})
+	flagset := currentFlagSet()
 
 	sc := bufio.NewScanner(file)
+	lineNo := 0
 	for sc.Scan() {
+		lineNo++
 		k, v := parseLine(sc.Text())
 		if k == "" || configKeyOverriddenByFlag(flagset, k) {
 			continue
 		}
-		c.set(k, v)
+		switch c.set(k, v) {
+		case configSetUnknown:
+			if c.enableDebugLog {
+				appLogger.Warnf("ignore unknown config key %s:%d: %s", path, lineNo, k)
+			}
+		case configSetInvalid:
+			if c.enableDebugLog {
+				appLogger.Warnf("ignore invalid config value %s:%d: %s=%s", path, lineNo, k, v)
+			}
+		}
 	}
 	if err := sc.Err(); err != nil {
 		if c.enableDebugLog {
@@ -199,7 +231,8 @@ func (c *appConfig) findDefaultConfigPath() string {
 
 	if xdgConfPath := os.Getenv("XDG_CONFIG_HOME"); xdgConfPath != "" {
 		candidates = append(candidates, filepath.Join(xdgConfPath, "mgraftcp", "mgraftcp.conf"))
-	} else if homeDir, err := os.UserHomeDir(); err == nil {
+	}
+	if homeDir, err := os.UserHomeDir(); err == nil {
 		candidates = append(candidates, filepath.Join(homeDir, ".config", "mgraftcp", "mgraftcp.conf"))
 	}
 	candidates = append(candidates, "/etc/mgraftcp/mgraftcp.conf")

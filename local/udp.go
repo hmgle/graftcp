@@ -42,6 +42,7 @@ type UDPProxy struct {
 	packetConn *ipv4.PacketConn
 
 	startOnce sync.Once
+	closeOnce sync.Once
 	mu        sync.Mutex
 	sessions  map[string]*udpSession
 	closed    chan struct{}
@@ -100,28 +101,26 @@ func (p *UDPProxy) Close() error {
 		return nil
 	}
 
-	select {
-	case <-p.closed:
-	default:
-		close(p.closed)
-	}
-
-	p.mu.Lock()
-	sessions := p.sessions
-	p.sessions = make(map[string]*udpSession)
-	p.mu.Unlock()
-
 	var closeErr error
-	for _, session := range sessions {
-		if session.forwarder != nil {
-			if err := session.forwarder.Close(); err != nil && closeErr == nil {
-				closeErr = err
+	p.closeOnce.Do(func() {
+		close(p.closed)
+
+		p.mu.Lock()
+		sessions := p.sessions
+		p.sessions = make(map[string]*udpSession)
+		p.mu.Unlock()
+
+		for _, session := range sessions {
+			if session.forwarder != nil {
+				if err := session.forwarder.Close(); err != nil && closeErr == nil {
+					closeErr = err
+				}
 			}
 		}
-	}
-	if err := p.conn.Close(); err != nil && closeErr == nil {
-		closeErr = err
-	}
+		if err := p.conn.Close(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+	})
 	return closeErr
 }
 

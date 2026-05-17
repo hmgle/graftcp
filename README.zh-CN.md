@@ -101,7 +101,7 @@ Usage: mgraftcp [-hn] [-b value] [--config value] [--disable-dns] [--disable-udp
 2. 每次拦截到 `connect(2)` 时，把原始目标地址登记到进程内路由表，并从 `127.0.0.0/8` 分配一个唯一 Loopback token IP。
 3. 把 tracee 的目的 sockaddr 改写成这个 token IP 和内嵌 listener 的端口。
 4. 内嵌 listener `accept` 到连接后，从 `LocalAddr()` 取出 token，直接在进程内解析出原始目标地址，再按 SOCKS5 / HTTP / direct 策略发起真实连接。
-5. `mgraftcp` 有意固定为弱语义：`connect()` 返回后，不再把 tracee 原始 `sockaddr` 缓冲区写回去。
+5. syscall 返回后，`mgraftcp` 会 best-effort 恢复 tracee 原始 `sockaddr` 缓冲区。
 
 对 IPv6 `connect(2)`，当前实现会改写为 IPv4-mapped Loopback 地址 `::ffff:127.x.y.z`，从而复用同一套 token 路由逻辑。
 
@@ -119,10 +119,10 @@ Usage: mgraftcp [-hn] [-b value] [--config value] [--disable-dns] [--disable-udp
 - HTTP 代理模式不支持通用 UDP。`auto` 会优先尝试 SOCKS5 UDP，失败时回退 direct UDP；`only_http_proxy` 会拒绝通用 UDP session。
 - 同时启用 DNS 和通用 UDP 时，UDP/53 优先走 DNS-over-TCP 路径。
 - 配置文件支持代理地址和常见路由选项；命令行参数仍然覆盖配置文件。
-- 当前分支不会虚拟化 `getpeername()` / `getsockname()`，程序也可能在原始 `connect()` 缓冲区里看到 fake loopback endpoint。
-- UDP 路径同样采用弱语义改写 socket 地址缓冲区；如果客户端强依赖 `recvfrom()` 返回原始远端地址，透明性可能不完整。
+- 当前分支不会虚拟化 `getpeername()` / `getsockname()`，程序仍可能通过这些 API 看到重定向后的本地连接视角。
+- TCP 和 UDP syscall 地址缓冲区会在 `connect()` / `sendto()` / `sendmsg()` 返回后 best-effort 恢复；如果客户端强依赖 `recvfrom()` 返回原始远端地址，透明性仍可能不完整。
 - UDP syscall 覆盖 `connect()`、`sendto()` 和 `sendmsg()`；批量发送的 `sendmmsg()` 当前不覆盖。
 - IPv6 故意统一走 IPv4-mapped loopback；依赖 `IPV6_V6ONLY=1` 的 socket 不在当前设计目标内。
-- socket 跟踪是按 `(pid, fd)` 做的 best-effort，而不是按共享 fd table 建模；`dup*`、`close_range()`、跨线程共享 socket 等场景都属于有意不覆盖的边界。
-- loopback token 只会在本地 listener 成功 `accept()` 后回收；失败或放弃的连接可能留下残留条目，等待 token wrap-around 覆盖。
+- socket 跟踪按被跟踪 pid/fd 状态做 best-effort；`dup*` 和 `fcntl(F_DUPFD*)` 会 best-effort 复制，但 `close_range()`、`unshare(CLONE_FILES)` 和完整共享 fd table 语义属于有意不覆盖的边界。
+- loopback token 会在本地 listener 成功 `accept()` 或空闲清理时回收，不保证覆盖每一个失败或放弃的连接。
 - 设计取舍和风险说明见 [docs/simplicity-first-mgraftcp-design.zh-CN.md](./docs/simplicity-first-mgraftcp-design.zh-CN.md)。

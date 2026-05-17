@@ -101,7 +101,7 @@ An example config is available in [`example-mgraftcp.conf`](./example-mgraftcp.c
 2. For every intercepted `connect(2)`, it records the original destination in an in-process route table and allocates a unique loopback token IP from `127.0.0.0/8`.
 3. The tracee's destination sockaddr is rewritten to that token IP plus the embedded listener port.
 4. When the embedded listener accepts the connection, it reads the token from `LocalAddr()`, resolves the original destination from the route table, then dials the configured SOCKS5/HTTP/direct path.
-5. `mgraftcp` intentionally keeps weak socket visibility semantics: it does not restore the original `connect()` buffer after the syscall returns.
+5. After the syscall returns, `mgraftcp` restores the tracee's original sockaddr buffer on a best-effort basis.
 
 For IPv6 `connect(2)`, `mgraftcp` rewrites to an IPv4-mapped loopback address (`::ffff:127.x.y.z`) so the same token registry can be reused.
 
@@ -119,10 +119,10 @@ When generic UDP proxying is enabled, `mgraftcp` starts a separate UDP listener.
 - HTTP proxy mode does not support generic UDP. `auto` prefers SOCKS5 UDP when available and falls back to direct UDP if the SOCKS5 UDP association fails; `only_http_proxy` rejects generic UDP sessions.
 - DNS proxying has precedence over generic UDP for UDP/53 when both are enabled.
 - The proxy configuration file covers proxy endpoints and the common routing flags. CLI flags still override config values.
-- This branch intentionally does not virtualize `getpeername()` / `getsockname()`, and a traced program may observe the fake loopback endpoint in the original `connect()` buffer.
-- UDP paths rewrite socket address buffers with the same weak semantics; clients that require `recvfrom()` to report the original remote address may not be fully transparent.
+- This branch intentionally does not virtualize `getpeername()` / `getsockname()`, so a traced program can still observe the redirected local connection through those APIs.
+- TCP and UDP syscall address buffers are restored after `connect()` / `sendto()` / `sendmsg()` returns on a best-effort basis; clients that require `recvfrom()` to report the original remote address may still not be fully transparent.
 - UDP syscall coverage includes `connect()`, `sendto()`, and `sendmsg()`. Batched `sendmmsg()` is not covered.
 - IPv6 is intentionally simplified to the IPv4-mapped loopback path; sockets that require `IPV6_V6ONLY=1` are out of scope by design.
-- Socket tracking is best-effort and keyed by `(pid, fd)`, not by shared fd tables; `dup*`, `close_range()`, and cross-thread socket ownership are intentionally not modeled.
-- Loopback-token registrations are reclaimed on accept, not on every failed or abandoned connect; stale entries may remain until the token space wraps and overwrites them.
+- Socket tracking is best-effort and keyed by traced pid/fd state. `dup*` and `fcntl(F_DUPFD*)` are copied best-effort, but `close_range()`, `unshare(CLONE_FILES)`, and full shared fd-table semantics are intentionally not modeled.
+- Loopback-token registrations are reclaimed on accept or by idle cleanup, not on every failed or abandoned connect.
 - The design rationale and tradeoffs are documented in [docs/simplicity-first-mgraftcp-design.zh-CN.md](./docs/simplicity-first-mgraftcp-design.zh-CN.md).

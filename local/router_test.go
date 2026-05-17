@@ -138,6 +138,20 @@ func TestRouteRegistryForgetReleasesToken(t *testing.T) {
 	}
 }
 
+func TestRouteRegistrySweepIdle(t *testing.T) {
+	registry := NewRouteRegistry()
+
+	token, err := registry.Register(syscall.AF_INET, "203.0.113.3", 443)
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+
+	registry.SweepIdle(time.Now().Add(time.Minute), time.Second)
+	if _, ok := registry.Consume(tokenToIP(token)); ok {
+		t.Fatal("Consume() found route after idle sweep")
+	}
+}
+
 func TestDatagramRouteRegistryForgetReleasesToken(t *testing.T) {
 	registry := NewDatagramRouteRegistry()
 
