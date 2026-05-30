@@ -273,7 +273,7 @@ func (l *Local) StartListen() (ln *net.TCPListener, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("listen on %s: %w", l.faddr.String(), err)
 	}
-	log.Infof("mgraftcp local listener started on %s", l.faddr.String())
+	log.Infof("graftcp local listener started on %s", l.faddr.String())
 	if l.faddr.Port == 0 {
 		l.faddrString = ln.Addr().String()
 		l.faddr, err = net.ResolveTCPAddr("tcp", l.faddrString)

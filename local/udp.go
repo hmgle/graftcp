@@ -92,7 +92,7 @@ func (p *UDPProxy) Start() {
 		go p.serve()
 		go p.gcLoop()
 		port := p.conn.LocalAddr().(*net.UDPAddr).Port
-		log.Infof("mgraftcp UDP proxy started on 0.0.0.0:%d", port)
+		log.Infof("graftcp UDP proxy started on 0.0.0.0:%d", port)
 	})
 }
 

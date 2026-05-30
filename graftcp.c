@@ -673,7 +673,7 @@ static void restore_sockaddr_if_needed(struct proc_info *pinfp)
 		return;
 	if (putdata(pinfp->pid, pinfp->sockaddr_restore_addr,
 		    pinfp->sockaddr_restore, pinfp->sockaddr_restore_len) < 0)
-		fprintf(stderr, "mgraftcp restore sockaddr failed\n");
+		fprintf(stderr, "graftcp restore sockaddr failed\n");
 	clear_sockaddr_restore(pinfp);
 }
 
@@ -707,7 +707,7 @@ static bool rewrite_udp_sockaddr(struct proc_info *pinfp, long addr,
 			ok = putdata(pinfp->pid, addr, &dns_sa6, sizeof(dns_sa6)) == 0;
 		}
 		if (!ok) {
-			fprintf(stderr, "mgraftcp rewrite DNS UDP failed\n");
+			fprintf(stderr, "graftcp rewrite DNS UDP failed\n");
 		} else {
 			save_sockaddr_restore(pinfp, addr, &dest.sa, dest.len);
 		}
@@ -719,13 +719,13 @@ static bool rewrite_udp_sockaddr(struct proc_info *pinfp, long addr,
 
 	loopback_token = mgraftcp_register_udp(dest.family, dest.ipstr, dest.port);
 	if (loopback_token == 0) {
-		fprintf(stderr, "mgraftcp register UDP failed for %s:%d\n",
+		fprintf(stderr, "graftcp register UDP failed for %s:%d\n",
 			dest.ipstr, dest.port);
 		return false;
 	}
 	if (!write_loopback_token(pinfp->pid, addr, &dest, loopback_token,
 				  UDP_PROXY_PORT)) {
-		fprintf(stderr, "mgraftcp rewrite UDP failed for %s:%d\n",
+		fprintf(stderr, "graftcp rewrite UDP failed for %s:%d\n",
 			dest.ipstr, dest.port);
 		mgraftcp_forget_udp(loopback_token);
 	} else {
@@ -751,13 +751,13 @@ static void tcp_connect_pre_handle(struct proc_info *pinfp)
 	loopback_token = mgraftcp_register_connect(dest.family, dest.ipstr,
 						   dest.port);
 	if (loopback_token == 0) {
-		fprintf(stderr, "mgraftcp register connect failed for %s:%d\n",
+		fprintf(stderr, "graftcp register connect failed for %s:%d\n",
 			dest.ipstr, dest.port);
 		return;
 	}
 	if (!write_loopback_token(pinfp->pid, addr, &dest, loopback_token,
 				  LOCAL_PROXY_PORT)) {
-		fprintf(stderr, "mgraftcp rewrite connect failed for %s:%d\n",
+		fprintf(stderr, "graftcp rewrite connect failed for %s:%d\n",
 			dest.ipstr, dest.port);
 		mgraftcp_forget_connect(loopback_token);
 		return;
@@ -868,7 +868,7 @@ void dup_exiting_handle(struct proc_info *pinfp, int retfd)
 			untrack_socket_fd(pinfp, newfd);
 		if (copy_tracked_socket_fd(pinfp, pinfp,
 					   pinfp->pending_dup_oldfd, newfd) < 0)
-			fprintf(stderr, "mgraftcp failed to track duplicated socket fd %d\n",
+			fprintf(stderr, "graftcp failed to track duplicated socket fd %d\n",
 				newfd);
 	}
 	clear_dup_tracking(pinfp);
@@ -896,7 +896,7 @@ void socket_exiting_handle(struct proc_info *pinfp, int fd)
 		return;
 	if (track_socket_fd(pinfp, fd, pinfp->pending_socket_domain,
 			    pinfp->pending_socket_type) < 0)
-		fprintf(stderr, "mgraftcp failed to track socket fd %d\n", fd);
+		fprintf(stderr, "graftcp failed to track socket fd %d\n", fd);
 }
 
 void do_child(const char *username, int argc, char **argv)
@@ -975,7 +975,7 @@ static void inherit_child_proc_info(struct proc_info *parent, unsigned event)
 	if (child == NULL)
 		return;
 	if (copy_tracked_sockets(child, parent) < 0)
-		fprintf(stderr, "mgraftcp failed to inherit tracked sockets for pid %lu\n",
+		fprintf(stderr, "graftcp failed to inherit tracked sockets for pid %lu\n",
 			new_pid);
 }
 

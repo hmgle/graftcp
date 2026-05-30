@@ -91,7 +91,7 @@ func TestDNSConfigFlagOverrides(t *testing.T) {
 
 func TestClientArgsIncludesProxyPortsWhenEnabled(t *testing.T) {
 	oldArgs := os.Args
-	os.Args = []string{"mgraftcp"}
+	os.Args = []string{"graftcp"}
 	defer func() { os.Args = oldArgs }()
 
 	cfg := defaultConfig()
@@ -99,7 +99,7 @@ func TestClientArgsIncludesProxyPortsWhenEnabled(t *testing.T) {
 	cfg.udpProxy = true
 
 	got := cfg.clientArgs(2233, 5353, 5354, []string{"curl", "example.com"})
-	want := []string{"mgraftcp", "-p", "2233", "--dns-port", "5353", "--udp-port", "5354", "curl", "example.com"}
+	want := []string{"graftcp", "-p", "2233", "--dns-port", "5353", "--udp-port", "5354", "curl", "example.com"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("clientArgs() = %v, want %v", got, want)
 	}
@@ -191,6 +191,27 @@ func TestConfigSetUnknownKey(t *testing.T) {
 }
 
 func TestFindDefaultConfigPathChecksHomeWhenXDGIsSet(t *testing.T) {
+	xdgDir := t.TempDir()
+	homeDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdgDir)
+	t.Setenv("HOME", homeDir)
+
+	homeConfigDir := filepath.Join(homeDir, ".config", "graftcp")
+	if err := os.MkdirAll(homeConfigDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	homeConfig := filepath.Join(homeConfigDir, "graftcp.conf")
+	if err := os.WriteFile(homeConfig, []byte("dns_proxy = true\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cfg := defaultConfig()
+	if got := cfg.findDefaultConfigPath(); got != homeConfig {
+		t.Fatalf("findDefaultConfigPath() = %q, want %q", got, homeConfig)
+	}
+}
+
+func TestFindDefaultConfigPathKeepsMGraftcpFallback(t *testing.T) {
 	xdgDir := t.TempDir()
 	homeDir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", xdgDir)

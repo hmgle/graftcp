@@ -82,7 +82,7 @@ func (p *DNSProxy) Start() {
 		}
 		if len(conns) > 0 {
 			port := conns[0].LocalAddr().(*net.UDPAddr).Port
-			log.Infof("mgraftcp DNS proxy started on 127.0.0.1:%d, upstream %s", port, p.upstream)
+			log.Infof("graftcp DNS proxy started on 127.0.0.1:%d, upstream %s", port, p.upstream)
 		}
 	})
 }

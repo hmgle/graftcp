@@ -15,18 +15,31 @@ import "C"
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"unsafe"
 
 	"github.com/hmgle/graftcp/local"
 	"github.com/pborman/getopt/v2"
 )
 
+func progName() string {
+	name := filepath.Base(os.Args[0])
+	if name == "" {
+		return "graftcp"
+	}
+	return name
+}
+
+func appErrorf(format string, a ...any) {
+	fmt.Fprintf(os.Stderr, progName()+": "+format, a...)
+}
+
 func clientPrepare(args []string) int {
 	argc := C.int(len(args))
 
 	argv := (**C.char)(C.alloc_string_slice(argc + 1))
 	if argv == nil {
-		fmt.Fprintln(os.Stderr, "mgraftcp: failed to allocate argv")
+		appErrorf("failed to allocate argv\n")
 		return 1
 	}
 	defer C.free(unsafe.Pointer(argv))
@@ -56,7 +69,7 @@ func init() {
 func main() {
 	getopt.Parse()
 	if cfg.showVersion {
-		fmt.Printf("mgraftcp version %s\n", version)
+		fmt.Printf("%s version %s\n", progName(), version)
 		return
 	}
 	args := getopt.Args()
@@ -72,29 +85,29 @@ func main() {
 	defer func() { os.Exit(retCode) }()
 
 	if err := cfg.parseConfigFile(cfg.configFile); err != nil {
-		fmt.Fprintf(os.Stderr, "mgraftcp: %v\n", err)
+		appErrorf("%v\n", err)
 		retCode = 1
 		return
 	}
 
 	l, err := local.NewLocalListener(":0")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "mgraftcp: %v\n", err)
+		appErrorf("%v\n", err)
 		retCode = 1
 		return
 	}
 	if err := l.SetSelectMode(cfg.selectProxyMode); err != nil {
-		fmt.Fprintf(os.Stderr, "mgraftcp: %v\n", err)
+		appErrorf("%v\n", err)
 		retCode = 1
 		return
 	}
 	if err := l.ConfigureProxy(cfg.socks5Addr, cfg.socks5User, cfg.socks5Pwd, cfg.httpProxyAddr); err != nil {
-		fmt.Fprintf(os.Stderr, "mgraftcp: %v\n", err)
+		appErrorf("%v\n", err)
 		retCode = 1
 		return
 	}
 	if cfg.disableDNS && cfg.dnsProxy {
-		fmt.Fprintln(os.Stderr, "mgraftcp: --enable-dns and --disable-dns cannot be used together")
+		appErrorf("--enable-dns and --disable-dns cannot be used together\n")
 		retCode = 1
 		return
 	}
@@ -102,7 +115,7 @@ func main() {
 		cfg.dnsProxy = false
 	}
 	if cfg.disableUDP && cfg.udpProxy {
-		fmt.Fprintln(os.Stderr, "mgraftcp: --enable-udp and --disable-udp cannot be used together")
+		appErrorf("--enable-udp and --disable-udp cannot be used together\n")
 		retCode = 1
 		return
 	}
@@ -114,7 +127,7 @@ func main() {
 
 	ln, err := l.StartListen()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "mgraftcp: l.StartListen err: %s\n", err.Error())
+		appErrorf("l.StartListen err: %s\n", err.Error())
 		retCode = 1
 		return
 	}
@@ -126,7 +139,7 @@ func main() {
 		var port int
 		dnsProxy, port, err = l.ListenDNSProxy(cfg.dnsServer)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "mgraftcp: %v\n", err)
+			appErrorf("%v\n", err)
 			retCode = 1
 			return
 		}
@@ -139,7 +152,7 @@ func main() {
 		var port int
 		udpProxy, port, err = l.ListenUDPProxy()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "mgraftcp: %v\n", err)
+			appErrorf("%v\n", err)
 			retCode = 1
 			return
 		}

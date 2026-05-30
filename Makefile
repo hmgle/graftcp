@@ -56,7 +56,8 @@ else
 endif
 
 LOCAL_DIR := local
-TARGET := $(LOCAL_DIR)/mgraftcp
+TARGET := $(LOCAL_DIR)/graftcp
+ALIAS_TARGET := $(LOCAL_DIR)/mgraftcp
 
 LIB_SRCS := graftcp.c util.c ptrace-ops.c cidr-trie.c
 LIB_OBJS := $(LIB_SRCS:.c=.o)
@@ -87,7 +88,7 @@ endif
 .SUFFIXES:
 
 .PHONY: all clean install uninstall test test-go test-c
-all: $(TARGET)
+all: $(TARGET) $(ALIAS_TARGET)
 
 libgraftcp.a: $(LIB_OBJS)
 	$(AR) $(ARFLAGS) $@ $^
@@ -99,10 +100,16 @@ $(TARGET): libgraftcp.a $(GO_BUILD_FILES) $(LOCAL_DIR)/go.mod $(LOCAL_DIR)/go.su
 	$(RM) $@
 	$(GO_ENV) $(GO) -C $(LOCAL_DIR) build -o $(notdir $@) -ldflags "$(GO_LDFLAGS) -X main.version=$(VERSION)" ./cmd/mgraftcp
 
-install: $(TARGET)
-	$(INSTALL) $< $(DESTDIR)$(BINDIR)/mgraftcp
+$(ALIAS_TARGET): $(TARGET)
+	$(RM) $@
+	ln -s $(notdir $<) $@
+
+install: $(TARGET) $(ALIAS_TARGET)
+	$(INSTALL) $(TARGET) $(DESTDIR)$(BINDIR)/graftcp
+	ln -sf graftcp $(DESTDIR)$(BINDIR)/mgraftcp
 
 uninstall:
+	$(RM) $(DESTDIR)$(BINDIR)/graftcp
 	$(RM) $(DESTDIR)$(BINDIR)/mgraftcp
 
 test: test-c test-go
@@ -120,7 +127,7 @@ test-c: $(CIDR_TRIE_TEST_BIN)
 	./$(CIDR_TRIE_TEST_BIN)
 
 clean:
-	$(RM) $(LIB_OBJS) $(LIB_DEPS) libgraftcp.a $(TARGET) \
+	$(RM) $(LIB_OBJS) $(LIB_DEPS) libgraftcp.a $(TARGET) $(ALIAS_TARGET) \
 		$(CIDR_TRIE_TEST_BIN) $(CIDR_TRIE_TEST_OBJS) cidr-trie_test.d
 
 -include $(LIB_DEPS)

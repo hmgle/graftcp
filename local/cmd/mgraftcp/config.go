@@ -70,7 +70,7 @@ func (c *appConfig) registerFlags() {
 	getopt.FlagLong(&c.notIgnoreLocal, "not-ignore-local", 'n', "Connecting to local is not changed by default, this option will redirect it to SOCKS5")
 	getopt.FlagLong(&c.userName, "username", 'u', "Run command as USERNAME handling setuid and/or setgid")
 	getopt.FlagLong(&c.help, "help", 'h', "Display this help and exit")
-	getopt.FlagLong(&c.showVersion, "version", 0, "Print the mgraftcp version information")
+	getopt.FlagLong(&c.showVersion, "version", 0, "Print version information")
 }
 
 func (c *appConfig) set(key, val string) configSetResult {
@@ -224,18 +224,28 @@ func (c *appConfig) parseConfigFile(path string) error {
 	return nil
 }
 
-// findDefaultConfigPath searches the conventional locations for an mgraftcp
+// findDefaultConfigPath searches the conventional locations for a graftcp
 // configuration file and returns the first match, or "" when none exists.
 func (c *appConfig) findDefaultConfigPath() string {
-	candidates := []string{filepath.Join(filepath.Dir(local.GetExePath()), "mgraftcp.conf")}
+	exeDir := filepath.Dir(local.GetExePath())
+	candidates := []string{
+		filepath.Join(exeDir, "graftcp.conf"),
+		filepath.Join(exeDir, "mgraftcp.conf"),
+	}
 
 	if xdgConfPath := os.Getenv("XDG_CONFIG_HOME"); xdgConfPath != "" {
-		candidates = append(candidates, filepath.Join(xdgConfPath, "mgraftcp", "mgraftcp.conf"))
+		candidates = append(candidates,
+			filepath.Join(xdgConfPath, "graftcp", "graftcp.conf"),
+			filepath.Join(xdgConfPath, "mgraftcp", "mgraftcp.conf"),
+		)
 	}
 	if homeDir, err := os.UserHomeDir(); err == nil {
-		candidates = append(candidates, filepath.Join(homeDir, ".config", "mgraftcp", "mgraftcp.conf"))
+		candidates = append(candidates,
+			filepath.Join(homeDir, ".config", "graftcp", "graftcp.conf"),
+			filepath.Join(homeDir, ".config", "mgraftcp", "mgraftcp.conf"),
+		)
 	}
-	candidates = append(candidates, "/etc/mgraftcp/mgraftcp.conf")
+	candidates = append(candidates, "/etc/graftcp/graftcp.conf", "/etc/mgraftcp/mgraftcp.conf")
 
 	for _, p := range candidates {
 		if _, err := os.Stat(p); err != nil {
