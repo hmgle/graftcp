@@ -2,6 +2,7 @@
 *.d
 *.a
 /local/mgraftcp
+/local/graftcp
 /cidr-trie_test
 /compile_commands.json
 /.cache/

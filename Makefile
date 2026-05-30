@@ -19,7 +19,7 @@ ifneq ($(KERNEL), Linux)
 $(error only support Linux now.)
 endif
 
-BASE_VERSION ?= v0.7
+BASE_VERSION ?= v0.8
 RAW_VERSION := $(shell git rev-parse --is-inside-work-tree 1>/dev/null 2>&1 && \
                git describe --tags --always 2>/dev/null || echo "$(BASE_VERSION)")
 ifeq ($(patsubst v%,,$(RAW_VERSION)),$(RAW_VERSION))
