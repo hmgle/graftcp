@@ -5,6 +5,8 @@
 /local/graftcp
 /cidr-trie_test
 /compile_commands.json
+/build/
+/dist/
 /.cache/
 /.gocache/
 /.gomodcache/

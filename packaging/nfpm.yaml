@@ -1,0 +1,53 @@
+name: graftcp
+arch: ${PACKAGE_ARCH}
+platform: linux
+version: ${PACKAGE_VERSION}
+release: "1"
+section: net
+priority: optional
+maintainer: Hmgle <dustgle@gmail.com>
+vendor: hmgle
+homepage: https://github.com/hmgle/graftcp
+license: GPL-3.0-or-later
+description: Redirect TCP connections from Linux processes to SOCKS5 or HTTP proxies.
+
+contents:
+  - src: ./build/package-root/usr/bin/graftcp
+    dst: /usr/bin/graftcp
+    file_info:
+      mode: 0755
+  - src: /usr/bin/graftcp
+    dst: /usr/bin/mgraftcp
+    type: symlink
+  - src: ./COPYING
+    dst: /usr/share/doc/graftcp/COPYING
+    file_info:
+      mode: 0644
+  - src: ./README.md
+    dst: /usr/share/doc/graftcp/README.md
+    file_info:
+      mode: 0644
+  - src: ./README.zh-CN.md
+    dst: /usr/share/doc/graftcp/README.zh-CN.md
+    file_info:
+      mode: 0644
+  - src: ./CHANGELOG.md
+    dst: /usr/share/doc/graftcp/CHANGELOG.md
+    file_info:
+      mode: 0644
+  - src: ./example-graftcp.conf
+    dst: /usr/share/doc/graftcp/examples/graftcp.conf
+    file_info:
+      mode: 0644
+  - src: ./example-mgraftcp.conf
+    dst: /usr/share/doc/graftcp/examples/mgraftcp.conf
+    file_info:
+      mode: 0644
+  - src: ./example-blacklist-ip.txt
+    dst: /usr/share/doc/graftcp/examples/blacklist-ip.txt
+    file_info:
+      mode: 0644
+  - src: ./example-whitelist-ip.txt
+    dst: /usr/share/doc/graftcp/examples/whitelist-ip.txt
+    file_info:
+      mode: 0644

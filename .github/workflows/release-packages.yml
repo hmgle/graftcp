@@ -1,0 +1,115 @@
+name: Release packages
+
+on:
+  push:
+    tags:
+      - "v*"
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to package, for example v0.8.1
+        required: true
+        default: v0.8.1
+      upload_to_release:
+        description: Upload built packages to the GitHub release
+        type: boolean
+        required: true
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  NFPM_VERSION: v2.46.3
+  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            package_arch: amd64
+            apt_packages: gcc
+            cross_compile: ""
+          - target: linux-arm64
+            package_arch: arm64
+            apt_packages: gcc-aarch64-linux-gnu
+            cross_compile: aarch64-linux-gnu-
+          - target: linux-armv7
+            package_arch: armv7
+            apt_packages: gcc-arm-linux-gnueabihf
+            cross_compile: arm-linux-gnueabihf-
+          - target: linux-386
+            package_arch: "386"
+            apt_packages: gcc-i686-linux-gnu
+            cross_compile: i686-linux-gnu-
+
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.7"
+          cache-dependency-path: local/go.sum
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make "${{ matrix.apt_packages }}"
+          go install "github.com/goreleaser/nfpm/v2/cmd/nfpm@${NFPM_VERSION}"
+
+      - name: Build packages
+        run: |
+          export PATH="${HOME}/go/bin:${PATH}"
+          scripts/build-release-packages.sh \
+            "${RELEASE_TAG}" \
+            "${{ matrix.target }}" \
+            "${{ matrix.package_arch }}" \
+            "${{ matrix.cross_compile }}"
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish release assets
+    runs-on: ubuntu-24.04
+    needs: build
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.upload_to_release }}
+
+    steps:
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create checksums
+        run: |
+          cd release-assets
+          sha256sum graftcp_* > SHA256SUMS
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release create "${RELEASE_TAG}" \
+              --title "graftcp ${RELEASE_TAG}" \
+              --generate-notes
+          fi
+          gh release upload "${RELEASE_TAG}" release-assets/* --clobber

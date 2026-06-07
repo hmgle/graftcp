@@ -70,10 +70,14 @@ GO_MOD_CACHE_DIR ?= $(CURDIR)/.gomodcache
 
 CC_MACHINE := $(shell $(CC) -dumpmachine 2>/dev/null)
 TARGET_GOARCH :=
+TARGET_GOARM :=
 ifneq ($(findstring aarch64,$(CC_MACHINE)),)
 	TARGET_GOARCH := arm64
 else ifneq ($(findstring arm,$(CC_MACHINE)),)
 	TARGET_GOARCH := arm
+	ifneq ($(findstring gnueabihf,$(CC_MACHINE)),)
+		TARGET_GOARM := 7
+	endif
 else ifneq ($(or $(findstring i386,$(CC_MACHINE)),$(findstring i486,$(CC_MACHINE)),$(findstring i586,$(CC_MACHINE)),$(findstring i686,$(CC_MACHINE))),)
 	TARGET_GOARCH := 386
 endif
@@ -82,6 +86,9 @@ GO_ENV := GOTOOLCHAIN=local GOCACHE=$(GO_CACHE_DIR) GOMODCACHE=$(GO_MOD_CACHE_DI
 	CGO_ENABLED=1 CC=$(CC) CXX=$(CXX) AR=$(AR)
 ifdef TARGET_GOARCH
 	GO_ENV += GOOS=linux GOARCH=$(TARGET_GOARCH)
+endif
+ifdef TARGET_GOARM
+	GO_ENV += GOARM=$(TARGET_GOARM)
 endif
 
 .DEFAULT_GOAL := all

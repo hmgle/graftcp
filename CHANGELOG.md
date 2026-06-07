@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v0.8.1] - 2026-06-07
+
+### Added
+
+- GitHub Actions release packaging for Linux `amd64`, `arm64`, `armv7`, and `386`.
+- Release assets now include `.deb`, `.rpm`, and `.tar.gz` packages plus SHA-256 checksums.
+
 ## [v0.8.0] - 2026-05-30
 
 ### Added
