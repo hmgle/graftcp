@@ -90,6 +90,14 @@ func main() {
 		return
 	}
 
+	flagset := currentFlagSet()
+	if flagset["socks5"] {
+		cfg.socks5AddrSet = true
+	}
+	if cfg.httpProxyAddr != "" && !cfg.socks5AddrSet {
+		cfg.socks5Addr = ""
+	}
+
 	l, err := local.NewLocalListener(":0")
 	if err != nil {
 		appErrorf("%v\n", err)

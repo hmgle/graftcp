@@ -25,10 +25,7 @@ type bufferedConn struct {
 }
 
 func (c *bufferedConn) Read(b []byte) (int, error) {
-	if c.r.Buffered() > 0 {
-		return c.r.Read(b)
-	}
-	return c.Conn.Read(b)
+	return c.r.Read(b)
 }
 
 func (h *httpDialer) Dial(network, addr string) (net.Conn, error) {

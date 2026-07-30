@@ -126,3 +126,73 @@ func TestHTTPProxyDialNon200StatusReturnsErrorWithoutPanic(t *testing.T) {
 		})
 	}
 }
+
+func TestHTTPProxyDialMultipleReads(t *testing.T) {
+	const data1 = "first part"
+	const data2 = "second part"
+
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		defer clientConn.Close()
+
+		_ = clientConn.SetDeadline(time.Now().Add(2 * time.Second))
+		r := bufio.NewReader(clientConn)
+		for {
+			line, err := r.ReadString('\n')
+			if err != nil {
+				t.Errorf("read CONNECT request: %v", err)
+				return
+			}
+			if line == "\r\n" {
+				break
+			}
+		}
+		if _, err := io.WriteString(clientConn, "HTTP/1.1 200 Connection Established\r\n\r\n"+data1); err != nil {
+			t.Errorf("write CONNECT response: %v", err)
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+		if _, err := io.WriteString(clientConn, data2); err != nil {
+			t.Errorf("write second part: %v", err)
+			return
+		}
+	}()
+
+	dialer := &httpDialer{
+		host: "proxy.test:8080",
+		forward: dialerFunc(func(network, addr string) (net.Conn, error) {
+			return serverConn, nil
+		}),
+	}
+
+	conn, err := dialer.Dial("tcp", "target.test:443")
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer conn.Close()
+
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+
+	buf := make([]byte, len(data1))
+	if _, err := io.ReadFull(conn, buf); err != nil {
+		t.Fatalf("ReadFull data1 error = %v", err)
+	}
+	if string(buf) != data1 {
+		t.Fatalf("got data1 = %q, want %q", string(buf), data1)
+	}
+
+	buf2 := make([]byte, len(data2))
+	if _, err := io.ReadFull(conn, buf2); err != nil {
+		t.Fatalf("ReadFull data2 error = %v", err)
+	}
+	if string(buf2) != data2 {
+		t.Fatalf("got data2 = %q, want %q", string(buf2), data2)
+	}
+
+	<-serverDone
+}
+

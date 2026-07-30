@@ -31,6 +31,8 @@ type appConfig struct {
 	notIgnoreLocal bool
 	enableDebugLog bool
 
+	socks5AddrSet bool
+
 	help        bool
 	showVersion bool
 }
@@ -77,6 +79,7 @@ func (c *appConfig) set(key, val string) configSetResult {
 	switch strings.ToLower(key) {
 	case "socks5":
 		c.socks5Addr = val
+		c.socks5AddrSet = true
 	case "socks5_username":
 		c.socks5User = val
 	case "socks5_password":
