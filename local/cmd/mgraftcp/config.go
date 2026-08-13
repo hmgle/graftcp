@@ -43,18 +43,31 @@ const (
 	configSetInvalid
 )
 
+// defaultSocks5Addr is the fallback upstream used only when neither a SOCKS5
+// nor an HTTP proxy is configured (see applyProxyDefaults).
+const defaultSocks5Addr = "127.0.0.1:1080"
+
 func defaultConfig() appConfig {
 	return appConfig{
 		selectProxyMode: "auto",
-		socks5Addr:      "127.0.0.1:1080",
 		dnsServer:       "1.1.1.1:53",
+	}
+}
+
+// applyProxyDefaults installs the loopback SOCKS5 default only when the user
+// configured no proxy at all. When any proxy was set explicitly (via flag or
+// config file), an empty socks5Addr is honored, so auto/random mode never
+// dials a SOCKS5 endpoint the user did not ask for.
+func (c *appConfig) applyProxyDefaults() {
+	if c.socks5Addr == "" && c.httpProxyAddr == "" {
+		c.socks5Addr = defaultSocks5Addr
 	}
 }
 
 func (c *appConfig) registerFlags() {
 	getopt.FlagLong(&c.httpProxyAddr, "http_proxy", 0, "http proxy address, e.g.: 127.0.0.1:8080")
 	getopt.FlagLong(&c.selectProxyMode, "select_proxy_mode", 0, "Set the mode for select a proxy [auto | random | only_http_proxy | only_socks5 | direct]")
-	getopt.FlagLong(&c.socks5Addr, "socks5", 0, "SOCKS5 address, e.g.: 127.0.0.1:1080 or unix:/path/tor.sock")
+	getopt.FlagLong(&c.socks5Addr, "socks5", 0, "SOCKS5 address, e.g.: 127.0.0.1:1080 or unix:/path/tor.sock (default 127.0.0.1:1080 when no proxy is configured)")
 	getopt.FlagLong(&c.socks5User, "socks5_username", 0, "SOCKS5 username")
 	getopt.FlagLong(&c.socks5Pwd, "socks5_password", 0, "SOCKS5 password")
 	getopt.FlagLong(&c.dnsProxy, "enable-dns", 0, "Enable DNS proxy for UDP/53 queries")

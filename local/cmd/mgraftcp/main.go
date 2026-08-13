@@ -89,6 +89,7 @@ func main() {
 		retCode = 1
 		return
 	}
+	cfg.applyProxyDefaults()
 
 	l, err := local.NewLocalListener(":0")
 	if err != nil {

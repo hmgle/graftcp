@@ -183,6 +183,32 @@ func TestParseBoolUnknownValueLeavesFieldUnchanged(t *testing.T) {
 	}
 }
 
+func TestApplyProxyDefaults(t *testing.T) {
+	cases := []struct {
+		name           string
+		socks5Addr     string
+		httpProxyAddr  string
+		wantSocks5Addr string
+	}{
+		{name: "no proxy configured", wantSocks5Addr: defaultSocks5Addr},
+		{name: "http proxy only", httpProxyAddr: "127.0.0.1:8080", wantSocks5Addr: ""},
+		{name: "explicit socks5", socks5Addr: "10.0.0.1:1080", wantSocks5Addr: "10.0.0.1:1080"},
+		{name: "both proxies", socks5Addr: "10.0.0.1:1080", httpProxyAddr: "127.0.0.1:8080", wantSocks5Addr: "10.0.0.1:1080"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := defaultConfig()
+			cfg.socks5Addr = tc.socks5Addr
+			cfg.httpProxyAddr = tc.httpProxyAddr
+			cfg.applyProxyDefaults()
+			if cfg.socks5Addr != tc.wantSocks5Addr {
+				t.Fatalf("applyProxyDefaults() socks5Addr = %q, want %q", cfg.socks5Addr, tc.wantSocks5Addr)
+			}
+		})
+	}
+}
+
 func TestConfigSetUnknownKey(t *testing.T) {
 	cfg := defaultConfig()
 	if got := cfg.set("typo_key", "true"); got != configSetUnknown {
