@@ -183,7 +183,7 @@ func TestParseBoolUnknownValueLeavesFieldUnchanged(t *testing.T) {
 	}
 }
 
-func TestApplyProxyDefaults(t *testing.T) {
+func TestResolveSocks5Default(t *testing.T) {
 	cases := []struct {
 		name           string
 		socks5Addr     string
@@ -201,9 +201,60 @@ func TestApplyProxyDefaults(t *testing.T) {
 			cfg := defaultConfig()
 			cfg.socks5Addr = tc.socks5Addr
 			cfg.httpProxyAddr = tc.httpProxyAddr
-			cfg.applyProxyDefaults()
+			if err := cfg.resolve(); err != nil {
+				t.Fatalf("resolve() error = %v", err)
+			}
 			if cfg.socks5Addr != tc.wantSocks5Addr {
-				t.Fatalf("applyProxyDefaults() socks5Addr = %q, want %q", cfg.socks5Addr, tc.wantSocks5Addr)
+				t.Fatalf("resolve() socks5Addr = %q, want %q", cfg.socks5Addr, tc.wantSocks5Addr)
+			}
+		})
+	}
+}
+
+func TestResolveDNSUDPToggles(t *testing.T) {
+	cases := []struct {
+		name         string
+		dnsProxy     bool
+		disableDNS   bool
+		udpProxy     bool
+		disableUDP   bool
+		wantErr      bool
+		wantDNSProxy bool
+		wantUDPProxy bool
+	}{
+		{name: "defaults keep both disabled"},
+		{name: "enable dns", dnsProxy: true, wantDNSProxy: true},
+		{name: "enable udp", udpProxy: true, wantUDPProxy: true},
+		{name: "disable dns alone", disableDNS: true},
+		{name: "disable udp alone", disableUDP: true},
+		{name: "conflicting dns flags", dnsProxy: true, disableDNS: true, wantErr: true},
+		{name: "conflicting udp flags", udpProxy: true, disableUDP: true, wantErr: true},
+		{name: "disable dns keeps udp", disableDNS: true, udpProxy: true, wantUDPProxy: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := defaultConfig()
+			cfg.dnsProxy = tc.dnsProxy
+			cfg.disableDNS = tc.disableDNS
+			cfg.udpProxy = tc.udpProxy
+			cfg.disableUDP = tc.disableUDP
+
+			err := cfg.resolve()
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("resolve() error = nil, want an error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolve() error = %v", err)
+			}
+			if cfg.dnsProxy != tc.wantDNSProxy {
+				t.Fatalf("resolve() dnsProxy = %v, want %v", cfg.dnsProxy, tc.wantDNSProxy)
+			}
+			if cfg.udpProxy != tc.wantUDPProxy {
+				t.Fatalf("resolve() udpProxy = %v, want %v", cfg.udpProxy, tc.wantUDPProxy)
 			}
 		})
 	}
