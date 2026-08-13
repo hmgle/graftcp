@@ -61,8 +61,8 @@ Usage: graftcp [-hn] [-b value] [--config value] [--disable-dns] [--disable-udp]
                     Set the mode for select a proxy [auto | random |
                     only_http_proxy | only_socks5 | direct] [auto]
      --socks5=value
-                    SOCKS5 address, e.g.: 127.0.0.1:1080 or
-                    unix:/path/tor.sock [127.0.0.1:1080]
+                    SOCKS5 address, e.g.: 127.0.0.1:1080 or unix:/path/tor.sock
+                    (default 127.0.0.1:1080 when no proxy is configured)
      --socks5_password=value
                     SOCKS5 password
      --socks5_username=value
@@ -130,6 +130,7 @@ Usage: graftcp [-hn] [-b value] [--config value] [--disable-dns] [--disable-udp]
 - 通用 UDP 代理默认关闭；使用 `--enable-udp` 启用。
 - HTTP 代理模式不支持通用 UDP。`auto` 会优先尝试 SOCKS5 UDP，失败时回退 direct UDP；`only_http_proxy` 会拒绝通用 UDP session。
 - SOCKS5 可以使用 TCP endpoint（`127.0.0.1:1080`），也可以用 Unix socket endpoint（`unix:/path/tor.sock` 或 `/path/tor.sock`）承载 TCP CONNECT 流量。SOCKS5 UDP ASSOCIATE 仍然要求 TCP SOCKS5 endpoint。
+- 当 `--socks5` 和 `--http_proxy` 都没有配置时，graftcp 会回退到 SOCKS5 `127.0.0.1:1080`。只要配置了任意一个代理，这个隐含默认值就不再生效，因此单独使用 `--http_proxy` 时不会去连接任何 SOCKS5 endpoint。
 - 同时启用 DNS 和通用 UDP 时，UDP/53 优先走 DNS-over-TCP 路径。
 - 配置文件支持代理地址和常见路由选项；命令行参数仍然覆盖配置文件。
 - TCP 和通用 UDP syscall 地址缓冲区会在 `connect()` / `sendto()` / `sendmsg()` 返回后 best-effort 恢复；DNS proxy 改写会保留下来，以兼容 resolver 的来源地址校验。如果客户端强依赖 `recvfrom()` 返回原始远端地址，透明性仍可能不完整。
