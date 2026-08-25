@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- Install the implicit SOCKS5 fallback `127.0.0.1:1080` only when no proxy at
+  all is configured. Previously configuring only `--http_proxy` still created
+  a SOCKS5 dialer pointing at the default address, which `auto` and `random`
+  mode could pick, and `only_socks5` validation silently passed. With only an
+  HTTP proxy configured, `only_socks5` now fails startup validation instead of
+  using the unintended endpoint. Supersedes the SOCKS5-fallback half of #93.
+
 ## [v0.8.3] - 2026-07-15
 
 ### Fixed

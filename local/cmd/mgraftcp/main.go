@@ -89,6 +89,11 @@ func main() {
 		retCode = 1
 		return
 	}
+	if err := cfg.resolve(); err != nil {
+		appErrorf("%v\n", err)
+		retCode = 1
+		return
+	}
 
 	l, err := local.NewLocalListener(":0")
 	if err != nil {
@@ -105,22 +110,6 @@ func main() {
 		appErrorf("%v\n", err)
 		retCode = 1
 		return
-	}
-	if cfg.disableDNS && cfg.dnsProxy {
-		appErrorf("--enable-dns and --disable-dns cannot be used together\n")
-		retCode = 1
-		return
-	}
-	if cfg.disableDNS {
-		cfg.dnsProxy = false
-	}
-	if cfg.disableUDP && cfg.udpProxy {
-		appErrorf("--enable-udp and --disable-udp cannot be used together\n")
-		retCode = 1
-		return
-	}
-	if cfg.disableUDP {
-		cfg.udpProxy = false
 	}
 	activeRegistry = l.Registry()
 	activeUDPRegistry = l.UDPRegistry()

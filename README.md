@@ -61,8 +61,8 @@ Usage: graftcp [-hn] [-b value] [--config value] [--disable-dns] [--disable-udp]
                     Set the mode for select a proxy [auto | random |
                     only_http_proxy | only_socks5 | direct] [auto]
      --socks5=value
-                    SOCKS5 address, e.g.: 127.0.0.1:1080 or
-                    unix:/path/tor.sock [127.0.0.1:1080]
+                    SOCKS5 address, e.g.: 127.0.0.1:1080 or unix:/path/tor.sock
+                    (default 127.0.0.1:1080 when no proxy is configured)
      --socks5_password=value
                     SOCKS5 password
      --socks5_username=value
@@ -130,6 +130,7 @@ When generic UDP proxying is enabled, `graftcp` starts a separate UDP listener. 
 - Generic UDP proxying is disabled by default. Use `--enable-udp` to enable it.
 - HTTP proxy mode does not support generic UDP. `auto` prefers SOCKS5 UDP when available and falls back to direct UDP if the SOCKS5 UDP association fails; `only_http_proxy` rejects generic UDP sessions.
 - SOCKS5 can use a TCP endpoint (`127.0.0.1:1080`) or a Unix socket endpoint (`unix:/path/tor.sock` or `/path/tor.sock`) for TCP CONNECT traffic. SOCKS5 UDP ASSOCIATE still requires a TCP SOCKS5 endpoint.
+- When neither `--socks5` nor `--http_proxy` is configured, graftcp falls back to SOCKS5 `127.0.0.1:1080`. Configuring any proxy disables this implicit default, so `--http_proxy` alone never dials a SOCKS5 endpoint.
 - DNS proxying has precedence over generic UDP for UDP/53 when both are enabled.
 - The proxy configuration file covers proxy endpoints and the common routing flags. CLI flags still override config values.
 - TCP and generic UDP syscall address buffers are restored after `connect()` / `sendto()` / `sendmsg()` returns on a best-effort basis; DNS proxy rewrites are kept in place for resolver source-address checks. Clients that require `recvfrom()` to report the original remote address may still not be fully transparent.

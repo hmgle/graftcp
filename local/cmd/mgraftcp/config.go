@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,18 +44,53 @@ const (
 	configSetInvalid
 )
 
+// defaultSocks5Addr is the fallback upstream installed by resolve when neither
+// a SOCKS5 nor an HTTP proxy is configured.
+const defaultSocks5Addr = "127.0.0.1:1080"
+
+// socks5FlagHelp documents the conditional default, which getopt cannot render
+// itself because socks5Addr is empty until resolve runs.
+const socks5FlagHelp = "SOCKS5 address, e.g.: " + defaultSocks5Addr +
+	" or unix:/path/tor.sock (default " + defaultSocks5Addr +
+	" when no proxy is configured)"
+
+// defaultConfig returns the static defaults, i.e. the values that do not depend
+// on any other setting. Flags and the config file are merged on top of them;
+// everything derived from the merged result belongs in resolve.
 func defaultConfig() appConfig {
 	return appConfig{
 		selectProxyMode: "auto",
-		socks5Addr:      "127.0.0.1:1080",
 		dnsServer:       "1.1.1.1:53",
 	}
+}
+
+// resolve completes the configuration once every source (static defaults,
+// flags and the config file) has been merged. It is the single place for
+// settings whose value depends on other settings, and it rejects combinations
+// that contradict each other.
+func (c *appConfig) resolve() error {
+	// Install the loopback SOCKS5 fallback only when the user configured no
+	// proxy at all, so auto/random mode never dials a SOCKS5 endpoint that
+	// was not asked for. An address configured as empty counts as unset.
+	if c.socks5Addr == "" && c.httpProxyAddr == "" {
+		c.socks5Addr = defaultSocks5Addr
+	}
+
+	if c.disableDNS && c.dnsProxy {
+		return errors.New("--enable-dns and --disable-dns cannot be used together")
+	}
+	if c.disableUDP && c.udpProxy {
+		return errors.New("--enable-udp and --disable-udp cannot be used together")
+	}
+	c.dnsProxy = c.dnsProxy && !c.disableDNS
+	c.udpProxy = c.udpProxy && !c.disableUDP
+	return nil
 }
 
 func (c *appConfig) registerFlags() {
 	getopt.FlagLong(&c.httpProxyAddr, "http_proxy", 0, "http proxy address, e.g.: 127.0.0.1:8080")
 	getopt.FlagLong(&c.selectProxyMode, "select_proxy_mode", 0, "Set the mode for select a proxy [auto | random | only_http_proxy | only_socks5 | direct]")
-	getopt.FlagLong(&c.socks5Addr, "socks5", 0, "SOCKS5 address, e.g.: 127.0.0.1:1080 or unix:/path/tor.sock")
+	getopt.FlagLong(&c.socks5Addr, "socks5", 0, socks5FlagHelp)
 	getopt.FlagLong(&c.socks5User, "socks5_username", 0, "SOCKS5 username")
 	getopt.FlagLong(&c.socks5Pwd, "socks5_password", 0, "SOCKS5 password")
 	getopt.FlagLong(&c.dnsProxy, "enable-dns", 0, "Enable DNS proxy for UDP/53 queries")
