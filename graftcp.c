@@ -20,6 +20,7 @@
 #include <stddef.h>
 #include <pwd.h>
 #include <grp.h>
+#include <sys/ioctl.h>
 #include <sys/prctl.h>
 #include <netinet/udp.h>
 #include <linux/version.h>
@@ -445,7 +446,9 @@ static bool ip6_is_ignore(uint8_t *ip)
 	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_unshare, \
 		 SECCOMP_JUMP_OFFSET(base##_UNSHARE, base##_RET_TRACE), 0), \
 	SECCOMP_TRACE_CLONE3(base) \
-	SECCOMP_TRACE_CLOSE_RANGE(base)
+	SECCOMP_TRACE_CLOSE_RANGE(base) \
+	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_ioctl, \
+		 SECCOMP_JUMP_OFFSET(base##_IOCTL, base##_IOCTL_ARGS), 0),
 #define SECCOMP_TRACE_DUP_SYSCALLS(base)				\
 	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_dup,			\
 		 SECCOMP_JUMP_OFFSET(base##_DUP, base##_RET_TRACE), 0),	\
@@ -458,6 +461,13 @@ static bool ip6_is_ignore(uint8_t *ip)
 #define SECCOMP_JUMP_OFFSET(from, to) ((to) - (from) - 1)
 #define SECCOMP_LAYOUT_CHECK(name, expr)				\
 	enum { name = 1 / !!(expr) }
+#define SECCOMP_IOCTL_ARG_FILTER(base)					\
+	BPF_STMT(BPF_LD | BPF_W | BPF_ABS, SECCOMP_ARG_LO32_OFFSET(1)),	\
+	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, FIOCLEX,			\
+		 SECCOMP_JUMP_OFFSET(base##_FIOCLEX, base##_RET_TRACE), 0), \
+	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, FIONCLEX,			\
+		 SECCOMP_JUMP_OFFSET(base##_FIONCLEX, base##_RET_TRACE),	\
+		 SECCOMP_JUMP_OFFSET(base##_FIONCLEX, base##_RET_ALLOW))
 /*
  * These checks only need the low 32 bits of seccomp_data.args[]. Keep
  * SECCOMP_SOCKET_ARG_FILTER_LEN in sync with this macro, and keep the macro
@@ -489,6 +499,7 @@ static void install_seccomp()
 #ifdef SYS_close_range
 		FILTER_CLOSE_RANGE,
 #endif
+		FILTER_IOCTL,
 		FILTER_DUP,
 	#ifdef SYS_dup2
 		FILTER_DUP2,
@@ -499,6 +510,9 @@ static void install_seccomp()
 		FILTER_FCNTL64,
 	#endif
 		FILTER_ALLOW_JUMP,
+		FILTER_IOCTL_ARGS,
+		FILTER_FIOCLEX,
+		FILTER_FIONCLEX,
 		FILTER_SOCKET_ARGS,
 		FILTER_RET_TRACE =
 			FILTER_SOCKET_ARGS + SECCOMP_SOCKET_ARG_FILTER_LEN,
@@ -520,6 +534,7 @@ static void install_seccomp()
 #ifdef SYS_close_range
 		UDP_FILTER_CLOSE_RANGE,
 #endif
+		UDP_FILTER_IOCTL,
 		UDP_FILTER_DUP,
 	#ifdef SYS_dup2
 		UDP_FILTER_DUP2,
@@ -530,6 +545,9 @@ static void install_seccomp()
 		UDP_FILTER_FCNTL64,
 	#endif
 		UDP_FILTER_ALLOW_JUMP,
+		UDP_FILTER_IOCTL_ARGS,
+		UDP_FILTER_FIOCLEX,
+		UDP_FILTER_FIONCLEX,
 		UDP_FILTER_SOCKET_ARGS,
 		UDP_FILTER_RET_TRACE =
 			UDP_FILTER_SOCKET_ARGS + SECCOMP_SOCKET_ARG_FILTER_LEN,
@@ -554,6 +572,7 @@ static void install_seccomp()
 		BPF_STMT(BPF_JMP | BPF_JA,
 			 SECCOMP_JUMP_OFFSET(FILTER_ALLOW_JUMP,
 					     FILTER_RET_ALLOW)),
+		SECCOMP_IOCTL_ARG_FILTER(FILTER),
 		SECCOMP_SOCKET_ARG_FILTER,
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
@@ -590,6 +609,7 @@ static void install_seccomp()
 		BPF_STMT(BPF_JMP | BPF_JA,
 			 SECCOMP_JUMP_OFFSET(UDP_FILTER_ALLOW_JUMP,
 					     UDP_FILTER_RET_ALLOW)),
+		SECCOMP_IOCTL_ARG_FILTER(UDP_FILTER),
 		SECCOMP_SOCKET_ARG_FILTER,
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
@@ -1123,6 +1143,11 @@ int trace_syscall_entering(struct proc_info *pinfp)
 	case SYS_unshare:
 		pinfp->fd_args[0] = get_syscall_arg(pinfp->pid, 0);
 		break;
+	case SYS_ioctl:
+		pinfp->fd_args[1] = get_syscall_arg(pinfp->pid, 1);
+		if (pinfp->fd_args[1] == FIOCLEX || pinfp->fd_args[1] == FIONCLEX)
+			pinfp->fd_args[0] = get_syscall_arg(pinfp->pid, 0);
+		break;
 #ifdef SYS_close_range
 	case SYS_close_range:
 		for (int i = 0; i < 3; i++)
@@ -1260,6 +1285,12 @@ int trace_syscall_exiting(struct proc_info *pinfp)
 	case SYS_unshare:
 		if ((pinfp->fd_args[0] & CLONE_FILES) && get_retval(pinfp->pid) == 0)
 			unshare_files(pinfp);
+		break;
+	case SYS_ioctl:
+		if ((pinfp->fd_args[1] == FIOCLEX || pinfp->fd_args[1] == FIONCLEX) &&
+		    get_retval(pinfp->pid) == 0)
+			set_socket_cloexec(pinfp, pinfp->fd_args[0],
+					   pinfp->fd_args[1] == FIOCLEX);
 		break;
 #ifdef SYS_close_range
 	case SYS_close_range:
