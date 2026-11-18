@@ -66,9 +66,9 @@ func traceUDPProbe(t *testing.T, registry *local.DatagramRouteRegistry, port str
 
 func TestCorkedUDPSurvivesIdleSweep(t *testing.T) {
 	probe := filepath.Join(t.TempDir(), "udp-cork")
-	buildTracerProbe(t, probe, filepath.Join("testdata", "udp-cork.c"))
+	buildTracerProbe(t, probe, "-pthread", filepath.Join("testdata", "udp-cork.c"))
 
-	for _, mode := range []string{"sendto", "sendmsg", "setsockopt"} {
+	for _, mode := range []string{"sendto", "sendmsg", "setsockopt", "thread", "fork", "native-fork"} {
 		t.Run(mode, func(t *testing.T) {
 			l, err := local.NewLocal(":0", "", "", "", "")
 			if err != nil {
@@ -107,7 +107,11 @@ func TestCorkedUDPSurvivesIdleSweep(t *testing.T) {
 				swept <- sweepBeforeFlush(control, registry, upstreamAddr)
 			}()
 			targetPort := strconv.Itoa(upstream.LocalAddr().(*net.UDPAddr).Port)
-			if code := traceUDPProbe(t, registry, strconv.Itoa(port), probe, mode, targetPort, controlName); code != 0 {
+			code := traceUDPProbe(t, registry, strconv.Itoa(port), probe, mode, targetPort, controlName)
+			if mode == "native-fork" && code == 77 {
+				t.Skip("architecture has no native fork syscall")
+			}
+			if code != 0 {
 				t.Errorf("tracee exit status = %d", code)
 			}
 			if err := <-swept; err != nil {

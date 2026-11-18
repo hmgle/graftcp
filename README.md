@@ -136,7 +136,7 @@ When generic UDP proxying is enabled, `graftcp` starts a separate UDP listener. 
 - The proxy configuration file covers proxy endpoints and the common routing flags. CLI flags still override config values.
 - TCP and generic UDP syscall address buffers are restored after `connect()` / `sendto()` / `sendmsg()` returns on a best-effort basis; DNS proxy rewrites are kept in place for resolver source-address checks. Clients that require `recvfrom()` to report the original remote address may still not be fully transparent.
 - IPv6 is intentionally simplified to the IPv4-mapped loopback path; sockets that require `IPV6_V6ONLY=1` are out of scope by design.
-- Socket tracking is best-effort and keyed by traced pid/fd state. `dup*` and `fcntl(F_DUPFD*)` are copied best-effort, but `close_range()`, `unshare(CLONE_FILES)`, and full shared fd-table semantics are intentionally not modeled.
+- Socket tracking uses the descriptor operations graftcp observes. It tracks aliases created by `dup*` and `fcntl(F_DUPFD*)`. A successful `unshare(CLONE_FILES)` separates the caller’s tracked table. When the build headers expose `close_range()`, graftcp handles successful range closes, including `CLOSE_RANGE_UNSHARE` and `CLOSE_RANGE_CLOEXEC`. Descriptors received via `SCM_RIGHTS` can go untracked.
 - Loopback-token registrations are reclaimed on accept or by idle cleanup, not on every failed or abandoned connect.
 - The design intentionally favors a single in-process tracer/proxy and loopback-token routing over the old daemon/FIFO/socket-lookup model.
 

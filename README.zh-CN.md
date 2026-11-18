@@ -136,7 +136,7 @@ Usage: graftcp [-hn] [-b value] [--config value] [--disable-dns] [--disable-udp]
 - 配置文件支持代理地址和常见路由选项；命令行参数仍然覆盖配置文件。
 - TCP 和通用 UDP syscall 地址缓冲区会在 `connect()` / `sendto()` / `sendmsg()` 返回后 best-effort 恢复；DNS proxy 改写会保留下来，以兼容 resolver 的来源地址校验。如果客户端强依赖 `recvfrom()` 返回原始远端地址，透明性仍可能不完整。
 - IPv6 故意统一走 IPv4-mapped loopback；依赖 `IPV6_V6ONLY=1` 的 socket 不在当前设计目标内。
-- socket 跟踪按被跟踪 pid/fd 状态做 best-effort；`dup*` 和 `fcntl(F_DUPFD*)` 会 best-effort 复制，但 `close_range()`、`unshare(CLONE_FILES)` 和完整共享 fd table 语义属于有意不覆盖的边界。
+- graftcp 根据观察到的描述符操作跟踪 socket，包括由 `dup*` 和 `fcntl(F_DUPFD*)` 创建的别名。`unshare(CLONE_FILES)` 成功后，调用者使用独立的跟踪表。若编译时的头文件提供 `close_range()` 系统调用号，graftcp 会处理成功的区间关闭操作，包括 `CLOSE_RANGE_UNSHARE` 和 `CLOSE_RANGE_CLOEXEC`。通过 `SCM_RIGHTS` 接收的描述符可能漏跟踪。
 - loopback token 会在本地 listener 成功 `accept()` 或空闲清理时回收，不保证覆盖每一个失败或放弃的连接。
 - 当前设计有意优先采用单进程 tracer/proxy 与 loopback token 路由，不再使用旧的守护进程、FIFO 和 socket 反查模型。
 

@@ -16,6 +16,13 @@
 
 #include "graftcp.h"
 
+struct socket_table {
+	unsigned int refs;
+	unsigned int count;
+	unsigned int cap;
+	struct tracked_socket *sockets;
+};
+
 /* Shared by the tracked descriptors referring to one UDP socket. */
 struct udp_socket_state {
 	unsigned int refs;
@@ -35,8 +42,8 @@ static int find_tracked_socket_fd(const struct proc_info *pinfp, int fd)
 	if (pinfp == NULL || fd < 0)
 		return -1;
 
-	for (i = 0; i < pinfp->tracked_socket_count; i++) {
-		if (pinfp->tracked_sockets[i].fd == fd)
+	for (i = 0; i < pinfp->files->count; i++) {
+		if (pinfp->files->sockets[i].fd == fd)
 			return (int)i;
 	}
 	return -1;
@@ -49,23 +56,23 @@ static int set_tracked_socket(struct proc_info *pinfp, struct tracked_socket soc
 	int idx = find_tracked_socket_fd(pinfp, socket.fd);
 
 	if (idx < 0) {
-		if (pinfp->tracked_socket_count >= pinfp->tracked_socket_cap) {
-			new_cap = pinfp->tracked_socket_cap ?
-				  pinfp->tracked_socket_cap * 2 : TRACKED_SOCKET_INITIAL_CAP;
-			sockets = realloc(pinfp->tracked_sockets,
-					  new_cap * sizeof(*pinfp->tracked_sockets));
+		if (pinfp->files->count >= pinfp->files->cap) {
+			new_cap = pinfp->files->cap ?
+				  pinfp->files->cap * 2 : TRACKED_SOCKET_INITIAL_CAP;
+			sockets = realloc(pinfp->files->sockets,
+					  new_cap * sizeof(*pinfp->files->sockets));
 			if (sockets == NULL)
 				return -1;
-			pinfp->tracked_sockets = sockets;
-			pinfp->tracked_socket_cap = new_cap;
+			pinfp->files->sockets = sockets;
+			pinfp->files->cap = new_cap;
 		}
-		idx = pinfp->tracked_socket_count++;
-		pinfp->tracked_sockets[idx].udp = NULL;
+		idx = pinfp->files->count++;
+		pinfp->files->sockets[idx].udp = NULL;
 	}
 	if (socket.udp != NULL)
 		socket.udp->refs++;
-	release_udp_socket_state(pinfp->tracked_sockets[idx].udp);
-	pinfp->tracked_sockets[idx] = socket;
+	release_udp_socket_state(pinfp->files->sockets[idx].udp);
+	pinfp->files->sockets[idx] = socket;
 	return 0;
 }
 
@@ -98,22 +105,9 @@ int copy_tracked_socket_fd(struct proc_info *dst, const struct proc_info *src,
 	idx = find_tracked_socket_fd(src, oldfd);
 	if (idx < 0)
 		return 0;
-	socket = src->tracked_sockets[idx];
+	socket = src->files->sockets[idx];
 	socket.fd = newfd;
 	return set_tracked_socket(dst, socket);
-}
-
-int copy_tracked_sockets(struct proc_info *dst, const struct proc_info *src)
-{
-	unsigned int i;
-
-	if (dst == NULL || src == NULL)
-		return -1;
-	for (i = 0; i < src->tracked_socket_count; i++) {
-		if (set_tracked_socket(dst, src->tracked_sockets[i]) < 0)
-			return -1;
-	}
-	return 0;
 }
 
 bool is_tracked_socket_fd(struct proc_info *pinfp, int fd)
@@ -127,7 +121,7 @@ static bool is_tracked_socket_type(struct proc_info *pinfp, int fd, int type)
 
 	if (idx < 0)
 		return false;
-	return (pinfp->tracked_sockets[idx].type & SOCK_TYPE_MASK) == type;
+	return (pinfp->files->sockets[idx].type & SOCK_TYPE_MASK) == type;
 }
 
 bool is_tracked_stream_socket_fd(struct proc_info *pinfp, int fd)
@@ -144,16 +138,16 @@ void mark_socket_may_cork(struct proc_info *pinfp, int fd)
 {
 	int idx = find_tracked_socket_fd(pinfp, fd);
 
-	if (idx >= 0 && pinfp->tracked_sockets[idx].udp != NULL)
-		pinfp->tracked_sockets[idx].udp->may_cork = true;
+	if (idx >= 0 && pinfp->files->sockets[idx].udp != NULL)
+		pinfp->files->sockets[idx].udp->may_cork = true;
 }
 
 bool socket_may_cork(struct proc_info *pinfp, int fd)
 {
 	int idx = find_tracked_socket_fd(pinfp, fd);
 
-	return idx >= 0 && pinfp->tracked_sockets[idx].udp != NULL &&
-	       pinfp->tracked_sockets[idx].udp->may_cork;
+	return idx >= 0 && pinfp->files->sockets[idx].udp != NULL &&
+	       pinfp->files->sockets[idx].udp->may_cork;
 }
 
 void untrack_socket_fd(struct proc_info *pinfp, int fd)
@@ -164,9 +158,114 @@ void untrack_socket_fd(struct proc_info *pinfp, int fd)
 	if (idx < 0)
 		return;
 
-	release_udp_socket_state(pinfp->tracked_sockets[idx].udp);
-	pinfp->tracked_sockets[idx] =
-		pinfp->tracked_sockets[--pinfp->tracked_socket_count];
+	release_udp_socket_state(pinfp->files->sockets[idx].udp);
+	pinfp->files->sockets[idx] =
+		pinfp->files->sockets[--pinfp->files->count];
+}
+
+static void release_socket_table(struct socket_table *files)
+{
+	if (--files->refs != 0)
+		return;
+	for (unsigned int i = 0; i < files->count; i++)
+		release_udp_socket_state(files->sockets[i].udp);
+	free(files->sockets);
+	free(files);
+}
+
+static struct socket_table *clone_socket_table(const struct socket_table *src)
+{
+	struct socket_table *files = calloc(1, sizeof(*files));
+
+	if (files == NULL)
+		return NULL;
+	if (src->count != 0) {
+		size_t size = src->count * sizeof(*files->sockets);
+
+		files->sockets = malloc(size);
+		if (!files->sockets) {
+			free(files);
+			return NULL;
+		}
+		memcpy(files->sockets, src->sockets, size);
+		for (unsigned int i = 0; i < src->count; i++) {
+			if (files->sockets[i].udp != NULL)
+				files->sockets[i].udp->refs++;
+		}
+	}
+	files->count = files->cap = src->count;
+	files->refs = 1;
+	return files;
+}
+
+int copy_tracked_sockets(struct proc_info *dst, const struct proc_info *src)
+{
+	struct socket_table *files;
+
+	if (dst == NULL || src == NULL)
+		return -1;
+	files = clone_socket_table(src->files);
+	if (files == NULL)
+		return -1;
+	release_socket_table(dst->files);
+	dst->files = files;
+	return 0;
+}
+
+void share_tracked_sockets(struct proc_info *dst, const struct proc_info *src)
+{
+	++src->files->refs;
+	release_socket_table(dst->files);
+	dst->files = src->files;
+}
+
+int unshare_tracked_sockets(struct proc_info *p)
+{
+	if (p->files->refs == 1)
+		return 0;
+	return copy_tracked_sockets(p, p);
+}
+
+void set_socket_cloexec(struct proc_info *p, int fd, bool enabled)
+{
+	int idx = find_tracked_socket_fd(p, fd);
+
+	if (idx < 0)
+		return;
+	p->files->sockets[idx].type &= ~SOCK_CLOEXEC;
+	if (enabled)
+		p->files->sockets[idx].type |= SOCK_CLOEXEC;
+}
+
+void close_tracked_range(struct proc_info *p, unsigned int first,
+			 unsigned int last, bool cloexec)
+{
+	unsigned int i = 0;
+
+	while (i < p->files->count) {
+		struct tracked_socket *sock = &p->files->sockets[i];
+
+		if ((unsigned int)sock->fd < first || (unsigned int)sock->fd > last) {
+			++i;
+		} else if (cloexec) {
+			sock->type |= SOCK_CLOEXEC;
+			++i;
+		} else {
+			untrack_socket_fd(p, sock->fd);
+		}
+	}
+}
+
+void close_exec_sockets(struct proc_info *p)
+{
+	unsigned int i = 0;
+
+	while (i < p->files->count) {
+		if (p->files->sockets[i].type & SOCK_CLOEXEC)
+			untrack_socket_fd(p, p->files->sockets[i].fd);
+		else
+			++i;
+	}
 }
 
 static struct proc_info *PROC_INFO_TAB;
@@ -199,6 +298,12 @@ struct proc_info *alloc_proc_info(pid_t pid)
 
 	if (newp == NULL)
 		return NULL;
+	newp->files = calloc(1, sizeof(*newp->files));
+	if (newp->files == NULL) {
+		free(newp);
+		return NULL;
+	}
+	newp->files->refs = 1;
 	newp->pid = pid;
 	add_proc_info(newp);
 	return newp;
@@ -206,13 +311,9 @@ struct proc_info *alloc_proc_info(pid_t pid)
 
 void free_proc_info(struct proc_info *p)
 {
-	unsigned int i;
-
 	if (p == NULL)
 		return;
 	del_proc_info(p);
-	for (i = 0; i < p->tracked_socket_count; i++)
-		release_udp_socket_state(p->tracked_sockets[i].udp);
-	free(p->tracked_sockets);
+	release_socket_table(p->files);
 	free(p);
 }
