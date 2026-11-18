@@ -167,17 +167,26 @@ test-go: libgraftcp.a
 CIDR_TRIE_TEST_BIN := cidr-trie_test
 CIDR_TRIE_TEST_OBJS := cidr-trie_test.o cidr-trie.o
 
-$(LIB_OBJS) $(CIDR_TRIE_TEST_OBJS): $(C_CONFIG_STAMP) Makefile
+$(LIB_OBJS) $(CIDR_TRIE_TEST_OBJS) reaped-child_test.o: $(C_CONFIG_STAMP) Makefile
 
 $(CIDR_TRIE_TEST_BIN): $(CIDR_TRIE_TEST_OBJS)
 	$(CC) $(CFLAGS) -o $@ $^
 
-test-c: $(CIDR_TRIE_TEST_BIN)
+reaped-child_test: reaped-child_test.o $(filter-out graftcp.o,$(LIB_OBJS))
+	$(CC) $(CFLAGS) -o $@ $^
+
+test-c: $(CIDR_TRIE_TEST_BIN) reaped-child_test
 	./$(CIDR_TRIE_TEST_BIN)
+	./reaped-child_test stop-first
+	./reaped-child_test death-first
+	./reaped-child_test unqueued
+	./reaped-child_test overlap
+	./reaped-child_test untraced-vfork
 
 clean:
 	$(RM) $(LIB_OBJS) $(LIB_DEPS) libgraftcp.a $(TARGET) $(ALIAS_TARGET) \
 		$(CIDR_TRIE_TEST_BIN) $(CIDR_TRIE_TEST_OBJS) cidr-trie_test.d \
+		reaped-child_test reaped-child_test.o reaped-child_test.d \
 		$(C_CONFIG_STAMP) $(AR_CONFIG_STAMP)
 
--include $(LIB_DEPS) cidr-trie_test.d
+-include $(LIB_DEPS) cidr-trie_test.d reaped-child_test.d

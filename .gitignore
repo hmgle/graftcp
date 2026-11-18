@@ -4,6 +4,7 @@
 /local/mgraftcp
 /local/graftcp
 /cidr-trie_test
+/reaped-child_test
 /compile_commands.json
 /build/
 /dist/

@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -23,11 +25,13 @@ const startupHelperTest = "-test.run=^TestTracerStartupHelper$"
 
 func TestTracerStartupHelper(t *testing.T) {
 	if os.Getenv("GRAFTCP_TEST_TRACER_STARTUP") == "1" {
-		args := []string{"/bin/sh", "-c", "exit 37"}
+		args := []string{"--", "/bin/sh", "-c", "exit 37"}
 		if i := slices.Index(os.Args, "--"); i >= 0 {
+			// The first separator ends the Go test flags. The rest is
+			// the graftcp command line, including its own separator.
 			args = os.Args[i+1:]
 		}
-		os.Args = append([]string{"graftcp", "--config", "/dev/null", "--select_proxy_mode", "direct", "--"}, args...)
+		os.Args = append([]string{"graftcp", "--config", "/dev/null", "--select_proxy_mode", "direct"}, args...)
 		main()
 	}
 }
@@ -39,7 +43,7 @@ func TestTraceeDiesWithTracer(t *testing.T) {
 	}
 	defer reader.Close()
 	defer writer.Close()
-	cmd := exec.Command(os.Args[0], startupHelperTest, "--", "/bin/sh", "-c", "printf R; read -r line")
+	cmd := exec.Command(os.Args[0], startupHelperTest, "--", "--", "/bin/sh", "-c", "printf R; read -r line")
 	cmd.Env = append(os.Environ(), startupHelperEnv)
 	cmd.Stdout = writer
 	cmd.Stderr = os.Stderr
@@ -352,6 +356,61 @@ func TestConcurrentTracerStartup(t *testing.T) {
 	}
 }
 
+func TestTracerResumesChildAfterForkEventESRCH(t *testing.T) {
+	for _, operation := range []string{"fork", "vfork"} {
+		for _, order := range []string{"parent_first", "child_first"} {
+			t.Run(operation+"/"+order, func(t *testing.T) {
+				cmd := startupProbeCommand(t, "esrch-on-fork-event", "--", "--", "./fork-event-child", operation)
+				buildTracerProbe(t, filepath.Join(cmd.Dir, "fork-event-child"), filepath.Join("testdata", "fork-event-child.c"))
+				if order == "child_first" {
+					cmd.Env = append(cmd.Env, "GRAFTCP_TEST_CHILD_STOP_FIRST=1")
+				}
+				output, err := cmd.CombinedOutput()
+				var exitErr *exec.ExitError
+				if !errors.As(err, &exitErr) || exitErr.ExitCode() != 37 ||
+					!bytes.Contains(output, []byte("missing creation event")) ||
+					!bytes.Contains(output, []byte("root reaped grandchild")) {
+					t.Fatalf("graftcp returned %v, want recovery and exit status 37\n%s", err, output)
+				}
+			})
+		}
+	}
+}
+
+func TestTracerInheritsSocketWhenChildStopsFirst(t *testing.T) {
+	upstream, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer upstream.Close()
+	port := strconv.Itoa(upstream.Addr().(*net.TCPAddr).Port)
+	cmd := startupProbeCommand(t, "esrch-on-fork-event", "--", "--not-ignore-local", "--", "./fork-event-child", "inherit", port)
+	cmd.Env = append(cmd.Env, "GRAFTCP_TEST_KEEP_CREATOR=1")
+	buildTracerProbe(t, filepath.Join(cmd.Dir, "fork-event-child"), filepath.Join("testdata", "fork-event-child.c"))
+
+	upstreamResult := make(chan error, 1)
+	if err := upstream.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		conn, err := upstream.AcceptTCP()
+		if err == nil {
+			defer conn.Close()
+			_, err = io.WriteString(conn, "R")
+		}
+		upstreamResult <- err
+	}()
+
+	output, err := cmd.CombinedOutput()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 37 || len(output) != 0 {
+		t.Fatalf("graftcp returned %v, want silent exit status 37 after proxying the inherited socket\n%s", err, output)
+	}
+	if err := <-upstreamResult; err != nil {
+		t.Fatalf("upstream connection: %v", err)
+	}
+}
+
 func TestTracerKeepsRootStatusAfterWorkerESRCH(t *testing.T) {
 	if runtime.GOARCH != "amd64" {
 		t.Skip("the probe targets x86-64 PTRACE_PEEKUSER register reads")
@@ -359,7 +418,7 @@ func TestTracerKeepsRootStatusAfterWorkerESRCH(t *testing.T) {
 
 	for _, operation := range []string{"socket", "dup", "fcntl"} {
 		t.Run(operation, func(t *testing.T) {
-			cmd := startupProbeCommand(t, "esrch-on-worker-return", "--", "./worker", operation)
+			cmd := startupProbeCommand(t, "esrch-on-worker-return", "--", "--", "./worker", operation)
 			buildTracerProbe(t, filepath.Join(cmd.Dir, "worker"), "-pthread", filepath.Join("testdata", "worker-syscall.c"))
 			cmd.Env = append(cmd.Env, "GRAFTCP_TEST_WORKER_SYSCALL="+operation)
 			output, err := cmd.CombinedOutput()

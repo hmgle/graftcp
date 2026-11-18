@@ -50,6 +50,16 @@
 #define SOCK_TYPE_MASK 0xf
 #endif
 
+/* Recognize clone3 from newer tracees even with older build headers. */
+#ifndef SYS_clone3
+#ifdef __NR_clone3
+#define SYS_clone3 __NR_clone3
+#elif defined(__i386__) || (defined(__x86_64__) && !defined(__ILP32__)) || \
+      (defined(__arm__) && defined(__ARM_EABI__)) || defined(__aarch64__) || defined(__arm64__)
+#define SYS_clone3 435
+#endif
+#endif
+
 #if defined(__arm__) || defined(__arm64__) || defined(__aarch64__)
 
 #ifndef SYS_socket
@@ -117,8 +127,9 @@
 #define satosin6(x)  ((struct sockaddr_in6 *) &(x))
 #define SOCKPORT6(x) (satosin6(x)->sin6_port)
 
-#define FLAG_STARTUP    00002
-#define FLAG_INSYSCALL  00010
+#define FLAG_STARTUP        00002
+#define FLAG_INSYSCALL      00010
+#define FLAG_CREATING_CHILD 00020
 
 #define exiting(pinfp)  ((pinfp)->flags & FLAG_INSYSCALL)
 
@@ -139,6 +150,9 @@ struct proc_info {
 	int flags;
 	int csn;		/* current syscall number */
 	uint64_t clone_flags;
+	uint64_t creation_seq;
+	struct proc_info *creation_prev;
+	struct proc_info *creation_next;
 	unsigned int fd_args[3];
 	bool waiting_for_parent;
 	bool pending_socket;

@@ -124,6 +124,7 @@ Usage: graftcp [-hn] [-b value] [--config value] [--disable-dns] [--disable-udp]
 
 - 需要 Linux 3.8 或更高版本提供的 `PTRACE_O_EXITKILL`。如果 tracer 终止，内核会终止它正在跟踪的进程。
 - 仍然受 `ptrace(2)` 权限限制；如果跟踪失败，请检查 Yama `ptrace_scope`、能力集或是否需要 root。
+- 如果子进程创建事件丢失，或并发 fork 报告了复用的 PID 导致无法确认创建者，graftcp 会发出告警并恢复子进程。通过继承的 socket 发起的连接可能绕过重定向。使用 `CLONE_FILES` 时，内核仍共享描述符表，但 graftcp 会分别跟踪各任务。一个任务使用另一个任务新建的 socket 时可能漏掉重定向，描述符复用后也可能按旧的 socket 类型处理。
 - 在支持的内核上，`graftcp` 会安装 seccomp-BPF 过滤器，使只有 socket 相关 syscall 才陷入 tracer，从而降低跟踪开销；在不支持 seccomp 过滤的内核上则回退为对每个 syscall 停点。该行为自动生效，无需配置。
 - 默认忽略本地目标地址；如果希望本地连接也走代理，使用 `--not-ignore-local`。
 - DNS 代理默认关闭；使用 `--enable-dns` 启用 UDP/53 DNS-over-TCP 路径，使用 `--dns-server` 指定上游服务器。
@@ -165,7 +166,7 @@ sudo setcap 'cap_sys_ptrace,cap_sys_admin+ep' ./sumg
 
 ### `clone(2)` 有 `CLONE_UNTRACED` 标志可以避免被跟踪，`graftcp` 如何强制跟踪？
 
-`graftcp` 会拦截 `clone(2)` 并清除 `CLONE_UNTRACED`，使派生的子进程无法逃脱跟踪。（该标志是给内核用的，用户态程序本不应设置它。）Linux 还可通过 [`/proc/sys/kernel/yama/ptrace_scope`](https://www.kernel.org/doc/Documentation/security/Yama.txt) 限制 `ptrace(2)`；如果跟踪失败，请检查该值。
+在 x86-64 上，`graftcp` 会尝试清除传统 `clone(2)` 的 flags 寄存器中的 `CLONE_UNTRACED`。这一改写仅适用于该系统调用和架构。Linux 还可通过 [`/proc/sys/kernel/yama/ptrace_scope`](https://www.kernel.org/doc/Documentation/security/Yama.txt) 限制 `ptrace(2)`；如果跟踪失败，请检查该值。
 
 ### 支持 macOS 吗？
 
