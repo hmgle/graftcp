@@ -128,6 +128,7 @@ Usage: graftcp [-hn] [-b value] [--config value] [--disable-dns] [--disable-udp]
 - 默认忽略本地目标地址；如果希望本地连接也走代理，使用 `--not-ignore-local`。
 - DNS 代理默认关闭；使用 `--enable-dns` 启用 UDP/53 DNS-over-TCP 路径，使用 `--dns-server` 指定上游服务器。
 - 通用 UDP 代理默认关闭；使用 `--enable-udp` 启用。
+- 通用 UDP 在成功执行 `connect()` 或使用 cork 发送后，内核可能保留目的地址。即使 socket 已关闭，相应映射仍保留到 graftcp 退出。长时间运行的命令如果以这种方式访问大量不同的 IP:port，映射会累积。空闲清理仅扫描临时路由。
 - HTTP 代理模式不支持通用 UDP。`auto` 会优先尝试 SOCKS5 UDP，失败时回退 direct UDP；`only_http_proxy` 会拒绝通用 UDP session。
 - SOCKS5 可以使用 TCP endpoint（`127.0.0.1:1080`），也可以用 Unix socket endpoint（`unix:/path/tor.sock` 或 `/path/tor.sock`）承载 TCP CONNECT 流量。SOCKS5 UDP ASSOCIATE 仍然要求 TCP SOCKS5 endpoint。
 - 当 `--socks5` 和 `--http_proxy` 都没有配置时，graftcp 会回退到 SOCKS5 `127.0.0.1:1080`。只要配置了任意一个代理，这个隐含默认值就不再生效，因此单独使用 `--http_proxy` 时不会去连接任何 SOCKS5 endpoint。

@@ -16,6 +16,18 @@
 
 #include "graftcp.h"
 
+/* Shared by the tracked descriptors referring to one UDP socket. */
+struct udp_socket_state {
+	unsigned int refs;
+	bool may_cork;
+};
+
+static void release_udp_socket_state(struct udp_socket_state *udp)
+{
+	if (udp != NULL && --udp->refs == 0)
+		free(udp);
+}
+
 static int find_tracked_socket_fd(const struct proc_info *pinfp, int fd)
 {
 	unsigned int i;
@@ -30,39 +42,55 @@ static int find_tracked_socket_fd(const struct proc_info *pinfp, int fd)
 	return -1;
 }
 
-int track_socket_fd(struct proc_info *pinfp, int fd, int domain, int type)
+static int set_tracked_socket(struct proc_info *pinfp, struct tracked_socket socket)
 {
 	struct tracked_socket *sockets;
 	unsigned int new_cap;
-	int idx;
+	int idx = find_tracked_socket_fd(pinfp, socket.fd);
+
+	if (idx < 0) {
+		if (pinfp->tracked_socket_count >= pinfp->tracked_socket_cap) {
+			new_cap = pinfp->tracked_socket_cap ?
+				  pinfp->tracked_socket_cap * 2 : TRACKED_SOCKET_INITIAL_CAP;
+			sockets = realloc(pinfp->tracked_sockets,
+					  new_cap * sizeof(*pinfp->tracked_sockets));
+			if (sockets == NULL)
+				return -1;
+			pinfp->tracked_sockets = sockets;
+			pinfp->tracked_socket_cap = new_cap;
+		}
+		idx = pinfp->tracked_socket_count++;
+		pinfp->tracked_sockets[idx].udp = NULL;
+	}
+	if (socket.udp != NULL)
+		socket.udp->refs++;
+	release_udp_socket_state(pinfp->tracked_sockets[idx].udp);
+	pinfp->tracked_sockets[idx] = socket;
+	return 0;
+}
+
+int track_socket_fd(struct proc_info *pinfp, int fd, int domain, int type)
+{
+	struct tracked_socket socket = {.fd = fd, .domain = domain, .type = type};
 
 	if (pinfp == NULL || fd < 0)
 		return -1;
-	idx = find_tracked_socket_fd(pinfp, fd);
-	if (idx >= 0) {
-		pinfp->tracked_sockets[idx].domain = domain;
-		pinfp->tracked_sockets[idx].type = type;
-		return 0;
-	}
-	if (pinfp->tracked_socket_count >= pinfp->tracked_socket_cap) {
-		new_cap = pinfp->tracked_socket_cap ?
-			  pinfp->tracked_socket_cap * 2 : TRACKED_SOCKET_INITIAL_CAP;
-		sockets = realloc(pinfp->tracked_sockets,
-			      new_cap * sizeof(*pinfp->tracked_sockets));
-		if (sockets == NULL)
+	if ((type & SOCK_TYPE_MASK) == SOCK_DGRAM) {
+		socket.udp = calloc(1, sizeof(*socket.udp));
+		if (socket.udp == NULL)
 			return -1;
-		pinfp->tracked_sockets = sockets;
-		pinfp->tracked_socket_cap = new_cap;
 	}
-
-	pinfp->tracked_sockets[pinfp->tracked_socket_count++] =
-		(struct tracked_socket){fd, domain, type};
+	if (set_tracked_socket(pinfp, socket) < 0) {
+		free(socket.udp);
+		return -1;
+	}
 	return 0;
 }
 
 int copy_tracked_socket_fd(struct proc_info *dst, const struct proc_info *src,
 			   int oldfd, int newfd)
 {
+	struct tracked_socket socket;
 	int idx;
 
 	if (dst == NULL || src == NULL || oldfd < 0 || newfd < 0)
@@ -70,8 +98,9 @@ int copy_tracked_socket_fd(struct proc_info *dst, const struct proc_info *src,
 	idx = find_tracked_socket_fd(src, oldfd);
 	if (idx < 0)
 		return 0;
-	return track_socket_fd(dst, newfd, src->tracked_sockets[idx].domain,
-			       src->tracked_sockets[idx].type);
+	socket = src->tracked_sockets[idx];
+	socket.fd = newfd;
+	return set_tracked_socket(dst, socket);
 }
 
 int copy_tracked_sockets(struct proc_info *dst, const struct proc_info *src)
@@ -81,9 +110,7 @@ int copy_tracked_sockets(struct proc_info *dst, const struct proc_info *src)
 	if (dst == NULL || src == NULL)
 		return -1;
 	for (i = 0; i < src->tracked_socket_count; i++) {
-		if (track_socket_fd(dst, src->tracked_sockets[i].fd,
-				    src->tracked_sockets[i].domain,
-				    src->tracked_sockets[i].type) < 0)
+		if (set_tracked_socket(dst, src->tracked_sockets[i]) < 0)
 			return -1;
 	}
 	return 0;
@@ -113,6 +140,22 @@ bool is_tracked_dgram_socket_fd(struct proc_info *pinfp, int fd)
 	return is_tracked_socket_type(pinfp, fd, SOCK_DGRAM);
 }
 
+void mark_socket_may_cork(struct proc_info *pinfp, int fd)
+{
+	int idx = find_tracked_socket_fd(pinfp, fd);
+
+	if (idx >= 0 && pinfp->tracked_sockets[idx].udp != NULL)
+		pinfp->tracked_sockets[idx].udp->may_cork = true;
+}
+
+bool socket_may_cork(struct proc_info *pinfp, int fd)
+{
+	int idx = find_tracked_socket_fd(pinfp, fd);
+
+	return idx >= 0 && pinfp->tracked_sockets[idx].udp != NULL &&
+	       pinfp->tracked_sockets[idx].udp->may_cork;
+}
+
 void untrack_socket_fd(struct proc_info *pinfp, int fd)
 {
 	int idx;
@@ -121,6 +164,7 @@ void untrack_socket_fd(struct proc_info *pinfp, int fd)
 	if (idx < 0)
 		return;
 
+	release_udp_socket_state(pinfp->tracked_sockets[idx].udp);
 	pinfp->tracked_sockets[idx] =
 		pinfp->tracked_sockets[--pinfp->tracked_socket_count];
 }
@@ -162,9 +206,13 @@ struct proc_info *alloc_proc_info(pid_t pid)
 
 void free_proc_info(struct proc_info *p)
 {
+	unsigned int i;
+
 	if (p == NULL)
 		return;
 	del_proc_info(p);
+	for (i = 0; i < p->tracked_socket_count; i++)
+		release_udp_socket_state(p->tracked_sockets[i].udp);
 	free(p->tracked_sockets);
 	free(p);
 }

@@ -21,6 +21,7 @@
 #include <pwd.h>
 #include <grp.h>
 #include <sys/prctl.h>
+#include <netinet/udp.h>
 #include <linux/version.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
 #define ENABLE_SECCOMP_BPF
@@ -478,6 +479,7 @@ static void install_seccomp()
 		UDP_FILTER_CONNECT,
 		UDP_FILTER_SENDTO,
 		UDP_FILTER_SENDMSG,
+		UDP_FILTER_SETSOCKOPT,
 	#if defined(__x86_64__)
 		UDP_FILTER_CLONE,
 	#endif
@@ -555,6 +557,9 @@ static void install_seccomp()
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendmsg,
 			 SECCOMP_JUMP_OFFSET(UDP_FILTER_SENDMSG,
 					     UDP_FILTER_RET_TRACE), 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_setsockopt,
+			 SECCOMP_JUMP_OFFSET(UDP_FILTER_SETSOCKOPT,
+					     UDP_FILTER_RET_TRACE), 0),
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_clone,
 			 SECCOMP_JUMP_OFFSET(UDP_FILTER_CLONE,
 					     UDP_FILTER_RET_TRACE), 0),
@@ -574,6 +579,9 @@ static void install_seccomp()
 					     UDP_FILTER_RET_TRACE), 0),
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendmsg,
 			 SECCOMP_JUMP_OFFSET(UDP_FILTER_SENDMSG,
+					     UDP_FILTER_RET_TRACE), 0),
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_setsockopt,
+			 SECCOMP_JUMP_OFFSET(UDP_FILTER_SETSOCKOPT,
 					     UDP_FILTER_RET_TRACE), 0),
 		SECCOMP_TRACE_DUP_SYSCALLS(UDP_FILTER)
 	#endif
@@ -682,7 +690,7 @@ static void restore_sockaddr_if_needed(struct proc_info *pinfp)
 }
 
 static bool rewrite_udp_sockaddr(struct proc_info *pinfp, long addr,
-				 long addrlen, bool connect)
+				 long addrlen, bool may_retain_dest)
 {
 	struct dest_endpoint dest;
 	uint32_t loopback_token;
@@ -733,7 +741,7 @@ static bool rewrite_udp_sockaddr(struct proc_info *pinfp, long addr,
 			dest.ipstr, dest.port);
 		mgraftcp_finish_udp_rewrite(loopback_token, false);
 	} else {
-		if (connect) {
+		if (may_retain_dest) {
 			mgraftcp_start_udp_use(loopback_token);
 			pinfp->pending_udp_token = loopback_token;
 		} else {
@@ -793,6 +801,13 @@ void connect_pre_handle(struct proc_info *pinfp)
 	rewrite_udp_sockaddr(pinfp, addr, addrlen, true);
 }
 
+static bool udp_send_may_retain_dest(struct proc_info *pinfp, int fd, int flags_arg)
+{
+	long flags = get_syscall_arg(pinfp->pid, flags_arg);
+
+	return (flags & MSG_MORE) != 0 || socket_may_cork(pinfp, fd);
+}
+
 void sendto_pre_handle(struct proc_info *pinfp)
 {
 	int socket_fd = get_syscall_arg(pinfp->pid, 0);
@@ -803,7 +818,8 @@ void sendto_pre_handle(struct proc_info *pinfp)
 		return;
 	addr = get_syscall_arg(pinfp->pid, 4);
 	addrlen = get_syscall_arg(pinfp->pid, 5);
-	rewrite_udp_sockaddr(pinfp, addr, addrlen, false);
+	rewrite_udp_sockaddr(pinfp, addr, addrlen,
+			     udp_send_may_retain_dest(pinfp, socket_fd, 3));
 }
 
 void sendmsg_pre_handle(struct proc_info *pinfp)
@@ -818,7 +834,28 @@ void sendmsg_pre_handle(struct proc_info *pinfp)
 		return;
 	if (msg.msg_name == NULL)
 		return;
-	rewrite_udp_sockaddr(pinfp, (long)msg.msg_name, msg.msg_namelen, false);
+	rewrite_udp_sockaddr(pinfp, (long)msg.msg_name, msg.msg_namelen,
+			     udp_send_may_retain_dest(pinfp, socket_fd, 2));
+}
+
+static void setsockopt_pre_handle(struct proc_info *pinfp)
+{
+	int fd, enabled;
+	long addr;
+
+	if (UDP_PROXY_PORT == 0 ||
+	    get_syscall_arg(pinfp->pid, 1) != IPPROTO_UDP ||
+	    get_syscall_arg(pinfp->pid, 2) != UDP_CORK ||
+	    get_syscall_arg(pinfp->pid, 4) < (long)sizeof(enabled))
+		return;
+	fd = get_syscall_arg(pinfp->pid, 0);
+	if (!is_tracked_dgram_socket_fd(pinfp, fd))
+		return;
+	addr = get_syscall_arg(pinfp->pid, 3);
+	/* Mark before resuming. Another task sharing the socket can send
+	 * before we observe the result. Keep it marked across toggles. */
+	if (getdata(pinfp->pid, addr, &enabled, sizeof(enabled)) < 0 || enabled)
+		mark_socket_may_cork(pinfp, fd);
 }
 
 void close_pre_handle(struct proc_info *pinfp)
@@ -1035,6 +1072,9 @@ int trace_syscall_entering(struct proc_info *pinfp)
 		break;
 	case SYS_sendmsg:
 		sendmsg_pre_handle(pinfp);
+		break;
+	case SYS_setsockopt:
+		setsockopt_pre_handle(pinfp);
 		break;
 	case SYS_close:
 		close_pre_handle(pinfp);

@@ -124,10 +124,13 @@
 
 #define TRACKED_SOCKET_INITIAL_CAP 8U
 
+struct udp_socket_state;
+
 struct tracked_socket {
 	int fd;
 	int domain;
 	int type;
+	struct udp_socket_state *udp;
 };
 
 struct proc_info {
@@ -164,6 +167,8 @@ bool is_tracked_socket_fd(struct proc_info *pinfp, int fd);
 bool is_tracked_stream_socket_fd(struct proc_info *pinfp, int fd);
 bool is_tracked_dgram_socket_fd(struct proc_info *pinfp, int fd);
 void untrack_socket_fd(struct proc_info *pinfp, int fd);
+void mark_socket_may_cork(struct proc_info *pinfp, int fd);
+bool socket_may_cork(struct proc_info *pinfp, int fd);
 
 int get_syscall_number(pid_t pid);
 int get_retval(pid_t pid);

@@ -158,12 +158,13 @@ func tokenToIP(token uint32) net.IP {
 	return net.IPv4(buf[0], buf[1], buf[2], buf[3]).To4()
 }
 
-// DatagramRouteRegistry stores UDP destination mappings. Connected sockets
-// keep their token for the life of the tracer. Routes used only for individual
-// datagrams expire when idle.
+// DatagramRouteRegistry stores UDP destination mappings. Tokens that the
+// kernel may retain after connect or a corked send live until the tracer exits.
+// Routes used only for individual datagrams expire when idle.
 type DatagramRouteRegistry struct {
 	mu        sync.Mutex
-	routes    map[uint32]datagramRoute
+	transient map[uint32]datagramRoute
+	pinned    map[uint32]string // Permanent mappings need only their destination.
 	tokens    map[string]uint32
 	allocator *LoopbackGen
 }
@@ -173,12 +174,11 @@ type datagramRoute struct {
 	pending  uint64
 	inFlight uint64
 	lastSeen time.Time // Zero until the first successful rewrite or Register.
-	pinned   bool
 }
 
 func NewDatagramRouteRegistry() *DatagramRouteRegistry {
 	return &DatagramRouteRegistry{
-		routes:    make(map[uint32]datagramRoute),
+		transient: make(map[uint32]datagramRoute),
 		tokens:    make(map[string]uint32),
 		allocator: newLoopbackGen(loopbackStartToken, loopbackEndToken),
 	}
@@ -205,35 +205,42 @@ func (r *DatagramRouteRegistry) register(family int, host string, port uint16, p
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.routes == nil {
-		r.routes = make(map[uint32]datagramRoute)
+	if r.transient == nil {
+		r.transient = make(map[uint32]datagramRoute)
 	}
 	if r.tokens == nil {
 		r.tokens = make(map[string]uint32)
 	}
 
 	token, ok := r.tokens[destAddr]
-	if !ok {
-		if len(r.routes) >= int(r.allocator.rangeSize) {
+	if ok {
+		if _, pinned := r.pinned[token]; pinned {
+			return token, nil
+		}
+	} else {
+		if len(r.tokens) >= int(r.allocator.rangeSize) {
 			return 0, fmt.Errorf("datagram route registry token range is exhausted")
 		}
 		for {
 			token = r.allocator.nextToken()
-			if _, occupied := r.routes[token]; !occupied {
+			if _, occupied := r.transient[token]; occupied {
+				continue
+			}
+			if _, occupied := r.pinned[token]; !occupied {
 				break
 			}
 		}
 		r.tokens[destAddr] = token
 	}
 
-	route := r.routes[token]
+	route := r.transient[token]
 	route.destAddr = destAddr
 	if pending {
 		route.pending++
 	} else {
 		route.lastSeen = time.Now()
 	}
-	r.routes[token] = route
+	r.transient[token] = route
 	return token, nil
 }
 
@@ -245,10 +252,10 @@ func (r *DatagramRouteRegistry) StartUse(token uint32) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	route, ok := r.routes[token]
+	route, ok := r.transient[token]
 	if ok && route.inFlight < route.pending {
 		route.inFlight++
-		r.routes[token] = route
+		r.transient[token] = route
 	}
 }
 
@@ -269,9 +276,19 @@ func (r *DatagramRouteRegistry) finishRewrite(token uint32, accepted, inFlight b
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	route, ok := r.routes[token]
+	route, ok := r.transient[token]
 	if !ok || (inFlight && route.inFlight == 0) ||
 		(!inFlight && route.pending == route.inFlight) {
+		return
+	}
+	// Pinning is permanent. Remaining reservations for this token may
+	// finish in any order without changing its lifetime or visibility.
+	if accepted && inFlight {
+		if r.pinned == nil {
+			r.pinned = make(map[uint32]string)
+		}
+		r.pinned[token] = route.destAddr
+		delete(r.transient, token)
 		return
 	}
 	route.pending--
@@ -280,14 +297,13 @@ func (r *DatagramRouteRegistry) finishRewrite(token uint32, accepted, inFlight b
 	}
 	if accepted {
 		route.lastSeen = time.Now()
-		route.pinned = route.pinned || inFlight
 	}
 	if route.pending == 0 && route.lastSeen.IsZero() {
-		delete(r.routes, token)
+		delete(r.transient, token)
 		delete(r.tokens, route.destAddr)
 		return
 	}
-	r.routes[token] = route
+	r.transient[token] = route
 }
 
 func (r *DatagramRouteRegistry) Lookup(localIP net.IP) (string, bool) {
@@ -301,19 +317,21 @@ func (r *DatagramRouteRegistry) Lookup(localIP net.IP) (string, bool) {
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	route := r.routes[token]
+	if dest, ok := r.pinned[token]; ok {
+		return dest, true
+	}
+	route := r.transient[token]
 	if route.lastSeen.IsZero() && route.inFlight == 0 {
 		return "", false
 	}
-	if !route.pinned && !route.lastSeen.IsZero() {
+	if !route.lastSeen.IsZero() {
 		route.lastSeen = time.Now()
-		r.routes[token] = route
+		r.transient[token] = route
 	}
 	return route.destAddr, true
 }
 
-// SweepIdle reclaims routes whose token is not held by a connected socket
-// or by an in-progress rewrite.
+// SweepIdle reclaims routes whose token is not pinned or reserved.
 func (r *DatagramRouteRegistry) SweepIdle(now time.Time, maxIdle time.Duration) {
 	if r == nil || maxIdle <= 0 {
 		return
@@ -321,9 +339,9 @@ func (r *DatagramRouteRegistry) SweepIdle(now time.Time, maxIdle time.Duration) 
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for token, route := range r.routes {
-		if !route.pinned && route.pending == 0 && now.Sub(route.lastSeen) > maxIdle {
-			delete(r.routes, token)
+	for token, route := range r.transient {
+		if route.pending == 0 && now.Sub(route.lastSeen) > maxIdle {
+			delete(r.transient, token)
 			delete(r.tokens, route.destAddr)
 		}
 	}

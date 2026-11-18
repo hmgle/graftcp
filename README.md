@@ -128,6 +128,7 @@ When generic UDP proxying is enabled, `graftcp` starts a separate UDP listener. 
 - Local destinations are ignored by default. Use `--not-ignore-local` to proxy loopback/private-local connects as well.
 - DNS proxying is disabled by default. Use `--enable-dns` to enable the UDP/53 DNS-over-TCP path, and `--dns-server` to choose the upstream server.
 - Generic UDP proxying is disabled by default. Use `--enable-udp` to enable it.
+- Generic UDP mappings that the kernel may retain after a successful `connect()` or corked send stay allocated until graftcp exits, even after the socket closes. Long-running commands that use many distinct IP:port pairs this way can accumulate mappings. Idle cleanup scans only transient routes.
 - HTTP proxy mode does not support generic UDP. `auto` prefers SOCKS5 UDP when available and falls back to direct UDP if the SOCKS5 UDP association fails; `only_http_proxy` rejects generic UDP sessions.
 - SOCKS5 can use a TCP endpoint (`127.0.0.1:1080`) or a Unix socket endpoint (`unix:/path/tor.sock` or `/path/tor.sock`) for TCP CONNECT traffic. SOCKS5 UDP ASSOCIATE still requires a TCP SOCKS5 endpoint.
 - When neither `--socks5` nor `--http_proxy` is configured, graftcp falls back to SOCKS5 `127.0.0.1:1080`. Configuring any proxy disables this implicit default, so `--http_proxy` alone never dials a SOCKS5 endpoint.

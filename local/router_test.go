@@ -227,14 +227,52 @@ func TestDatagramRouteRegistryLookupRefreshesIdleTime(t *testing.T) {
 	}
 	const idle = 2 * time.Minute
 	now := time.Now()
-	route := registry.routes[token]
+	route := registry.transient[token]
 	route.lastSeen = now.Add(-idle - time.Second)
-	registry.routes[token] = route
+	registry.transient[token] = route
 	if _, ok := registry.Lookup(tokenToIP(token)); !ok {
 		t.Fatal("Lookup() missed the route before the sweep")
 	}
 	registry.SweepIdle(now, idle)
 	if _, ok := registry.Lookup(tokenToIP(token)); !ok {
 		t.Fatal("sweep reclaimed a route refreshed by Lookup()")
+	}
+}
+
+func TestDatagramRouteRegistryPinWithOutstandingReservations(t *testing.T) {
+	registry := &DatagramRouteRegistry{
+		allocator: newLoopbackGen(loopbackStartToken, loopbackStartToken+1),
+	}
+	const host = "203.0.113.9"
+	token, err := registry.Reserve(syscall.AF_INET, host, 53)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One connect succeeds while another connect and a send are pending.
+	for range 2 {
+		got, err := registry.Reserve(syscall.AF_INET, host, 53)
+		if err != nil || got != token {
+			t.Fatalf("Reserve() = %v, %v, want %v", got, err, token)
+		}
+	}
+	registry.StartUse(token)
+	registry.StartUse(token)
+	registry.FinishUse(token, true)
+	registry.FinishRewrite(token, false)
+	registry.FinishUse(token, false)
+	if _, ok := registry.transient[token]; ok {
+		t.Fatal("pinned token remains in the idle sweep")
+	}
+
+	// Wrap the allocator with the pinned slot first and the other slot free.
+	for _, port := range []uint16{54, 55} {
+		other, err := registry.Register(syscall.AF_INET, host, port)
+		if err != nil || other == token {
+			t.Fatalf("Register(port %d) = %v, %v, reused pinned slot %v", port, other, err, token)
+		}
+		registry.SweepIdle(time.Now().Add(time.Hour), time.Minute)
+	}
+	if got, ok := registry.Lookup(tokenToIP(token)); !ok || got != host+":53" {
+		t.Fatalf("Lookup() after token wrap = %q, %v", got, ok)
 	}
 }
