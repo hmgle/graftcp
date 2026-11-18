@@ -1,6 +1,7 @@
 package local
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -59,12 +60,31 @@ type timeoutDialer struct {
 }
 
 func (d timeoutDialer) Dial(network, addr string) (net.Conn, error) {
-	return net.DialTimeout(network, addr, d.timeout)
+	return d.DialContext(context.Background(), network, addr)
+}
+
+func (d timeoutDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialer := net.Dialer{Timeout: d.timeout}
+	return dialer.DialContext(ctx, network, addr)
 }
 
 type socks5ProxyEndpoint struct {
 	network string
 	address string
+}
+
+// SOCKS5.Dial returns the raw transport, preserving CloseWrite and splice.
+type socks5ConnectDialer struct{ proxy.Dialer }
+
+func (d socks5ConnectDialer) Dial(network, addr string) (net.Conn, error) {
+	conn, err := d.Dialer.Dial(network, addr)
+	if err != nil {
+		return nil, err
+	}
+	if err := clearProxyDeadline(conn); err != nil {
+		return nil, err
+	}
+	return conn, nil
 }
 
 func (e socks5ProxyEndpoint) String() string {
@@ -181,11 +201,11 @@ func (l *Local) ConfigureSOCKS5(addr, username, password string) error {
 	if forward == nil {
 		forward = timeoutDialer{timeout: tcpDialTimeout}
 	}
-	dialer, err := proxy.SOCKS5(endpoint.network, endpoint.address, auth, forward)
+	dialer, err := proxy.SOCKS5(endpoint.network, endpoint.address, auth, proxyHandshakeTransport{forward})
 	if err != nil {
 		return fmt.Errorf("create SOCKS5 proxy %q: %w", endpoint.String(), err)
 	}
-	l.socks5Dialer = dialer
+	l.socks5Dialer = socks5ConnectDialer{dialer}
 	l.socks5Network = endpoint.network
 	l.socks5Addr = endpoint.address
 	l.socks5Username = username
@@ -404,28 +424,29 @@ func (l *Local) HandleConn(conn *net.TCPConn) error {
 	return nil
 }
 
-// relay copies bytes in both directions between a and b until both sides are
-// done. The first side to finish triggers a deadline on both connections so
-// the still-blocked Read returns promptly; the second receive then unblocks.
+// A clean EOF ends one direction. Keep the reverse stream open for replies.
 func relay(a, b net.Conn) {
 	errc := make(chan error, 2)
 	go func() { errc <- copyAndCloseWrite(a, b) }()
 	go func() { errc <- copyAndCloseWrite(b, a) }()
 
-	<-errc
-	now := time.Now()
-	_ = a.SetDeadline(now)
-	_ = b.SetDeadline(now)
+	if err := <-errc; err != nil {
+		_ = a.Close()
+		_ = b.Close()
+	}
 	<-errc
 }
 
 func copyAndCloseWrite(dst, src net.Conn) error {
-	_, err := io.Copy(dst, src)
-	type closeWriter interface {
-		CloseWrite() error
+	if _, err := io.Copy(dst, src); err != nil {
+		return err
 	}
-	if cw, ok := dst.(closeWriter); ok {
-		_ = cw.CloseWrite()
+	return closeWrite(dst)
+}
+
+func closeWrite(conn net.Conn) error {
+	if cw, ok := conn.(interface{ CloseWrite() error }); ok {
+		return cw.CloseWrite()
 	}
-	return err
+	return errors.ErrUnsupported
 }
