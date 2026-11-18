@@ -2,11 +2,15 @@ package local
 
 import (
 	"bufio"
+	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -14,6 +18,122 @@ type dialerFunc func(network, addr string) (net.Conn, error)
 
 func (f dialerFunc) Dial(network, addr string) (net.Conn, error) {
 	return f(network, addr)
+}
+
+type contextTestDialer struct {
+	dialerFunc
+	dialContext func(context.Context, string, string) (net.Conn, error)
+}
+
+func (d contextTestDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	return d.dialContext(ctx, network, addr)
+}
+
+func TestHTTPProxyConnectDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		forward := contextTestDialer{
+			dialerFunc: func(string, string) (net.Conn, error) {
+				time.Sleep(2 * tcpDialTimeout)
+				return nil, errors.New("used Dial instead of DialContext")
+			},
+			dialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				if deadline, ok := ctx.Deadline(); !ok || !deadline.Equal(start.Add(tcpDialTimeout)) {
+					return nil, errors.New("missing HTTP attempt deadline")
+				}
+				<-ctx.Done()
+				return nil, ctx.Err()
+			},
+		}
+		dialer := httpDialer{forward: forward}
+		_, err := dialer.Dial("tcp", "target.test:443")
+		if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) != tcpDialTimeout {
+			t.Fatalf("Dial returned %v after %v, want connect timeout after %v", err, time.Since(start), tcpDialTimeout)
+		}
+	})
+}
+
+func TestHTTPProxyClosesLateConnection(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		transport, peer := net.Pipe()
+		defer transport.Close()
+		defer peer.Close()
+		dialer := httpDialer{forward: dialerFunc(func(string, string) (net.Conn, error) {
+			time.Sleep(2 * tcpDialTimeout)
+			return transport, nil
+		})}
+		start := time.Now()
+		_, err := dialer.Dial("tcp", "target.test:443")
+		if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) != tcpDialTimeout {
+			t.Fatalf("Dial returned %v after %v, want connect timeout after %v", err, time.Since(start), tcpDialTimeout)
+		}
+		peer.SetReadDeadline(start.Add(3 * tcpDialTimeout))
+		if _, err := peer.Read(make([]byte, 1)); err != io.EOF {
+			t.Fatalf("late connection was not closed: %v", err)
+		}
+	})
+}
+
+func TestHTTPProxyHandshakeDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		transport, peer := net.Pipe()
+		defer transport.Close()
+		defer peer.Close()
+		// Bound the test even if the dialer never installs its own deadline.
+		guard := time.AfterFunc(2*tcpDialTimeout, func() { peer.Close() })
+		defer guard.Stop()
+		go func() {
+			if _, err := http.ReadRequest(bufio.NewReader(peer)); err != nil {
+				t.Error(err)
+				return
+			}
+			time.Sleep(tcpDialTimeout / 4)
+			if _, err := io.WriteString(peer, "HTTP/1.1 103 Early Hints\r\n\r\n"); err != nil {
+				t.Error(err)
+			}
+			// Keep the tunnel open without sending a final response.
+		}()
+		dialer := httpDialer{forward: dialerFunc(func(string, string) (net.Conn, error) {
+			time.Sleep(tcpDialTimeout / 4)
+			return transport, nil
+		})}
+		start := time.Now()
+		_, err := dialer.Dial("tcp", "target.test:443")
+		if !errors.Is(err, os.ErrDeadlineExceeded) || time.Since(start) != tcpDialTimeout {
+			t.Fatalf("Dial returned %v after %v, want timeout after %v", err, time.Since(start), tcpDialTimeout)
+		}
+	})
+}
+
+func TestHTTPProxyClearsHandshakeDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		transport, peer := net.Pipe()
+		defer transport.Close()
+		defer peer.Close()
+		go func() {
+			if _, err := http.ReadRequest(bufio.NewReader(peer)); err != nil {
+				t.Error(err)
+				return
+			}
+			if _, err := io.WriteString(peer, "HTTP/1.1 200 OK\r\n\r\n"); err != nil {
+				t.Error(err)
+				return
+			}
+			time.Sleep(2 * tcpDialTimeout)
+			if _, err := io.WriteString(peer, "OK"); err != nil {
+				t.Error(err)
+			}
+		}()
+		dialer := httpDialer{forward: dialerFunc(func(string, string) (net.Conn, error) { return transport, nil })}
+		conn, err := dialer.Dial("tcp", "target.test:443")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var buf [2]byte
+		if _, err := io.ReadFull(conn, buf[:]); err != nil || string(buf[:]) != "OK" {
+			t.Fatalf("reading tunnel beyond handshake timeout: got %q, err %v", buf, err)
+		}
+	})
 }
 
 func TestHTTPProxyDialReturnsTransportWithoutBufferedData(t *testing.T) {

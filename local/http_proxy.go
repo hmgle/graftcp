@@ -39,7 +39,7 @@ func (c *bufferedConn) Read(b []byte) (int, error) {
 }
 
 func (h *httpDialer) Dial(network, addr string) (net.Conn, error) {
-	conn, err := h.forward.Dial("tcp", h.host)
+	conn, err := (proxyHandshakeTransport{h.forward}).Dial("tcp", h.host)
 	if err != nil {
 		return nil, err
 	}
@@ -65,6 +65,9 @@ func (h *httpDialer) Dial(network, addr string) (net.Conn, error) {
 	r := bufio.NewReader(conn)
 	if err := readConnectResponse(r); err != nil {
 		conn.Close()
+		return nil, err
+	}
+	if err := clearProxyDeadline(conn); err != nil {
 		return nil, err
 	}
 	if r.Buffered() == 0 {

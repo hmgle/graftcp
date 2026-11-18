@@ -1,6 +1,7 @@
 package local
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -59,12 +60,31 @@ type timeoutDialer struct {
 }
 
 func (d timeoutDialer) Dial(network, addr string) (net.Conn, error) {
-	return net.DialTimeout(network, addr, d.timeout)
+	return d.DialContext(context.Background(), network, addr)
+}
+
+func (d timeoutDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialer := net.Dialer{Timeout: d.timeout}
+	return dialer.DialContext(ctx, network, addr)
 }
 
 type socks5ProxyEndpoint struct {
 	network string
 	address string
+}
+
+// SOCKS5.Dial returns the raw transport, preserving CloseWrite and splice.
+type socks5ConnectDialer struct{ proxy.Dialer }
+
+func (d socks5ConnectDialer) Dial(network, addr string) (net.Conn, error) {
+	conn, err := d.Dialer.Dial(network, addr)
+	if err != nil {
+		return nil, err
+	}
+	if err := clearProxyDeadline(conn); err != nil {
+		return nil, err
+	}
+	return conn, nil
 }
 
 func (e socks5ProxyEndpoint) String() string {
@@ -181,11 +201,11 @@ func (l *Local) ConfigureSOCKS5(addr, username, password string) error {
 	if forward == nil {
 		forward = timeoutDialer{timeout: tcpDialTimeout}
 	}
-	dialer, err := proxy.SOCKS5(endpoint.network, endpoint.address, auth, forward)
+	dialer, err := proxy.SOCKS5(endpoint.network, endpoint.address, auth, proxyHandshakeTransport{forward})
 	if err != nil {
 		return fmt.Errorf("create SOCKS5 proxy %q: %w", endpoint.String(), err)
 	}
-	l.socks5Dialer = dialer
+	l.socks5Dialer = socks5ConnectDialer{dialer}
 	l.socks5Network = endpoint.network
 	l.socks5Addr = endpoint.address
 	l.socks5Username = username
