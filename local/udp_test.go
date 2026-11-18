@@ -1,6 +1,7 @@
 package local
 
 import (
+	"errors"
 	"net"
 	"strings"
 	"sync"
@@ -188,4 +189,112 @@ func (s *slowSocks5TCPServer) serve() {
 		s.mu.Unlock()
 		s.accepts <- struct{}{}
 	}
+}
+
+type failingUDPWrite struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (f *failingUDPWrite) Write([]byte) error {
+	close(f.started)
+	<-f.release
+	return net.ErrClosed
+}
+
+func (f *failingUDPWrite) Close() error { return nil }
+
+func TestUDPProxyOldWriteFailureKeepsReplacement(t *testing.T) {
+	proxy := listenTestUDPProxy(t)
+	token, err := proxy.local.udpRoutes.Register(syscall.AF_INET, "127.0.0.1", 9999)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokenIP := tokenToIP(token)
+	clientAddr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 12345}
+	destAddr := "127.0.0.1:9999"
+	key := udpSessionKey(clientAddr, tokenIP)
+	oldForwarder := &failingUDPWrite{started: make(chan struct{}), release: make(chan struct{})}
+	releaseWrite := sync.OnceFunc(func() { close(oldForwarder.release) })
+	defer releaseWrite()
+	ready := make(chan struct{})
+	close(ready)
+	proxy.sessions[key] = &udpSession{
+		key: key, ready: ready, forwarder: oldForwarder, lastSeen: time.Now(),
+		clientAddr: clientAddr, tokenIP: tokenIP, destAddr: destAddr,
+	}
+
+	handlerDone := make(chan struct{})
+	go func() {
+		defer close(handlerDone)
+		proxy.handlePacket(clientAddr, tokenIP, []byte("old packet"))
+	}()
+	select {
+	case <-oldForwarder.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("old handler never reached Write")
+	}
+
+	proxy.closeIdleSessions(time.Now().Add(udpSessionIdle + time.Second))
+	replacement, err := proxy.getSession(clientAddr, tokenIP, destAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-replacement.ready:
+		if replacement.initErr != nil || replacement.forwarder == nil {
+			t.Fatalf("replacement initialization: %v", replacement.initErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("replacement session did not initialize")
+	}
+
+	releaseWrite()
+	select {
+	case <-handlerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("old handler did not finish")
+	}
+	proxy.mu.Lock()
+	current := proxy.sessions[key]
+	proxy.mu.Unlock()
+	if current != replacement {
+		t.Fatal("old write failure removed the replacement session")
+	}
+}
+
+func TestUDPProxyRejectsSessionAfterClose(t *testing.T) {
+	proxy := listenTestUDPProxy(t)
+	if err := proxy.Close(); err != nil {
+		t.Fatal(err)
+	}
+	clientAddr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 12345}
+	session, err := proxy.getSession(clientAddr, tokenToIP(loopbackStartToken), "127.0.0.1:9999")
+	if session != nil {
+		<-session.ready
+		if session.forwarder != nil {
+			_ = session.forwarder.Close()
+		}
+		t.Fatal("getSession created a forwarder after Close")
+	}
+	if !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("getSession after Close = %v, want net.ErrClosed", err)
+	}
+}
+
+func listenTestUDPProxy(t *testing.T) *UDPProxy {
+	t.Helper()
+	l, err := NewLocal(":0", "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SetSelectMode("direct"); err != nil {
+		t.Fatal(err)
+	}
+	proxy, _, err := l.ListenUDPProxy()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = proxy.Close() })
+	return proxy
 }

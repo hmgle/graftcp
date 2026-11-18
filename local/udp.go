@@ -103,11 +103,10 @@ func (p *UDPProxy) Close() error {
 
 	var closeErr error
 	p.closeOnce.Do(func() {
-		close(p.closed)
-
 		p.mu.Lock()
+		close(p.closed)
 		sessions := p.sessions
-		p.sessions = make(map[string]*udpSession)
+		p.sessions = nil
 		p.mu.Unlock()
 
 		for _, session := range sessions {
@@ -179,7 +178,9 @@ func (p *UDPProxy) handlePacket(clientAddr *net.UDPAddr, tokenIP net.IP, payload
 
 	session, err := p.getSession(clientAddr, tokenIP, destAddr)
 	if err != nil {
-		log.Errorf("UDP proxy session for %s -> %s err: %s", clientAddr.String(), destAddr, err.Error())
+		if !errors.Is(err, net.ErrClosed) {
+			log.Errorf("UDP proxy session for %s -> %s err: %s", clientAddr.String(), destAddr, err.Error())
+		}
 		return
 	}
 	select {
@@ -197,7 +198,7 @@ func (p *UDPProxy) handlePacket(clientAddr *net.UDPAddr, tokenIP net.IP, payload
 	}
 	if err := session.forwarder.Write(payload); err != nil {
 		log.Errorf("UDP proxy write for %s -> %s err: %s", clientAddr.String(), destAddr, err.Error())
-		p.removeSession(session.key)
+		p.removeSession(session)
 	}
 }
 
@@ -206,6 +207,12 @@ func (p *UDPProxy) getSession(clientAddr *net.UDPAddr, tokenIP net.IP, destAddr 
 	now := time.Now()
 
 	p.mu.Lock()
+	select {
+	case <-p.closed:
+		p.mu.Unlock()
+		return nil, net.ErrClosed
+	default:
+	}
 	if session, ok := p.sessions[key]; ok {
 		session.lastSeen = now
 		p.mu.Unlock()
@@ -227,6 +234,12 @@ func (p *UDPProxy) getSession(clientAddr *net.UDPAddr, tokenIP net.IP, destAddr 
 }
 
 func (p *UDPProxy) initSession(session *udpSession) {
+	defer close(session.ready)
+	select {
+	case <-p.closed:
+		return
+	default:
+	}
 	forwarder, err := p.local.newUDPForwarder(p, session.clientAddr, session.tokenIP, session.destAddr)
 
 	p.mu.Lock()
@@ -241,13 +254,11 @@ func (p *UDPProxy) initSession(session *udpSession) {
 		if forwarder != nil {
 			_ = forwarder.Close()
 		}
-		close(session.ready)
 		return
 	}
 
-	close(session.ready)
 	if err != nil {
-		p.removeSession(session.key)
+		p.removeSession(session)
 	}
 }
 
@@ -257,17 +268,16 @@ func (p *UDPProxy) sendToClient(payload []byte, tokenIP net.IP, clientAddr *net.
 	return err
 }
 
-func (p *UDPProxy) removeSession(key string) {
+func (p *UDPProxy) removeSession(session *udpSession) {
 	p.mu.Lock()
-	session, ok := p.sessions[key]
-	if ok {
-		delete(p.sessions, key)
+	if p.sessions[session.key] != session {
+		p.mu.Unlock()
+		return
 	}
+	delete(p.sessions, session.key)
 	p.mu.Unlock()
-	if ok {
-		if session.forwarder != nil {
-			_ = session.forwarder.Close()
-		}
+	if session.forwarder != nil {
+		_ = session.forwarder.Close()
 	}
 }
 
