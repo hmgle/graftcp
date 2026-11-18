@@ -82,8 +82,18 @@ else ifneq ($(or $(findstring i386,$(CC_MACHINE)),$(findstring i486,$(CC_MACHINE
 	TARGET_GOARCH := 386
 endif
 
-GO_ENV := GOTOOLCHAIN=local GOCACHE=$(GO_CACHE_DIR) GOMODCACHE=$(GO_MOD_CACHE_DIR) \
-	CGO_ENABLED=1 CC=$(CC) CXX=$(CXX) AR=$(AR)
+shell_quote = '$(subst ','"'"',$(1))'
+
+# Preserve the Go toolchain default when Make has no caller-supplied flags.
+ifeq ($(origin CGO_CPPFLAGS),undefined)
+CGO_CPPFLAGS = $(shell GOTOOLCHAIN=local $(GO) env CGO_CPPFLAGS)
+endif
+
+# Go does not track external C library changes in its build/test cache.
+# Hash the archive and its objects because thin archives only reference them.
+GO_ENV = GOTOOLCHAIN=local GOCACHE=$(GO_CACHE_DIR) GOMODCACHE=$(GO_MOD_CACHE_DIR) \
+	CGO_ENABLED=1 CC=$(CC) CXX=$(CXX) AR=$(AR) \
+	CGO_CPPFLAGS=$(call shell_quote,$(CGO_CPPFLAGS))" -DGRAFTCP_ARCHIVE_HASH=$$(sha256sum libgraftcp.a $(LIB_OBJS) | sha256sum | cut -d ' ' -f 1)"
 ifdef TARGET_GOARCH
 	GO_ENV += GOOS=linux GOARCH=$(TARGET_GOARCH)
 endif
@@ -94,16 +104,45 @@ endif
 .DEFAULT_GOAL := all
 .SUFFIXES:
 
-.PHONY: all clean install uninstall test test-go test-c
+.PHONY: all clean install uninstall test test-go test-c FORCE
 all: $(TARGET) $(ALIAS_TARGET)
 
-libgraftcp.a: $(LIB_OBJS)
-	$(AR) $(ARFLAGS) $@ $^
+# Check effective options on every invocation, but preserve stamp timestamps
+# when they are unchanged. Separate compilation from archive-only options.
+# Stamps record the effective Make variable values.
+C_CONFIG_STAMP := .cache/make/c-config
+AR_CONFIG_STAMP := .cache/make/ar-config
+
+FORCE:
+
+define update_config_stamp
+	tmp=$$(mktemp "$@.XXXXXX") && \
+	trap 'rm -f -- "$$tmp"' EXIT && \
+	trap 'exit 1' HUP INT TERM && \
+	printf '%s\n' $(1) > "$$tmp" && \
+	if ! cmp -s "$$tmp" "$@"; then mv -f -- "$$tmp" "$@"; fi
+endef
+
+$(C_CONFIG_STAMP): FORCE
+	@mkdir -p $(dir $@)
+	@$(call update_config_stamp,$(call shell_quote,CC=$(CC)) \
+		$(call shell_quote,CPPFLAGS=$(CPPFLAGS)) \
+		$(call shell_quote,CFLAGS=$(CFLAGS)))
+
+$(AR_CONFIG_STAMP): FORCE
+	@mkdir -p $(dir $@)
+	@$(call update_config_stamp,$(call shell_quote,AR=$(AR)) \
+		$(call shell_quote,ARFLAGS=$(ARFLAGS)))
+
+
+libgraftcp.a: $(LIB_OBJS) $(AR_CONFIG_STAMP) Makefile
+	$(RM) $@
+	$(AR) $(ARFLAGS) $@ $(LIB_OBJS)
 
 %.o: %.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
 
-$(TARGET): libgraftcp.a $(GO_BUILD_FILES) $(LOCAL_DIR)/go.mod $(LOCAL_DIR)/go.sum
+$(TARGET): libgraftcp.a $(GO_BUILD_FILES) $(LOCAL_DIR)/go.mod $(LOCAL_DIR)/go.sum Makefile
 	$(RM) $@
 	$(GO_ENV) $(GO) -C $(LOCAL_DIR) build -o $(notdir $@) -ldflags "$(GO_LDFLAGS) -X main.version=$(VERSION)" ./cmd/mgraftcp
 
@@ -122,10 +161,13 @@ uninstall:
 test: test-c test-go
 
 test-go: libgraftcp.a
-	$(GO_ENV) $(GO) -C $(LOCAL_DIR) test ./...
+	@# The C compiler reads testdata probes at runtime, outside Go's test cache.
+	$(GO_ENV) $(GO) -C $(LOCAL_DIR) test -count=1 ./...
 
 CIDR_TRIE_TEST_BIN := cidr-trie_test
 CIDR_TRIE_TEST_OBJS := cidr-trie_test.o cidr-trie.o
+
+$(LIB_OBJS) $(CIDR_TRIE_TEST_OBJS): $(C_CONFIG_STAMP) Makefile
 
 $(CIDR_TRIE_TEST_BIN): $(CIDR_TRIE_TEST_OBJS)
 	$(CC) $(CFLAGS) -o $@ $^
@@ -135,6 +177,7 @@ test-c: $(CIDR_TRIE_TEST_BIN)
 
 clean:
 	$(RM) $(LIB_OBJS) $(LIB_DEPS) libgraftcp.a $(TARGET) $(ALIAS_TARGET) \
-		$(CIDR_TRIE_TEST_BIN) $(CIDR_TRIE_TEST_OBJS) cidr-trie_test.d
+		$(CIDR_TRIE_TEST_BIN) $(CIDR_TRIE_TEST_OBJS) cidr-trie_test.d \
+		$(C_CONFIG_STAMP) $(AR_CONFIG_STAMP)
 
--include $(LIB_DEPS)
+-include $(LIB_DEPS) cidr-trie_test.d
