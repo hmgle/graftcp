@@ -122,7 +122,7 @@ When generic UDP proxying is enabled, `graftcp` starts a separate UDP listener. 
 
 ## Notes
 
-- Linux only.
+- Requires Linux 3.8 or later for `PTRACE_O_EXITKILL`. If the tracer dies, the kernel kills the processes it is tracing.
 - `ptrace(2)` permissions still apply. If tracing is blocked, check Yama `ptrace_scope`, capabilities, or run as root when appropriate.
 - On supported kernels `graftcp` installs a seccomp-BPF filter so only socket-related syscalls trap into the tracer, reducing tracing overhead; on kernels without seccomp filtering it falls back to stopping on every syscall. This is automatic and needs no configuration.
 - Local destinations are ignored by default. Use `--not-ignore-local` to proxy loopback/private-local connects as well.
