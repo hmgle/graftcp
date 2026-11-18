@@ -20,6 +20,7 @@
 #include <stddef.h>
 #include <pwd.h>
 #include <grp.h>
+#include <sys/prctl.h>
 #include <linux/version.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
 #define ENABLE_SECCOMP_BPF
@@ -27,7 +28,6 @@
 #ifdef ENABLE_SECCOMP_BPF
 #include <linux/seccomp.h>
 #include <linux/filter.h>
-#include <sys/prctl.h>
 #endif /* ifdef ENABLE_SECCOMP_BPF */
 
 #include "graftcp.h"
@@ -38,7 +38,8 @@
 #endif
 
 #ifndef PTRACE_O_EXITKILL
-#define PTRACE_O_EXITKILL 0
+/* glibc declares this option as an enum, so use its Linux ABI value. */
+#define PTRACE_O_EXITKILL (1U << 20)
 #endif
 
 extern uint32_t mgraftcp_register_connect(int family, const char *addr,
@@ -66,6 +67,7 @@ static int run_group_count;
 
 static int exit_code = 0;
 static pid_t root_pid = -1;
+static int startup_fd = -1;
 
 static void child_write_str(const char *s)
 {
@@ -897,11 +899,20 @@ void socket_exiting_handle(struct proc_info *pinfp, int fd)
 		fprintf(stderr, "graftcp failed to track socket fd %d\n", fd);
 }
 
-void do_child(const char *username, int argc, char **argv)
+static void do_child(const char *username, int argc, char **argv, int ready_fd,
+		     pid_t tracer_pid)
 {
 	char *args[argc + 1];
 	int i;
 	pid_t pid;
+	char ready;
+	ssize_t n;
+
+	/* Until EXITKILL is installed, tracer death could leave us in SIGSTOP. */
+	if (prctl(PR_SET_PDEATHSIG, (long)SIGKILL, 0L, 0L, 0L) < 0)
+		child_die_errno("prctl(PR_SET_PDEATHSIG)");
+	if (getppid() != tracer_pid)
+		_exit(1);
 
 	for (i = 0; i < argc; i++)
 		args[i] = argv[i];
@@ -916,6 +927,16 @@ void do_child(const char *username, int argc, char **argv)
 	 */
 	if (kill(pid, SIGSTOP) < 0)
 		child_die_errno("kill(SIGSTOP)");
+	/* Detaching a stopped child resumes it, even if tracer setup failed. */
+	do {
+		n = read(ready_fd, &ready, 1);
+	} while (n < 0 && errno == EINTR);
+	if (n != 1 || ready != 'R')
+		_exit(1);
+	close(ready_fd);
+	/* EXITKILL now owns the tracee lifetime. Avoid inheriting this at exec. */
+	if (prctl(PR_SET_PDEATHSIG, 0L, 0L, 0L, 0L) < 0)
+		child_die_errno("prctl(clear PR_SET_PDEATHSIG)");
 	if (username && run_group_count > 0 &&
 	    setgroups((size_t)run_group_count, run_groups) < 0)
 		child_die_errno("setgroups");
@@ -935,15 +956,24 @@ void do_child(const char *username, int argc, char **argv)
 void start_tracee(const char *username, int argc, char **argv)
 {
 	pid_t child;
+	pid_t tracer_pid = getpid();
 	struct proc_info *pi;
 
+	int pair[2];
+	if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair) < 0) {
+		perror("startup socketpair");
+		exit(1);
+	}
 	child = fork();
 	if (child < 0) {
 		perror("fork");
 		exit(errno);
 	} else if (child == 0) {
-		do_child(username, argc, argv);
+		close(pair[0]);
+		do_child(username, argc, argv, pair[1], tracer_pid);
 	}
+	close(pair[1]);
+	startup_fd = pair[0];
 	root_pid = child;
 	pi = alloc_proc_info(child);
 	if (pi == NULL) {
@@ -1040,9 +1070,9 @@ int trace_syscall_exiting(struct proc_info *pinfp)
 	case SYS_socket:
 		child_ret = get_retval(pinfp->pid);
 		if (errno) {
-			/* No such process, child exited */
+			/* Let the wait loop collect the tracee exit status. */
 			if (errno == ESRCH)
-				exit(0);
+				goto end;
 			perror("ptrace");
 			exit(errno);
 		}
@@ -1065,7 +1095,7 @@ int trace_syscall_exiting(struct proc_info *pinfp)
 		child_ret = get_retval(pinfp->pid);
 		if (errno) {
 			if (errno == ESRCH)
-				exit(0);
+				goto end;
 			perror("ptrace");
 			exit(errno);
 		}
@@ -1133,18 +1163,7 @@ int do_trace()
 			exit(errno);
 		}
 
-		if (pinfp->flags & FLAG_STARTUP) {
-			pinfp->flags &= ~FLAG_STARTUP;
-
-			if (ptrace(PTRACE_SETOPTIONS, child, 0,
-				   ptrace_options) < 0) {
-				perror("ptrace");
-				exit(errno);
-			}
-		}
-		event = ((unsigned)status >> 16);
-		if (WIFSIGNALED(status) || WIFEXITED(status)
-		    || !WIFSTOPPED(status)) {
+		if (!WIFSTOPPED(status)) {
 			if (child == root_pid && WIFEXITED(status))
 				exit_code = WEXITSTATUS(status);
 			else if (child == root_pid && WIFSIGNALED(status))
@@ -1152,6 +1171,46 @@ int do_trace()
 			free_proc_info(pinfp);
 			continue;
 		}
+
+		if (pinfp->flags & FLAG_STARTUP) {
+			ssize_t n;
+
+			if (ptrace(PTRACE_SETOPTIONS, child, 0,
+				   ptrace_options) < 0) {
+				int setup_errno = errno;
+
+				/* SIGKILL can race the stop; wait for the exit status. */
+				if (setup_errno == ESRCH)
+					continue;
+				/* EXITKILL is not active; the child is still at SIGSTOP. */
+				if (kill(child, SIGKILL) < 0 && errno != ESRCH &&
+				    ptrace(PTRACE_CONT, child, 0, SIGKILL) < 0 && errno != ESRCH) {
+					perror("terminate tracee");
+				} else {
+					while (waitpid(child, NULL, __WALL) < 0) {
+						if (errno == EINTR)
+							continue;
+						if (errno != ECHILD)
+							perror("waitpid");
+						break;
+					}
+				}
+				errno = setup_errno;
+				perror("ptrace(PTRACE_SETOPTIONS)");
+				exit(setup_errno);
+			}
+			do {
+				n = send(startup_fd, "R", 1, MSG_NOSIGNAL);
+			} while (n < 0 && errno == EINTR);
+			if (n < 0 && errno != EPIPE && errno != ECONNRESET) {
+				perror("confirm tracee startup");
+				exit(1);
+			}
+			close(startup_fd);
+			startup_fd = -1;
+			pinfp->flags &= ~FLAG_STARTUP;
+		}
+		event = ((unsigned)status >> 16);
 
 		sig = 0;
 		if (event != 0) {
@@ -1393,9 +1452,12 @@ int client_prepare(int argc, char **argv)
 
 int client_trace(void)
 {
-	if (do_trace() < 0)
-		return -1;
-	return exit_code;
+	int ret = do_trace();
+	if (startup_fd >= 0) {
+		close(startup_fd);
+		startup_fd = -1;
+	}
+	return ret < 0 ? -1 : exit_code;
 }
 
 int client_main(int argc, char **argv)

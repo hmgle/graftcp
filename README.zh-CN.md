@@ -122,7 +122,7 @@ Usage: graftcp [-hn] [-b value] [--config value] [--disable-dns] [--disable-udp]
 
 ## 说明
 
-- 仅支持 Linux。
+- 需要 Linux 3.8 或更高版本提供的 `PTRACE_O_EXITKILL`。如果 tracer 终止，内核会终止它正在跟踪的进程。
 - 仍然受 `ptrace(2)` 权限限制；如果跟踪失败，请检查 Yama `ptrace_scope`、能力集或是否需要 root。
 - 在支持的内核上，`graftcp` 会安装 seccomp-BPF 过滤器，使只有 socket 相关 syscall 才陷入 tracer，从而降低跟踪开销；在不支持 seccomp 过滤的内核上则回退为对每个 syscall 停点。该行为自动生效，无需配置。
 - 默认忽略本地目标地址；如果希望本地连接也走代理，使用 `--not-ignore-local`。

@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"unsafe"
 
 	"github.com/hmgle/graftcp/local"
@@ -151,6 +152,9 @@ func main() {
 
 	_, faddr := l.GetFAddr()
 
+	// Linux ties ptrace ownership to the thread that forks the tracee.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	retCode = clientPrepare(cfg.clientArgs(faddr.Port, dnsPort, udpPort, args))
 	if retCode != 0 {
 		return
