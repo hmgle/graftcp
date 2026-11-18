@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/textproto"
 	"net/url"
+	"strconv"
+	"strings"
 
 	"golang.org/x/net/proxy"
 )
@@ -60,17 +63,44 @@ func (h *httpDialer) Dial(network, addr string) (net.Conn, error) {
 		return nil, err
 	}
 	r := bufio.NewReader(conn)
-	resp, err := http.ReadResponse(r, req)
-	if err != nil {
+	if err := readConnectResponse(r); err != nil {
 		conn.Close()
 		return nil, err
 	}
-	resp.Body.Close()
-	if resp.StatusCode != 200 {
-		conn.Close()
-		return nil, fmt.Errorf("connect proxy error: %s", resp.Status)
+	if r.Buffered() == 0 {
+		return conn, nil
 	}
 	return &bufferedConn{Conn: conn, r: r}, nil
+}
+
+// RFC 9110 section 9.3.6: the tunnel starts at the end of the 2xx headers,
+// even if the proxy sent Content-Length or Transfer-Encoding.
+func readConnectResponse(r *bufio.Reader) error {
+	headers := textproto.NewReader(r)
+	for {
+		line, err := headers.ReadLine()
+		if err != nil {
+			return err
+		}
+		version, status, _ := strings.Cut(line, " ")
+		status = strings.TrimLeft(status, " ")
+		code, _, _ := strings.Cut(status, " ")
+		n, err := strconv.Atoi(code)
+		if _, _, ok := http.ParseHTTPVersion(version); !ok || len(code) != 3 || err != nil || n < 100 {
+			return fmt.Errorf("malformed HTTP proxy status line: %q", line)
+		}
+		if _, err := headers.ReadMIMEHeader(); err != nil {
+			return err
+		}
+		// A 101 switches protocols, which this CONNECT request did not request.
+		if n < 200 && n != http.StatusSwitchingProtocols {
+			continue
+		}
+		if n/100 != 2 {
+			return fmt.Errorf("connect proxy error: %s", status)
+		}
+		return nil
+	}
 }
 
 func newHTTPProxy(u *url.URL, forward proxy.Dialer) (proxy.Dialer, error) {
