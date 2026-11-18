@@ -128,6 +128,7 @@ Usage: graftcp [-hn] [-b value] [--config value] [--disable-dns] [--disable-udp]
 - 默认忽略本地目标地址；如果希望本地连接也走代理，使用 `--not-ignore-local`。
 - DNS 代理默认关闭；使用 `--enable-dns` 启用 UDP/53 DNS-over-TCP 路径，使用 `--dns-server` 指定上游服务器。
 - 通用 UDP 代理默认关闭；使用 `--enable-udp` 启用。
+- 通用 UDP 在成功执行 `connect()` 或使用 cork 发送后，内核可能保留目的地址。即使 socket 已关闭，相应映射仍保留到 graftcp 退出。长时间运行的命令如果以这种方式访问大量不同的 IP:port，映射会累积。空闲清理仅扫描临时路由。
 - HTTP 代理模式不支持通用 UDP。`auto` 会优先尝试 SOCKS5 UDP，失败时回退 direct UDP；`only_http_proxy` 会拒绝通用 UDP session。
 - SOCKS5 可以使用 TCP endpoint（`127.0.0.1:1080`），也可以用 Unix socket endpoint（`unix:/path/tor.sock` 或 `/path/tor.sock`）承载 TCP CONNECT 流量。SOCKS5 UDP ASSOCIATE 仍然要求 TCP SOCKS5 endpoint。
 - 当 `--socks5` 和 `--http_proxy` 都没有配置时，graftcp 会回退到 SOCKS5 `127.0.0.1:1080`。只要配置了任意一个代理，这个隐含默认值就不再生效，因此单独使用 `--http_proxy` 时不会去连接任何 SOCKS5 endpoint。
@@ -135,7 +136,7 @@ Usage: graftcp [-hn] [-b value] [--config value] [--disable-dns] [--disable-udp]
 - 配置文件支持代理地址和常见路由选项；命令行参数仍然覆盖配置文件。
 - TCP 和通用 UDP syscall 地址缓冲区会在 `connect()` / `sendto()` / `sendmsg()` 返回后 best-effort 恢复；DNS proxy 改写会保留下来，以兼容 resolver 的来源地址校验。如果客户端强依赖 `recvfrom()` 返回原始远端地址，透明性仍可能不完整。
 - IPv6 故意统一走 IPv4-mapped loopback；依赖 `IPV6_V6ONLY=1` 的 socket 不在当前设计目标内。
-- socket 跟踪按被跟踪 pid/fd 状态做 best-effort；`dup*` 和 `fcntl(F_DUPFD*)` 会 best-effort 复制，但 `close_range()`、`unshare(CLONE_FILES)` 和完整共享 fd table 语义属于有意不覆盖的边界。
+- graftcp 根据观察到的描述符操作跟踪 socket，包括由 `dup*` 和 `fcntl(F_DUPFD*)` 创建的别名。`unshare(CLONE_FILES)` 成功后，调用者使用独立的跟踪表。若编译时的头文件提供 `close_range()` 系统调用号，graftcp 会处理成功的区间关闭操作，包括 `CLOSE_RANGE_UNSHARE` 和 `CLOSE_RANGE_CLOEXEC`。通过 `SCM_RIGHTS` 接收的描述符可能漏跟踪。
 - loopback token 会在本地 listener 成功 `accept()` 或空闲清理时回收，不保证覆盖每一个失败或放弃的连接。
 - 当前设计有意优先采用单进程 tracer/proxy 与 loopback token 路由，不再使用旧的守护进程、FIFO 和 socket 反查模型。
 

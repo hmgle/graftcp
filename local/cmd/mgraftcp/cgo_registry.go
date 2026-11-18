@@ -26,13 +26,13 @@ func mgraftcp_register_connect(family C.int, addr *C.char, port C.uint16_t) C.ui
 	return C.uint32_t(token)
 }
 
-//export mgraftcp_register_udp
-func mgraftcp_register_udp(family C.int, addr *C.char, port C.uint16_t) C.uint32_t {
+//export mgraftcp_reserve_udp
+func mgraftcp_reserve_udp(family C.int, addr *C.char, port C.uint16_t) C.uint32_t {
 	if activeUDPRegistry == nil || addr == nil {
 		return 0
 	}
 
-	token, err := activeUDPRegistry.Register(int(family), C.GoString(addr), uint16(port))
+	token, err := activeUDPRegistry.Reserve(int(family), C.GoString(addr), uint16(port))
 	if err != nil {
 		return 0
 	}
@@ -48,10 +48,20 @@ func mgraftcp_forget_connect(token C.uint32_t) {
 	activeRegistry.Forget(uint32(token))
 }
 
-//export mgraftcp_forget_udp
-func mgraftcp_forget_udp(token C.uint32_t) {
+//export mgraftcp_finish_udp_rewrite
+func mgraftcp_finish_udp_rewrite(token C.uint32_t, rewritten C.int) {
 	if activeUDPRegistry == nil || token == 0 {
 		return
 	}
-	activeUDPRegistry.Forget(uint32(token))
+	activeUDPRegistry.FinishRewrite(uint32(token), rewritten != 0)
+}
+
+//export mgraftcp_start_udp_use
+func mgraftcp_start_udp_use(token C.uint32_t) {
+	activeUDPRegistry.StartUse(uint32(token))
+}
+
+//export mgraftcp_finish_udp_use
+func mgraftcp_finish_udp_use(token C.uint32_t, accepted C.int) {
+	activeUDPRegistry.FinishUse(uint32(token), accepted != 0)
 }

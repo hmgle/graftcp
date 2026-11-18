@@ -33,13 +33,13 @@
 #include <sys/user.h>
 #if defined(__x86_64__)
 #include <sys/reg.h>
-#include <linux/sched.h>
 #elif defined(__arm__)
 #include <asm/ptrace.h>
 #elif defined(__arm64__) || defined(__aarch64__)
 #include <asm/ptrace.h>
 #include <linux/elf.h>
 #endif
+#include <linux/sched.h>
 #include <sys/syscall.h>
 #include <fcntl.h>
 #include <assert.h>
@@ -124,16 +124,23 @@
 
 #define TRACKED_SOCKET_INITIAL_CAP 8U
 
+struct udp_socket_state;
+struct socket_table;
+
 struct tracked_socket {
 	int fd;
 	int domain;
 	int type;
+	struct udp_socket_state *udp;
 };
 
 struct proc_info {
 	pid_t pid;
 	int flags;
 	int csn;		/* current syscall number */
+	uint64_t clone_flags;
+	unsigned int fd_args[3];
+	bool waiting_for_parent;
 	bool pending_socket;
 	int pending_socket_domain;
 	int pending_socket_type;
@@ -141,13 +148,13 @@ struct proc_info {
 	int pending_dup_oldfd;
 	int pending_dup_newfd;
 	bool pending_dup_fixed;
+	bool pending_dup_cloexec;
 	bool pending_sockaddr_restore;
+	uint32_t pending_udp_token;
 	long sockaddr_restore_addr;
 	size_t sockaddr_restore_len;
 	unsigned char sockaddr_restore[sizeof(struct sockaddr_in6)];
-	unsigned int tracked_socket_count;
-	unsigned int tracked_socket_cap;
-	struct tracked_socket *tracked_sockets;
+	struct socket_table *files;
 	UT_hash_handle hh;
 };
 
@@ -159,10 +166,18 @@ int track_socket_fd(struct proc_info *pinfp, int fd, int domain, int type);
 int copy_tracked_socket_fd(struct proc_info *dst, const struct proc_info *src,
 			   int oldfd, int newfd);
 int copy_tracked_sockets(struct proc_info *dst, const struct proc_info *src);
+void share_tracked_sockets(struct proc_info *dst, const struct proc_info *src);
+int unshare_tracked_sockets(struct proc_info *pinfp);
+void set_socket_cloexec(struct proc_info *pinfp, int fd, bool enabled);
+void close_tracked_range(struct proc_info *pinfp, unsigned int first,
+			 unsigned int last, bool cloexec);
+void close_exec_sockets(struct proc_info *pinfp);
 bool is_tracked_socket_fd(struct proc_info *pinfp, int fd);
 bool is_tracked_stream_socket_fd(struct proc_info *pinfp, int fd);
 bool is_tracked_dgram_socket_fd(struct proc_info *pinfp, int fd);
 void untrack_socket_fd(struct proc_info *pinfp, int fd);
+void mark_socket_may_cork(struct proc_info *pinfp, int fd);
+bool socket_may_cork(struct proc_info *pinfp, int fd);
 
 int get_syscall_number(pid_t pid);
 int get_retval(pid_t pid);

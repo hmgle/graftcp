@@ -20,7 +20,9 @@
 #include <stddef.h>
 #include <pwd.h>
 #include <grp.h>
+#include <sys/ioctl.h>
 #include <sys/prctl.h>
+#include <netinet/udp.h>
 #include <linux/version.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
 #define ENABLE_SECCOMP_BPF
@@ -37,6 +39,12 @@
 #define VERSION "v0.7"
 #endif
 
+#ifdef SYS_close_range
+/* Values from the Linux UAPI, also usable with older C library headers. */
+#define GRAFTCP_CLOSE_RANGE_UNSHARE (1U << 1)
+#define GRAFTCP_CLOSE_RANGE_CLOEXEC (1U << 2)
+#endif
+
 #ifndef PTRACE_O_EXITKILL
 /* glibc declares this option as an enum, so use its Linux ABI value. */
 #define PTRACE_O_EXITKILL (1U << 20)
@@ -44,10 +52,12 @@
 
 extern uint32_t mgraftcp_register_connect(int family, const char *addr,
 					  uint16_t port);
-extern uint32_t mgraftcp_register_udp(int family, const char *addr,
+extern uint32_t mgraftcp_reserve_udp(int family, const char *addr,
 				      uint16_t port);
 extern void mgraftcp_forget_connect(uint32_t token);
-extern void mgraftcp_forget_udp(uint32_t token);
+extern void mgraftcp_finish_udp_rewrite(uint32_t token, int rewritten);
+extern void mgraftcp_start_udp_use(uint32_t token);
+extern void mgraftcp_finish_udp_use(uint32_t token, int accepted);
 
 uint16_t DEFAULT_LOCAL_PORT      = 2233;
 bool DEFAULT_IGNORE_LOCAL        = true;
@@ -416,6 +426,29 @@ static bool ip6_is_ignore(uint8_t *ip)
 #else
 #define SECCOMP_TRACE_FCNTL64(base)
 #endif
+#ifdef SYS_clone3
+#define SECCOMP_TRACE_CLONE3(base) \
+	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_clone3, \
+		 SECCOMP_JUMP_OFFSET(base##_CLONE3, base##_RET_TRACE), 0),
+#else
+#define SECCOMP_TRACE_CLONE3(base)
+#endif
+#ifdef SYS_close_range
+#define SECCOMP_TRACE_CLOSE_RANGE(base) \
+	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close_range, \
+		 SECCOMP_JUMP_OFFSET(base##_CLOSE_RANGE, base##_RET_TRACE), 0),
+#else
+#define SECCOMP_TRACE_CLOSE_RANGE(base)
+#endif
+#define SECCOMP_TRACE_FD_TABLE(base) \
+	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_clone, \
+		 SECCOMP_JUMP_OFFSET(base##_CLONE, base##_RET_TRACE), 0), \
+	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_unshare, \
+		 SECCOMP_JUMP_OFFSET(base##_UNSHARE, base##_RET_TRACE), 0), \
+	SECCOMP_TRACE_CLONE3(base) \
+	SECCOMP_TRACE_CLOSE_RANGE(base) \
+	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_ioctl, \
+		 SECCOMP_JUMP_OFFSET(base##_IOCTL, base##_IOCTL_ARGS), 0),
 #define SECCOMP_TRACE_DUP_SYSCALLS(base)				\
 	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_dup,			\
 		 SECCOMP_JUMP_OFFSET(base##_DUP, base##_RET_TRACE), 0),	\
@@ -428,6 +461,13 @@ static bool ip6_is_ignore(uint8_t *ip)
 #define SECCOMP_JUMP_OFFSET(from, to) ((to) - (from) - 1)
 #define SECCOMP_LAYOUT_CHECK(name, expr)				\
 	enum { name = 1 / !!(expr) }
+#define SECCOMP_IOCTL_ARG_FILTER(base)					\
+	BPF_STMT(BPF_LD | BPF_W | BPF_ABS, SECCOMP_ARG_LO32_OFFSET(1)),	\
+	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, FIOCLEX,			\
+		 SECCOMP_JUMP_OFFSET(base##_FIOCLEX, base##_RET_TRACE), 0), \
+	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, FIONCLEX,			\
+		 SECCOMP_JUMP_OFFSET(base##_FIONCLEX, base##_RET_TRACE),	\
+		 SECCOMP_JUMP_OFFSET(base##_FIONCLEX, base##_RET_ALLOW))
 /*
  * These checks only need the low 32 bits of seccomp_data.args[]. Keep
  * SECCOMP_SOCKET_ARG_FILTER_LEN in sync with this macro, and keep the macro
@@ -451,9 +491,15 @@ static void install_seccomp()
 		FILTER_CLOSE,
 		FILTER_SOCKET,
 		FILTER_CONNECT,
-	#if defined(__x86_64__)
 		FILTER_CLONE,
-	#endif
+		FILTER_UNSHARE,
+#ifdef SYS_clone3
+		FILTER_CLONE3,
+#endif
+#ifdef SYS_close_range
+		FILTER_CLOSE_RANGE,
+#endif
+		FILTER_IOCTL,
 		FILTER_DUP,
 	#ifdef SYS_dup2
 		FILTER_DUP2,
@@ -464,6 +510,9 @@ static void install_seccomp()
 		FILTER_FCNTL64,
 	#endif
 		FILTER_ALLOW_JUMP,
+		FILTER_IOCTL_ARGS,
+		FILTER_FIOCLEX,
+		FILTER_FIONCLEX,
 		FILTER_SOCKET_ARGS,
 		FILTER_RET_TRACE =
 			FILTER_SOCKET_ARGS + SECCOMP_SOCKET_ARG_FILTER_LEN,
@@ -476,9 +525,16 @@ static void install_seccomp()
 		UDP_FILTER_CONNECT,
 		UDP_FILTER_SENDTO,
 		UDP_FILTER_SENDMSG,
-	#if defined(__x86_64__)
+		UDP_FILTER_SETSOCKOPT,
 		UDP_FILTER_CLONE,
-	#endif
+		UDP_FILTER_UNSHARE,
+#ifdef SYS_clone3
+		UDP_FILTER_CLONE3,
+#endif
+#ifdef SYS_close_range
+		UDP_FILTER_CLOSE_RANGE,
+#endif
+		UDP_FILTER_IOCTL,
 		UDP_FILTER_DUP,
 	#ifdef SYS_dup2
 		UDP_FILTER_DUP2,
@@ -489,6 +545,9 @@ static void install_seccomp()
 		UDP_FILTER_FCNTL64,
 	#endif
 		UDP_FILTER_ALLOW_JUMP,
+		UDP_FILTER_IOCTL_ARGS,
+		UDP_FILTER_FIOCLEX,
+		UDP_FILTER_FIONCLEX,
 		UDP_FILTER_SOCKET_ARGS,
 		UDP_FILTER_RET_TRACE =
 			UDP_FILTER_SOCKET_ARGS + SECCOMP_SOCKET_ARG_FILTER_LEN,
@@ -502,28 +561,18 @@ static void install_seccomp()
 	struct sock_filter filter[] = {
 		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
 				(offsetof(struct seccomp_data, nr))),
-#if defined(__x86_64__)
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close,
 			 SECCOMP_JUMP_OFFSET(FILTER_CLOSE, FILTER_RET_TRACE), 0),
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket,
 			 SECCOMP_JUMP_OFFSET(FILTER_SOCKET, FILTER_SOCKET_ARGS), 0),
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect,
 			 SECCOMP_JUMP_OFFSET(FILTER_CONNECT, FILTER_RET_TRACE), 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_clone,
-			 SECCOMP_JUMP_OFFSET(FILTER_CLONE, FILTER_RET_TRACE), 0),
+		SECCOMP_TRACE_FD_TABLE(FILTER)
 		SECCOMP_TRACE_DUP_SYSCALLS(FILTER)
-	#else
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close,
-			 SECCOMP_JUMP_OFFSET(FILTER_CLOSE, FILTER_RET_TRACE), 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket,
-			 SECCOMP_JUMP_OFFSET(FILTER_SOCKET, FILTER_SOCKET_ARGS), 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect,
-			 SECCOMP_JUMP_OFFSET(FILTER_CONNECT, FILTER_RET_TRACE), 0),
-		SECCOMP_TRACE_DUP_SYSCALLS(FILTER)
-	#endif
 		BPF_STMT(BPF_JMP | BPF_JA,
 			 SECCOMP_JUMP_OFFSET(FILTER_ALLOW_JUMP,
 					     FILTER_RET_ALLOW)),
+		SECCOMP_IOCTL_ARG_FILTER(FILTER),
 		SECCOMP_SOCKET_ARG_FILTER,
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
@@ -537,7 +586,6 @@ static void install_seccomp()
 	struct sock_filter udp_filter[] = {
 		BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
 				(offsetof(struct seccomp_data, nr))),
-#if defined(__x86_64__)
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close,
 			 SECCOMP_JUMP_OFFSET(UDP_FILTER_CLOSE,
 					     UDP_FILTER_RET_TRACE), 0),
@@ -553,31 +601,15 @@ static void install_seccomp()
 		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendmsg,
 			 SECCOMP_JUMP_OFFSET(UDP_FILTER_SENDMSG,
 					     UDP_FILTER_RET_TRACE), 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_clone,
-			 SECCOMP_JUMP_OFFSET(UDP_FILTER_CLONE,
+		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_setsockopt,
+			 SECCOMP_JUMP_OFFSET(UDP_FILTER_SETSOCKOPT,
 					     UDP_FILTER_RET_TRACE), 0),
+		SECCOMP_TRACE_FD_TABLE(UDP_FILTER)
 		SECCOMP_TRACE_DUP_SYSCALLS(UDP_FILTER)
-	#else
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close,
-			 SECCOMP_JUMP_OFFSET(UDP_FILTER_CLOSE,
-					     UDP_FILTER_RET_TRACE), 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_socket,
-			 SECCOMP_JUMP_OFFSET(UDP_FILTER_SOCKET,
-					     UDP_FILTER_SOCKET_ARGS), 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_connect,
-			 SECCOMP_JUMP_OFFSET(UDP_FILTER_CONNECT,
-					     UDP_FILTER_RET_TRACE), 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendto,
-			 SECCOMP_JUMP_OFFSET(UDP_FILTER_SENDTO,
-					     UDP_FILTER_RET_TRACE), 0),
-		BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_sendmsg,
-			 SECCOMP_JUMP_OFFSET(UDP_FILTER_SENDMSG,
-					     UDP_FILTER_RET_TRACE), 0),
-		SECCOMP_TRACE_DUP_SYSCALLS(UDP_FILTER)
-	#endif
 		BPF_STMT(BPF_JMP | BPF_JA,
 			 SECCOMP_JUMP_OFFSET(UDP_FILTER_ALLOW_JUMP,
 					     UDP_FILTER_RET_ALLOW)),
+		SECCOMP_IOCTL_ARG_FILTER(UDP_FILTER),
 		SECCOMP_SOCKET_ARG_FILTER,
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_TRACE),
 		BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
@@ -635,7 +667,7 @@ void socket_pre_handle(struct proc_info *pinfp)
 	}
 	pinfp->pending_socket = true;
 	pinfp->pending_socket_domain = domain;
-	pinfp->pending_socket_type = socket_type;
+	pinfp->pending_socket_type = type;
 }
 
 static void clear_dup_tracking(struct proc_info *pinfp)
@@ -646,6 +678,7 @@ static void clear_dup_tracking(struct proc_info *pinfp)
 	pinfp->pending_dup_oldfd = -1;
 	pinfp->pending_dup_newfd = -1;
 	pinfp->pending_dup_fixed = false;
+	pinfp->pending_dup_cloexec = false;
 }
 
 static void clear_sockaddr_restore(struct proc_info *pinfp)
@@ -680,10 +713,11 @@ static void restore_sockaddr_if_needed(struct proc_info *pinfp)
 }
 
 static bool rewrite_udp_sockaddr(struct proc_info *pinfp, long addr,
-				 long addrlen)
+				 long addrlen, bool may_retain_dest)
 {
 	struct dest_endpoint dest;
 	uint32_t loopback_token;
+	bool rewritten;
 
 	if (pinfp == NULL)
 		return false;
@@ -717,18 +751,25 @@ static bool rewrite_udp_sockaddr(struct proc_info *pinfp, long addr,
 	if (UDP_PROXY_PORT == 0 || dest_is_in_ignore_list(&dest))
 		return false;
 
-	loopback_token = mgraftcp_register_udp(dest.family, dest.ipstr, dest.port);
+	loopback_token = mgraftcp_reserve_udp(dest.family, dest.ipstr, dest.port);
 	if (loopback_token == 0) {
-		fprintf(stderr, "graftcp register UDP failed for %s:%d\n",
+		fprintf(stderr, "graftcp reserve UDP failed for %s:%d\n",
 			dest.ipstr, dest.port);
 		return false;
 	}
-	if (!write_loopback_token(pinfp->pid, addr, &dest, loopback_token,
-				  UDP_PROXY_PORT)) {
+	rewritten = write_loopback_token(pinfp->pid, addr, &dest,
+					     loopback_token, UDP_PROXY_PORT);
+	if (!rewritten) {
 		fprintf(stderr, "graftcp rewrite UDP failed for %s:%d\n",
 			dest.ipstr, dest.port);
-		mgraftcp_forget_udp(loopback_token);
+		mgraftcp_finish_udp_rewrite(loopback_token, false);
 	} else {
+		if (may_retain_dest) {
+			mgraftcp_start_udp_use(loopback_token);
+			pinfp->pending_udp_token = loopback_token;
+		} else {
+			mgraftcp_finish_udp_rewrite(loopback_token, true);
+		}
 		save_sockaddr_restore(pinfp, addr, &dest.sa, dest.len);
 	}
 	return true;
@@ -780,7 +821,14 @@ void connect_pre_handle(struct proc_info *pinfp)
 
 	addr = get_syscall_arg(pinfp->pid, 1);
 	addrlen = get_syscall_arg(pinfp->pid, 2);
-	rewrite_udp_sockaddr(pinfp, addr, addrlen);
+	rewrite_udp_sockaddr(pinfp, addr, addrlen, true);
+}
+
+static bool udp_send_may_retain_dest(struct proc_info *pinfp, int fd, int flags_arg)
+{
+	long flags = get_syscall_arg(pinfp->pid, flags_arg);
+
+	return (flags & MSG_MORE) != 0 || socket_may_cork(pinfp, fd);
 }
 
 void sendto_pre_handle(struct proc_info *pinfp)
@@ -793,7 +841,8 @@ void sendto_pre_handle(struct proc_info *pinfp)
 		return;
 	addr = get_syscall_arg(pinfp->pid, 4);
 	addrlen = get_syscall_arg(pinfp->pid, 5);
-	rewrite_udp_sockaddr(pinfp, addr, addrlen);
+	rewrite_udp_sockaddr(pinfp, addr, addrlen,
+			     udp_send_may_retain_dest(pinfp, socket_fd, 3));
 }
 
 void sendmsg_pre_handle(struct proc_info *pinfp)
@@ -808,7 +857,28 @@ void sendmsg_pre_handle(struct proc_info *pinfp)
 		return;
 	if (msg.msg_name == NULL)
 		return;
-	rewrite_udp_sockaddr(pinfp, (long)msg.msg_name, msg.msg_namelen);
+	rewrite_udp_sockaddr(pinfp, (long)msg.msg_name, msg.msg_namelen,
+			     udp_send_may_retain_dest(pinfp, socket_fd, 2));
+}
+
+static void setsockopt_pre_handle(struct proc_info *pinfp)
+{
+	int fd, enabled;
+	long addr;
+
+	if (UDP_PROXY_PORT == 0 ||
+	    get_syscall_arg(pinfp->pid, 1) != IPPROTO_UDP ||
+	    get_syscall_arg(pinfp->pid, 2) != UDP_CORK ||
+	    get_syscall_arg(pinfp->pid, 4) < (long)sizeof(enabled))
+		return;
+	fd = get_syscall_arg(pinfp->pid, 0);
+	if (!is_tracked_dgram_socket_fd(pinfp, fd))
+		return;
+	addr = get_syscall_arg(pinfp->pid, 3);
+	/* Mark before resuming. Another task sharing the socket can send
+	 * before we observe the result. Keep it marked across toggles. */
+	if (getdata(pinfp->pid, addr, &enabled, sizeof(enabled)) < 0 || enabled)
+		mark_socket_may_cork(pinfp, fd);
 }
 
 void close_pre_handle(struct proc_info *pinfp)
@@ -840,6 +910,8 @@ void dup2_pre_handle(struct proc_info *pinfp)
 	pinfp->pending_dup_oldfd = oldfd;
 	pinfp->pending_dup_newfd = newfd;
 	pinfp->pending_dup_fixed = true;
+	pinfp->pending_dup_cloexec = pinfp->csn == SYS_dup3 &&
+		(get_syscall_arg(pinfp->pid, 2) & O_CLOEXEC);
 }
 
 void fcntl_pre_handle(struct proc_info *pinfp)
@@ -848,12 +920,17 @@ void fcntl_pre_handle(struct proc_info *pinfp)
 	int cmd = get_syscall_arg(pinfp->pid, 1);
 
 	clear_dup_tracking(pinfp);
+	pinfp->fd_args[0] = oldfd;
+	pinfp->fd_args[1] = cmd;
+	if (cmd == F_SETFD)
+		pinfp->fd_args[2] = get_syscall_arg(pinfp->pid, 2);
 	if (cmd != F_DUPFD && cmd != F_DUPFD_CLOEXEC)
 		return;
 	if (!is_tracked_socket_fd(pinfp, oldfd))
 		return;
 	pinfp->pending_dup = true;
 	pinfp->pending_dup_oldfd = oldfd;
+	pinfp->pending_dup_cloexec = cmd == F_DUPFD_CLOEXEC;
 }
 
 void dup_exiting_handle(struct proc_info *pinfp, int retfd)
@@ -870,20 +947,21 @@ void dup_exiting_handle(struct proc_info *pinfp, int retfd)
 					   pinfp->pending_dup_oldfd, newfd) < 0)
 			fprintf(stderr, "graftcp failed to track duplicated socket fd %d\n",
 				newfd);
+		set_socket_cloexec(pinfp, newfd, pinfp->pending_dup_cloexec);
 	}
 	clear_dup_tracking(pinfp);
 }
 
 void clone_pre_handle(struct proc_info *pinfp)
 {
-#if defined(__x86_64__)
-	long flags = get_syscall_arg(pinfp->pid, 0);
+	unsigned long flags = get_syscall_arg(pinfp->pid, 0);
 
-	flags &= ~CLONE_UNTRACED;
-	if (ptrace(PTRACE_POKEUSER, pinfp->pid, sizeof(long) * RDI, flags) < 0)
+	pinfp->clone_flags = errno == 0 ? flags : 0;
+#if defined(__x86_64__)
+	if ((pinfp->clone_flags & CLONE_UNTRACED) &&
+	    ptrace(PTRACE_POKEUSER, pinfp->pid, sizeof(long) * RDI,
+		   flags & ~CLONE_UNTRACED) < 0)
 		perror("ptrace(PTRACE_POKEUSER)");
-#elif defined(__arm__) || defined(__arm64__) || defined(__aarch64__)
-	/* Do not know how to handle this */
 #endif
 }
 
@@ -983,28 +1061,43 @@ void start_tracee(const char *username, int argc, char **argv)
 	pi->flags |= FLAG_STARTUP;
 }
 
-static void inherit_child_proc_info(struct proc_info *parent, unsigned event)
+static int inherit_child_proc_info(struct proc_info *parent, unsigned event)
 {
 	unsigned long new_pid = 0;
 	struct proc_info *child;
 
-	if (parent == NULL)
-		return;
 	if (event != PTRACE_EVENT_CLONE && event != PTRACE_EVENT_FORK &&
 	    event != PTRACE_EVENT_VFORK)
-		return;
+		return 0;
 	if (ptrace(PTRACE_GETEVENTMSG, parent->pid, 0, &new_pid) < 0)
-		return;
-	if ((pid_t)new_pid <= 0)
-		return;
+		return -1;
 	child = find_proc_info((pid_t)new_pid);
 	if (!child)
 		child = alloc_proc_info((pid_t)new_pid);
 	if (child == NULL)
-		return;
-	if (copy_tracked_sockets(child, parent) < 0)
-		fprintf(stderr, "graftcp failed to inherit tracked sockets for pid %lu\n",
-			new_pid);
+		return -1;
+	/* clone can report any of these events. A native fork or vfork can
+	 * reach here without a seccomp entry stop, leaving stale clone flags. */
+	if (exiting(parent) && (parent->clone_flags & CLONE_FILES) &&
+	    (parent->csn == SYS_clone
+#ifdef SYS_clone3
+	     || parent->csn == SYS_clone3
+#endif
+	    ))
+		share_tracked_sockets(child, parent);
+	else if (copy_tracked_sockets(child, parent) < 0)
+		return -1;
+
+	if (child->waiting_for_parent) {
+		child->waiting_for_parent = false;
+#ifdef ENABLE_SECCOMP_BPF
+		if (ptrace(PTRACE_CONT, child->pid, 0, 0) < 0 && errno != ESRCH)
+#else
+		if (ptrace(PTRACE_SYSCALL, child->pid, 0, 0) < 0 && errno != ESRCH)
+#endif
+			return -1;
+	}
+	return 0;
 }
 
 int trace_syscall_entering(struct proc_info *pinfp)
@@ -1026,12 +1119,41 @@ int trace_syscall_entering(struct proc_info *pinfp)
 	case SYS_sendmsg:
 		sendmsg_pre_handle(pinfp);
 		break;
+	case SYS_setsockopt:
+		setsockopt_pre_handle(pinfp);
+		break;
 	case SYS_close:
 		close_pre_handle(pinfp);
 		break;
 	case SYS_clone:
 		clone_pre_handle(pinfp);
 		break;
+#ifdef SYS_clone3
+	case SYS_clone3: {
+		long addr = get_syscall_arg(pinfp->pid, 0);
+		uint64_t flags;
+
+		pinfp->clone_flags = 0;
+		/* flags is the first field of the Linux clone_args ABI. */
+		if (getdata(pinfp->pid, addr, &flags, sizeof(flags)) == 0)
+			pinfp->clone_flags = flags;
+		break;
+	}
+#endif
+	case SYS_unshare:
+		pinfp->fd_args[0] = get_syscall_arg(pinfp->pid, 0);
+		break;
+	case SYS_ioctl:
+		pinfp->fd_args[1] = get_syscall_arg(pinfp->pid, 1);
+		if (pinfp->fd_args[1] == FIOCLEX || pinfp->fd_args[1] == FIONCLEX)
+			pinfp->fd_args[0] = get_syscall_arg(pinfp->pid, 0);
+		break;
+#ifdef SYS_close_range
+	case SYS_close_range:
+		for (int i = 0; i < 3; i++)
+			pinfp->fd_args[i] = get_syscall_arg(pinfp->pid, i);
+		break;
+#endif
 	case SYS_dup:
 		dup_pre_handle(pinfp);
 		break;
@@ -1054,6 +1176,52 @@ int trace_syscall_entering(struct proc_info *pinfp)
 	}
 	pinfp->flags |= FLAG_INSYSCALL;
 	return 0;
+}
+
+static void finish_udp_use(struct proc_info *pinfp, bool accepted)
+{
+	if (pinfp->pending_udp_token == 0)
+		return;
+	mgraftcp_finish_udp_use(pinfp->pending_udp_token, accepted);
+	pinfp->pending_udp_token = 0;
+}
+
+static void unshare_files(struct proc_info *pinfp)
+{
+	if (unshare_tracked_sockets(pinfp) < 0) {
+		perror("copy socket table");
+		exit(1);
+	}
+}
+
+static void handle_exec(struct proc_info *pinfp)
+{
+	unsigned long old_tid = 0;
+	struct proc_info *old;
+
+	/* A non-leader exec takes over the leader's TID. */
+	if (ptrace(PTRACE_GETEVENTMSG, pinfp->pid, 0, &old_tid) == 0 &&
+	    old_tid != (unsigned long)pinfp->pid &&
+	    (old = find_proc_info((pid_t)old_tid)) != NULL) {
+		share_tracked_sockets(pinfp, old);
+		finish_udp_use(old, true);
+		free_proc_info(old);
+	}
+	unshare_files(pinfp);
+	close_exec_sockets(pinfp);
+	finish_udp_use(pinfp, true);
+	pinfp->pending_socket = false;
+	pinfp->clone_flags = 0;
+	clear_dup_tracking(pinfp);
+	clear_sockaddr_restore(pinfp);
+#ifdef ENABLE_SECCOMP_BPF
+	pinfp->flags &= ~FLAG_INSYSCALL;
+	pinfp->csn = -1;
+#else
+	/* PTRACE_SYSCALL also reports the successful exec's exit stop. */
+	pinfp->flags |= FLAG_INSYSCALL;
+	pinfp->csn = SYS_execve;
+#endif
 }
 
 int trace_syscall_exiting(struct proc_info *pinfp)
@@ -1081,6 +1249,11 @@ int trace_syscall_exiting(struct proc_info *pinfp)
 	case SYS_connect:
 	case SYS_sendto:
 	case SYS_sendmsg:
+		if (pinfp->pending_udp_token != 0) {
+			child_ret = get_retval(pinfp->pid);
+			/* An unreadable result may have installed the destination. */
+			finish_udp_use(pinfp, child_ret >= 0 || errno != 0);
+		}
 		restore_sockaddr_if_needed(pinfp);
 		break;
 	case SYS_dup:
@@ -1099,8 +1272,36 @@ int trace_syscall_exiting(struct proc_info *pinfp)
 			perror("ptrace");
 			exit(errno);
 		}
+		if (child_ret >= 0 &&
+		    (pinfp->csn == SYS_fcntl
+#ifdef SYS_fcntl64
+		     || pinfp->csn == SYS_fcntl64
+#endif
+		    ) && pinfp->fd_args[1] == F_SETFD)
+			set_socket_cloexec(pinfp, pinfp->fd_args[0],
+					   pinfp->fd_args[2] & FD_CLOEXEC);
 		dup_exiting_handle(pinfp, child_ret);
 		break;
+	case SYS_unshare:
+		if ((pinfp->fd_args[0] & CLONE_FILES) && get_retval(pinfp->pid) == 0)
+			unshare_files(pinfp);
+		break;
+	case SYS_ioctl:
+		if ((pinfp->fd_args[1] == FIOCLEX || pinfp->fd_args[1] == FIONCLEX) &&
+		    get_retval(pinfp->pid) == 0)
+			set_socket_cloexec(pinfp, pinfp->fd_args[0],
+					   pinfp->fd_args[1] == FIOCLEX);
+		break;
+#ifdef SYS_close_range
+	case SYS_close_range:
+		if (get_retval(pinfp->pid) == 0) {
+			if (pinfp->fd_args[2] & GRAFTCP_CLOSE_RANGE_UNSHARE)
+				unshare_files(pinfp);
+			close_tracked_range(pinfp, pinfp->fd_args[0], pinfp->fd_args[1],
+					    (pinfp->fd_args[2] & GRAFTCP_CLOSE_RANGE_CLOEXEC) != 0);
+		}
+		break;
+#endif
 	}
 end:
 	if (pinfp->csn != SYS_connect && pinfp->csn != SYS_sendto &&
@@ -1156,8 +1357,15 @@ int do_trace()
 			return -1;
 		}
 		pinfp = find_proc_info(child);
-		if (!pinfp)
+		if (!pinfp) {
 			pinfp = alloc_proc_info(child);
+			/* The child's initial stop can arrive before the parent's
+			 * creation event. Install its table before it runs. */
+			if (pinfp && WIFSTOPPED(status) && WSTOPSIG(status) == SIGSTOP) {
+				pinfp->waiting_for_parent = true;
+				continue;
+			}
+		}
 		if (pinfp == NULL) {
 			perror("calloc");
 			exit(errno);
@@ -1168,6 +1376,8 @@ int do_trace()
 				exit_code = WEXITSTATUS(status);
 			else if (child == root_pid && WIFSIGNALED(status))
 				exit_code = 128 + WTERMSIG(status);
+			/* A surviving alias may hold the destination if the task died. */
+			finish_udp_use(pinfp, true);
 			free_proc_info(pinfp);
 			continue;
 		}
@@ -1214,12 +1424,17 @@ int do_trace()
 
 		sig = 0;
 		if (event != 0) {
+			if (event == PTRACE_EVENT_EXEC)
+				handle_exec(pinfp);
 	#ifdef ENABLE_SECCOMP_BPF
 			if (event == PTRACE_EVENT_SECCOMP &&
 			    trace_syscall(pinfp) < 0)
 				perror("trace_syscall");
 	#endif
-			inherit_child_proc_info(pinfp, event);
+			if (inherit_child_proc_info(pinfp, event) < 0) {
+				perror("initialize new tracee");
+				return -1;
+			}
 			goto end;
 		}
 		if (is_syscall_stop(status)) {
