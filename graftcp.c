@@ -78,6 +78,22 @@ static int run_group_count;
 static int exit_code = 0;
 static pid_t root_pid = -1;
 static int startup_fd = -1;
+struct tracee_queue {
+	struct proc_info *head;
+	struct proc_info *tail;
+};
+
+static struct tracee_queue creators;
+static struct tracee_queue waiting_children;
+static uint64_t creation_seq;
+
+/* Only used when a child dies before its creator reports its PID. */
+struct reaped_child {
+	pid_t pid;
+	uint64_t creation_seq;
+	struct reaped_child *next;
+};
+static struct reaped_child *reaped_children;
 
 static void child_write_str(const char *s)
 {
@@ -433,6 +449,20 @@ static bool ip6_is_ignore(uint8_t *ip)
 #else
 #define SECCOMP_TRACE_CLONE3(base)
 #endif
+#ifdef SYS_fork
+#define SECCOMP_TRACE_FORK(base) \
+	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_fork, \
+		 SECCOMP_JUMP_OFFSET(base##_FORK, base##_RET_TRACE), 0),
+#else
+#define SECCOMP_TRACE_FORK(base)
+#endif
+#ifdef SYS_vfork
+#define SECCOMP_TRACE_VFORK(base) \
+	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_vfork, \
+		 SECCOMP_JUMP_OFFSET(base##_VFORK, base##_RET_TRACE), 0),
+#else
+#define SECCOMP_TRACE_VFORK(base)
+#endif
 #ifdef SYS_close_range
 #define SECCOMP_TRACE_CLOSE_RANGE(base) \
 	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close_range, \
@@ -446,6 +476,8 @@ static bool ip6_is_ignore(uint8_t *ip)
 	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_unshare, \
 		 SECCOMP_JUMP_OFFSET(base##_UNSHARE, base##_RET_TRACE), 0), \
 	SECCOMP_TRACE_CLONE3(base) \
+	SECCOMP_TRACE_FORK(base) \
+	SECCOMP_TRACE_VFORK(base) \
 	SECCOMP_TRACE_CLOSE_RANGE(base) \
 	BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_ioctl, \
 		 SECCOMP_JUMP_OFFSET(base##_IOCTL, base##_IOCTL_ARGS), 0),
@@ -496,6 +528,12 @@ static void install_seccomp()
 #ifdef SYS_clone3
 		FILTER_CLONE3,
 #endif
+#ifdef SYS_fork
+		FILTER_FORK,
+#endif
+#ifdef SYS_vfork
+		FILTER_VFORK,
+#endif
 #ifdef SYS_close_range
 		FILTER_CLOSE_RANGE,
 #endif
@@ -530,6 +568,12 @@ static void install_seccomp()
 		UDP_FILTER_UNSHARE,
 #ifdef SYS_clone3
 		UDP_FILTER_CLONE3,
+#endif
+#ifdef SYS_fork
+		UDP_FILTER_FORK,
+#endif
+#ifdef SYS_vfork
+		UDP_FILTER_VFORK,
 #endif
 #ifdef SYS_close_range
 		UDP_FILTER_CLOSE_RANGE,
@@ -958,10 +1002,13 @@ void clone_pre_handle(struct proc_info *pinfp)
 
 	pinfp->clone_flags = errno == 0 ? flags : 0;
 #if defined(__x86_64__)
-	if ((pinfp->clone_flags & CLONE_UNTRACED) &&
-	    ptrace(PTRACE_POKEUSER, pinfp->pid, sizeof(long) * RDI,
-		   flags & ~CLONE_UNTRACED) < 0)
-		perror("ptrace(PTRACE_POKEUSER)");
+	if (pinfp->clone_flags & CLONE_UNTRACED) {
+		if (ptrace(PTRACE_POKEUSER, pinfp->pid, sizeof(long) * RDI,
+			   flags & ~CLONE_UNTRACED) < 0)
+			perror("ptrace(PTRACE_POKEUSER)");
+		else
+			pinfp->clone_flags &= ~CLONE_UNTRACED;
+	}
 #endif
 }
 
@@ -1061,6 +1108,120 @@ void start_tracee(const char *username, int argc, char **argv)
 	pi->flags |= FLAG_STARTUP;
 }
 
+/* A tracee can be in only one creation queue at a time. */
+static void enqueue_tracee(struct tracee_queue *queue, struct proc_info *p)
+{
+	p->creation_prev = queue->tail;
+	p->creation_next = NULL;
+	if (queue->tail)
+		queue->tail->creation_next = p;
+	else
+		queue->head = p;
+	queue->tail = p;
+}
+
+static void dequeue_tracee(struct tracee_queue *queue, struct proc_info *p)
+{
+	if (p->creation_prev)
+		p->creation_prev->creation_next = p->creation_next;
+	else
+		queue->head = p->creation_next;
+	if (p->creation_next)
+		p->creation_next->creation_prev = p->creation_prev;
+	else
+		queue->tail = p->creation_prev;
+	p->creation_prev = NULL;
+	p->creation_next = NULL;
+}
+
+static void start_child_creation(struct proc_info *p)
+{
+	p->flags |= FLAG_CREATING_CHILD;
+	p->creation_seq = ++creation_seq;
+	enqueue_tracee(&creators, p);
+}
+
+/* child_pid is zero if the creator retired without reporting a child. */
+static bool finish_child_creation(struct proc_info *p, pid_t child_pid)
+{
+	struct reaped_child **link = &reaped_children;
+	bool matched = false;
+
+	if (!(p->flags & FLAG_CREATING_CHILD))
+		return false;
+	p->flags &= ~FLAG_CREATING_CHILD;
+	dequeue_tracee(&creators, p);
+	while (*link) {
+		struct reaped_child *child = *link;
+		/* Overlapping creators may both report the same numeric PID.
+		 * Keep rejecting ambiguous events until every candidate retires. */
+		if (child_pid == child->pid && p->creation_seq <= child->creation_seq)
+			matched = true;
+		if (!creators.head || creators.head->creation_seq > child->creation_seq) {
+			*link = child->next;
+			free(child);
+		} else {
+			link = &child->next;
+		}
+	}
+	return matched;
+}
+
+static void remove_waiting_child(struct proc_info *child)
+{
+	if (child->waiting_for_parent) {
+		child->waiting_for_parent = false;
+		dequeue_tracee(&waiting_children, child);
+	}
+}
+
+static int resume_tracee(struct proc_info *p, int sig)
+{
+	int request = PTRACE_SYSCALL;
+
+#ifdef ENABLE_SECCOMP_BPF
+	if (!exiting(p))
+		request = PTRACE_CONT;
+#endif
+	if (ptrace(request, p->pid, 0, sig) == 0)
+		return 0;
+	if (errno != ESRCH)
+		return -1;
+	finish_child_creation(p, 0);
+	return 0;
+}
+
+static int resume_unmatched_children(void)
+{
+	struct proc_info *oldest = creators.head;
+	struct proc_info *child;
+
+	/* Only creators already in the kernel when this stop was observed
+	 * can supply the child's table. Later forks cannot prolong the wait. */
+	while ((child = waiting_children.head) != NULL &&
+	       (oldest == NULL || oldest->creation_seq > child->creation_seq)) {
+		remove_waiting_child(child);
+		fprintf(stderr, "graftcp: missing creation event for %d; inherited sockets are untracked\n",
+			child->pid);
+		if (resume_tracee(child, 0) < 0)
+			return -1;
+	}
+	return 0;
+}
+
+static int remember_reaped_child(pid_t pid, uint64_t seq)
+{
+	struct reaped_child *child = malloc(sizeof(*child));
+
+	if (child == NULL)
+		return -1;
+	child->pid = pid;
+	child->creation_seq = seq;
+	child->next = reaped_children;
+	reaped_children = child;
+	return 0;
+}
+
 static int inherit_child_proc_info(struct proc_info *parent, unsigned event)
 {
 	unsigned long new_pid = 0;
@@ -1069,15 +1230,23 @@ static int inherit_child_proc_info(struct proc_info *parent, unsigned event)
 	if (event != PTRACE_EVENT_CLONE && event != PTRACE_EVENT_FORK &&
 	    event != PTRACE_EVENT_VFORK)
 		return 0;
-	if (ptrace(PTRACE_GETEVENTMSG, parent->pid, 0, &new_pid) < 0)
-		return -1;
+	/* clone3 arguments can change after the entry stop. Without a
+	 * queued creator the child may already have resumed or exited. */
+	if (!(parent->flags & FLAG_CREATING_CHILD))
+		return 0;
+	if (ptrace(PTRACE_GETEVENTMSG, parent->pid, 0, &new_pid) < 0) {
+		int ret = errno == ESRCH ? 0 : -1;
+		finish_child_creation(parent, 0);
+		return ret;
+	}
+	if (finish_child_creation(parent, (pid_t)new_pid))
+		return 0;
 	child = find_proc_info((pid_t)new_pid);
 	if (!child)
 		child = alloc_proc_info((pid_t)new_pid);
 	if (child == NULL)
 		return -1;
-	/* clone can report any of these events. A native fork or vfork can
-	 * reach here without a seccomp entry stop, leaving stale clone flags. */
+	/* clone can report any of these events, depending on its flags. */
 	if (exiting(parent) && (parent->clone_flags & CLONE_FILES) &&
 	    (parent->csn == SYS_clone
 #ifdef SYS_clone3
@@ -1089,13 +1258,8 @@ static int inherit_child_proc_info(struct proc_info *parent, unsigned event)
 		return -1;
 
 	if (child->waiting_for_parent) {
-		child->waiting_for_parent = false;
-#ifdef ENABLE_SECCOMP_BPF
-		if (ptrace(PTRACE_CONT, child->pid, 0, 0) < 0 && errno != ESRCH)
-#else
-		if (ptrace(PTRACE_SYSCALL, child->pid, 0, 0) < 0 && errno != ESRCH)
-#endif
-			return -1;
+		remove_waiting_child(child);
+		return resume_tracee(child, 0);
 	}
 	return 0;
 }
@@ -1127,6 +1291,8 @@ int trace_syscall_entering(struct proc_info *pinfp)
 		break;
 	case SYS_clone:
 		clone_pre_handle(pinfp);
+		if (!(pinfp->clone_flags & CLONE_UNTRACED))
+			start_child_creation(pinfp);
 		break;
 #ifdef SYS_clone3
 	case SYS_clone3: {
@@ -1137,8 +1303,22 @@ int trace_syscall_entering(struct proc_info *pinfp)
 		/* flags is the first field of the Linux clone_args ABI. */
 		if (getdata(pinfp->pid, addr, &flags, sizeof(flags)) == 0)
 			pinfp->clone_flags = flags;
+		/* An untraced vfork can wait for its child without ever
+		 * reporting a creation event. */
+		if (!(pinfp->clone_flags & CLONE_UNTRACED))
+			start_child_creation(pinfp);
 		break;
 	}
+#endif
+#ifdef SYS_fork
+	case SYS_fork:
+#endif
+#ifdef SYS_vfork
+	case SYS_vfork:
+#endif
+#if defined(SYS_fork) || defined(SYS_vfork)
+		start_child_creation(pinfp);
+		break;
 #endif
 	case SYS_unshare:
 		pinfp->fd_args[0] = get_syscall_arg(pinfp->pid, 0);
@@ -1205,8 +1385,12 @@ static void handle_exec(struct proc_info *pinfp)
 	    (old = find_proc_info((pid_t)old_tid)) != NULL) {
 		share_tracked_sockets(pinfp, old);
 		finish_udp_use(old, true);
+		finish_child_creation(old, 0);
+		remove_waiting_child(old);
 		free_proc_info(old);
 	}
+	finish_child_creation(pinfp, 0);
+	remove_waiting_child(pinfp);
 	unshare_files(pinfp);
 	close_exec_sockets(pinfp);
 	finish_udp_use(pinfp, true);
@@ -1304,6 +1488,7 @@ int trace_syscall_exiting(struct proc_info *pinfp)
 #endif
 	}
 end:
+	finish_child_creation(pinfp, 0);
 	if (pinfp->csn != SYS_connect && pinfp->csn != SYS_sendto &&
 	    pinfp->csn != SYS_sendmsg)
 		clear_sockaddr_restore(pinfp);
@@ -1348,6 +1533,8 @@ int do_trace()
 			      PTRACE_O_EXITKILL;
 
 	for (;;) {
+		if (resume_unmatched_children() < 0)
+			return -1;
 		do {
 			child = waitpid(-1, &status, __WALL);
 		} while (child < 0 && errno == EINTR);
@@ -1357,12 +1544,35 @@ int do_trace()
 			return -1;
 		}
 		pinfp = find_proc_info(child);
+		if (!WIFSTOPPED(status)) {
+			if (child == root_pid && WIFEXITED(status))
+				exit_code = WEXITSTATUS(status);
+			else if (child == root_pid && WIFSIGNALED(status))
+				exit_code = 128 + WTERMSIG(status);
+			if (!pinfp || pinfp->waiting_for_parent) {
+				uint64_t seq = pinfp ? pinfp->creation_seq : creation_seq;
+
+				if (creators.head && creators.head->creation_seq <= seq &&
+				    remember_reaped_child(child, seq) < 0)
+					return -1;
+				if (!pinfp)
+					continue;
+			}
+			/* A surviving alias may hold the destination if the task died. */
+			finish_udp_use(pinfp, true);
+			finish_child_creation(pinfp, 0);
+			remove_waiting_child(pinfp);
+			free_proc_info(pinfp);
+			continue;
+		}
 		if (!pinfp) {
 			pinfp = alloc_proc_info(child);
 			/* The child's initial stop can arrive before the parent's
 			 * creation event. Install its table before it runs. */
-			if (pinfp && WIFSTOPPED(status) && WSTOPSIG(status) == SIGSTOP) {
+			if (pinfp && WSTOPSIG(status) == SIGSTOP) {
 				pinfp->waiting_for_parent = true;
+				pinfp->creation_seq = creation_seq;
+				enqueue_tracee(&waiting_children, pinfp);
 				continue;
 			}
 		}
@@ -1371,16 +1581,6 @@ int do_trace()
 			exit(errno);
 		}
 
-		if (!WIFSTOPPED(status)) {
-			if (child == root_pid && WIFEXITED(status))
-				exit_code = WEXITSTATUS(status);
-			else if (child == root_pid && WIFSIGNALED(status))
-				exit_code = 128 + WTERMSIG(status);
-			/* A surviving alias may hold the destination if the task died. */
-			finish_udp_use(pinfp, true);
-			free_proc_info(pinfp);
-			continue;
-		}
 
 		if (pinfp->flags & FLAG_STARTUP) {
 			ssize_t n;
@@ -1447,25 +1647,8 @@ int do_trace()
 		if (sig == SIGSTOP || is_group_stop(child))
 			sig = 0;
 end:
-		/*
-		 * Since the value returned by a successful PTRACE_PEEK*  request  may  be
-		 * -1,  the  caller  must  clear  errno before the call of ptrace(2).
-		 */
-		errno = 0;
-#ifdef ENABLE_SECCOMP_BPF
-		if (ptrace(exiting(pinfp) ? PTRACE_SYSCALL : PTRACE_CONT,
-					pinfp->pid, 0, sig) < 0) {
-			if (errno == ESRCH)
-				continue;
+		if (resume_tracee(pinfp, sig) < 0)
 			return -1;
-		}
-#else
-		if (ptrace(PTRACE_SYSCALL, pinfp->pid, 0, sig) < 0) {
-			if (errno == ESRCH)
-				continue;
-			return -1;
-		}
-#endif
 	}
 	return 0;
 }

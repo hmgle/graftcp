@@ -124,6 +124,7 @@ When generic UDP proxying is enabled, `graftcp` starts a separate UDP listener. 
 
 - Requires Linux 3.8 or later for `PTRACE_O_EXITKILL`. If the tracer dies, the kernel kills the processes it is tracing.
 - `ptrace(2)` permissions still apply. If tracing is blocked, check Yama `ptrace_scope`, capabilities, or run as root when appropriate.
+- If a child creation event is lost or concurrent forks report a reused PID and the creator is ambiguous, graftcp warns and resumes the child. Connections on inherited sockets can bypass redirection. With `CLONE_FILES`, the kernel still shares the descriptor table, but graftcp tracks the tasks separately. One task can miss a socket opened by another or use stale socket type information after a descriptor is reused.
 - On supported kernels `graftcp` installs a seccomp-BPF filter so only socket-related syscalls trap into the tracer, reducing tracing overhead; on kernels without seccomp filtering it falls back to stopping on every syscall. This is automatic and needs no configuration.
 - Local destinations are ignored by default. Use `--not-ignore-local` to proxy loopback/private-local connects as well.
 - DNS proxying is disabled by default. Use `--enable-dns` to enable the UDP/53 DNS-over-TCP path, and `--dns-server` to choose the upstream server.
@@ -165,7 +166,7 @@ sudo setcap 'cap_sys_ptrace,cap_sys_admin+ep' ./sumg
 
 ### `clone(2)` has a `CLONE_UNTRACED` flag to avoid being traced. How does `graftcp` force tracing?
 
-`graftcp` intercepts `clone(2)` and clears `CLONE_UNTRACED`, so spawned children cannot escape tracing. That flag is meant for the kernel; user space should not set it. Linux can also restrict `ptrace(2)` via [`/proc/sys/kernel/yama/ptrace_scope`](https://www.kernel.org/doc/Documentation/security/Yama.txt). If tracing fails, check this value.
+On x86-64, `graftcp` attempts to clear `CLONE_UNTRACED` in the flags register for legacy `clone(2)`. This rewrite is specific to that syscall and architecture. Linux can also restrict `ptrace(2)` via [`/proc/sys/kernel/yama/ptrace_scope`](https://www.kernel.org/doc/Documentation/security/Yama.txt). If tracing fails, check this value.
 
 ### Does it support macOS?
 

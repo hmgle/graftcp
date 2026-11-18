@@ -11,6 +11,18 @@ trap 'rm -rf -- "$test_dir"' EXIT
 cp -- "$repo_dir/Makefile" "$repo_dir/"*.c "$repo_dir/"*.h "$test_dir/"
 cd -- "$test_dir"
 
+# Compare the old-header fallback with the build host's actual syscall ABI.
+gcc -I. -x c -fsyntax-only - <<'EOF'
+#include <sys/syscall.h>
+#ifdef SYS_clone3
+enum { native_clone3 = SYS_clone3 };
+#undef SYS_clone3
+#undef __NR_clone3
+#include "graftcp.h"
+_Static_assert(SYS_clone3 == native_clone3, "incorrect clone3 fallback");
+#endif
+EOF
+
 artifacts=(graftcp.o util.o ptrace-ops.o cidr-trie.o cidr-trie_test.o
            libgraftcp.a cidr-trie_test)
 
