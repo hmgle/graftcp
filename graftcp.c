@@ -44,10 +44,12 @@
 
 extern uint32_t mgraftcp_register_connect(int family, const char *addr,
 					  uint16_t port);
-extern uint32_t mgraftcp_register_udp(int family, const char *addr,
+extern uint32_t mgraftcp_reserve_udp(int family, const char *addr,
 				      uint16_t port);
 extern void mgraftcp_forget_connect(uint32_t token);
-extern void mgraftcp_forget_udp(uint32_t token);
+extern void mgraftcp_finish_udp_rewrite(uint32_t token, int rewritten);
+extern void mgraftcp_start_udp_use(uint32_t token);
+extern void mgraftcp_finish_udp_use(uint32_t token, int accepted);
 
 uint16_t DEFAULT_LOCAL_PORT      = 2233;
 bool DEFAULT_IGNORE_LOCAL        = true;
@@ -680,10 +682,11 @@ static void restore_sockaddr_if_needed(struct proc_info *pinfp)
 }
 
 static bool rewrite_udp_sockaddr(struct proc_info *pinfp, long addr,
-				 long addrlen)
+				 long addrlen, bool connect)
 {
 	struct dest_endpoint dest;
 	uint32_t loopback_token;
+	bool rewritten;
 
 	if (pinfp == NULL)
 		return false;
@@ -717,18 +720,25 @@ static bool rewrite_udp_sockaddr(struct proc_info *pinfp, long addr,
 	if (UDP_PROXY_PORT == 0 || dest_is_in_ignore_list(&dest))
 		return false;
 
-	loopback_token = mgraftcp_register_udp(dest.family, dest.ipstr, dest.port);
+	loopback_token = mgraftcp_reserve_udp(dest.family, dest.ipstr, dest.port);
 	if (loopback_token == 0) {
-		fprintf(stderr, "graftcp register UDP failed for %s:%d\n",
+		fprintf(stderr, "graftcp reserve UDP failed for %s:%d\n",
 			dest.ipstr, dest.port);
 		return false;
 	}
-	if (!write_loopback_token(pinfp->pid, addr, &dest, loopback_token,
-				  UDP_PROXY_PORT)) {
+	rewritten = write_loopback_token(pinfp->pid, addr, &dest,
+					     loopback_token, UDP_PROXY_PORT);
+	if (!rewritten) {
 		fprintf(stderr, "graftcp rewrite UDP failed for %s:%d\n",
 			dest.ipstr, dest.port);
-		mgraftcp_forget_udp(loopback_token);
+		mgraftcp_finish_udp_rewrite(loopback_token, false);
 	} else {
+		if (connect) {
+			mgraftcp_start_udp_use(loopback_token);
+			pinfp->pending_udp_token = loopback_token;
+		} else {
+			mgraftcp_finish_udp_rewrite(loopback_token, true);
+		}
 		save_sockaddr_restore(pinfp, addr, &dest.sa, dest.len);
 	}
 	return true;
@@ -780,7 +790,7 @@ void connect_pre_handle(struct proc_info *pinfp)
 
 	addr = get_syscall_arg(pinfp->pid, 1);
 	addrlen = get_syscall_arg(pinfp->pid, 2);
-	rewrite_udp_sockaddr(pinfp, addr, addrlen);
+	rewrite_udp_sockaddr(pinfp, addr, addrlen, true);
 }
 
 void sendto_pre_handle(struct proc_info *pinfp)
@@ -793,7 +803,7 @@ void sendto_pre_handle(struct proc_info *pinfp)
 		return;
 	addr = get_syscall_arg(pinfp->pid, 4);
 	addrlen = get_syscall_arg(pinfp->pid, 5);
-	rewrite_udp_sockaddr(pinfp, addr, addrlen);
+	rewrite_udp_sockaddr(pinfp, addr, addrlen, false);
 }
 
 void sendmsg_pre_handle(struct proc_info *pinfp)
@@ -808,7 +818,7 @@ void sendmsg_pre_handle(struct proc_info *pinfp)
 		return;
 	if (msg.msg_name == NULL)
 		return;
-	rewrite_udp_sockaddr(pinfp, (long)msg.msg_name, msg.msg_namelen);
+	rewrite_udp_sockaddr(pinfp, (long)msg.msg_name, msg.msg_namelen, false);
 }
 
 void close_pre_handle(struct proc_info *pinfp)
@@ -1056,6 +1066,14 @@ int trace_syscall_entering(struct proc_info *pinfp)
 	return 0;
 }
 
+static void finish_udp_use(struct proc_info *pinfp, bool accepted)
+{
+	if (pinfp->pending_udp_token == 0)
+		return;
+	mgraftcp_finish_udp_use(pinfp->pending_udp_token, accepted);
+	pinfp->pending_udp_token = 0;
+}
+
 int trace_syscall_exiting(struct proc_info *pinfp)
 {
 	int ret = 0;
@@ -1081,6 +1099,11 @@ int trace_syscall_exiting(struct proc_info *pinfp)
 	case SYS_connect:
 	case SYS_sendto:
 	case SYS_sendmsg:
+		if (pinfp->pending_udp_token != 0) {
+			child_ret = get_retval(pinfp->pid);
+			/* An unreadable result may have installed the destination. */
+			finish_udp_use(pinfp, child_ret >= 0 || errno != 0);
+		}
 		restore_sockaddr_if_needed(pinfp);
 		break;
 	case SYS_dup:
@@ -1168,6 +1191,8 @@ int do_trace()
 				exit_code = WEXITSTATUS(status);
 			else if (child == root_pid && WIFSIGNALED(status))
 				exit_code = 128 + WTERMSIG(status);
+			/* A surviving alias may hold the destination if the task died. */
+			finish_udp_use(pinfp, true);
 			free_proc_info(pinfp);
 			continue;
 		}

@@ -142,6 +142,7 @@ struct proc_info {
 	int pending_dup_newfd;
 	bool pending_dup_fixed;
 	bool pending_sockaddr_restore;
+	uint32_t pending_udp_token;
 	long sockaddr_restore_addr;
 	size_t sockaddr_restore_len;
 	unsigned char sockaddr_restore[sizeof(struct sockaddr_in6)];

@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func TestUDPProxyForwardsDirectDatagram(t *testing.T) {
+func TestUDPProxyForwardsConnectedDatagramsAfterIdleGC(t *testing.T) {
 	upstream, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
 		t.Fatalf("ListenUDP upstream error = %v", err)
@@ -20,12 +20,14 @@ func TestUDPProxyForwardsDirectDatagram(t *testing.T) {
 	gotPayload := make(chan string, 1)
 	go func() {
 		buf := make([]byte, 512)
-		n, addr, err := upstream.ReadFromUDP(buf)
-		if err != nil {
-			return
+		for range 2 {
+			n, addr, err := upstream.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			gotPayload <- string(buf[:n])
+			_, _ = upstream.WriteToUDP([]byte(strings.ToUpper(string(buf[:n]))), addr)
 		}
-		gotPayload <- string(buf[:n])
-		_, _ = upstream.WriteToUDP([]byte(strings.ToUpper(string(buf[:n]))), addr)
 	}()
 
 	l, err := NewLocal(":0", "", "", "", "")
@@ -41,10 +43,12 @@ func TestUDPProxyForwardsDirectDatagram(t *testing.T) {
 	}
 	defer proxy.Close()
 
-	token, err := l.UDPRegistry().Register(syscall.AF_INET, "127.0.0.1", uint16(upstream.LocalAddr().(*net.UDPAddr).Port))
+	token, err := l.UDPRegistry().Reserve(syscall.AF_INET, "127.0.0.1", uint16(upstream.LocalAddr().(*net.UDPAddr).Port))
 	if err != nil {
 		t.Fatalf("UDP Register() error = %v", err)
 	}
+	l.UDPRegistry().StartUse(token)
+	l.UDPRegistry().FinishUse(token, true)
 	tokenIP := tokenToIP(token)
 	client, err := net.DialUDP("udp4", nil, &net.UDPAddr{IP: tokenIP, Port: port})
 	if err != nil {
@@ -52,28 +56,33 @@ func TestUDPProxyForwardsDirectDatagram(t *testing.T) {
 	}
 	defer client.Close()
 
-	if _, err := client.Write([]byte("hello")); err != nil {
-		t.Fatalf("client.Write() error = %v", err)
-	}
-	if err := client.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
-		t.Fatalf("SetReadDeadline() error = %v", err)
-	}
-	buf := make([]byte, 512)
-	n, err := client.Read(buf)
-	if err != nil {
-		t.Fatalf("client.Read() error = %v", err)
-	}
-	if got, want := string(buf[:n]), "HELLO"; got != want {
-		t.Fatalf("client response = %q, want %q", got, want)
-	}
-
-	select {
-	case got := <-gotPayload:
-		if got != "hello" {
-			t.Fatalf("upstream payload = %q, want %q", got, "hello")
+	for i, payload := range []string{"hello", "after idle"} {
+		if i == 1 {
+			proxy.closeIdleSessions(time.Now().Add(udpSessionIdle + time.Second))
+			proxy.mu.Lock()
+			remaining := len(proxy.sessions)
+			proxy.mu.Unlock()
+			if remaining != 0 {
+				t.Fatalf("idle GC left %d sessions", remaining)
+			}
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("upstream did not receive UDP payload")
+		if _, err := client.Write([]byte(payload)); err != nil {
+			t.Fatalf("client.Write() error = %v", err)
+		}
+		if err := client.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			t.Fatalf("SetReadDeadline() error = %v", err)
+		}
+		buf := make([]byte, 512)
+		n, err := client.Read(buf)
+		if err != nil {
+			t.Fatalf("client.Read() after sending %q: %v", payload, err)
+		}
+		if got, want := string(buf[:n]), strings.ToUpper(payload); got != want {
+			t.Fatalf("client response = %q, want %q", got, want)
+		}
+		if got := <-gotPayload; got != payload {
+			t.Fatalf("upstream payload = %q, want %q", got, payload)
+		}
 	}
 }
 
@@ -213,7 +222,7 @@ func TestUDPProxyOldWriteFailureKeepsReplacement(t *testing.T) {
 	tokenIP := tokenToIP(token)
 	clientAddr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 12345}
 	destAddr := "127.0.0.1:9999"
-	key := udpSessionKey(clientAddr, tokenIP)
+	key := udpSessionKey(clientAddr, tokenIP, destAddr)
 	oldForwarder := &failingUDPWrite{started: make(chan struct{}), release: make(chan struct{})}
 	releaseWrite := sync.OnceFunc(func() { close(oldForwarder.release) })
 	defer releaseWrite()
@@ -297,4 +306,21 @@ func listenTestUDPProxy(t *testing.T) *UDPProxy {
 	}
 	t.Cleanup(func() { _ = proxy.Close() })
 	return proxy
+}
+
+func TestUDPProxyUsesNewSessionWhenTokenIsReassigned(t *testing.T) {
+	proxy := listenTestUDPProxy(t)
+	clientAddr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 12345}
+	tokenIP := tokenToIP(loopbackStartToken)
+	first, err := proxy.getSession(clientAddr, tokenIP, "127.0.0.1:9998")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := proxy.getSession(clientAddr, tokenIP, "127.0.0.1:9999")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second == first {
+		t.Fatal("reassigned token reused a forwarder for the old destination")
+	}
 }

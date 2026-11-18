@@ -203,7 +203,7 @@ func (p *UDPProxy) handlePacket(clientAddr *net.UDPAddr, tokenIP net.IP, payload
 }
 
 func (p *UDPProxy) getSession(clientAddr *net.UDPAddr, tokenIP net.IP, destAddr string) (*udpSession, error) {
-	key := udpSessionKey(clientAddr, tokenIP)
+	key := udpSessionKey(clientAddr, tokenIP, destAddr)
 	now := time.Now()
 
 	p.mu.Lock()
@@ -409,8 +409,9 @@ func (f *directUDPForwarder) readLoop() {
 	}
 }
 
-func udpSessionKey(clientAddr *net.UDPAddr, tokenIP net.IP) string {
-	return clientAddr.String() + "|" + tokenIP.String()
+// The destination can change when the registry reuses an expired token.
+func udpSessionKey(clientAddr *net.UDPAddr, tokenIP net.IP, destAddr string) string {
+	return clientAddr.String() + "|" + tokenIP.String() + "|" + destAddr
 }
 
 func isManagedLoopbackToken(ip net.IP) bool {
