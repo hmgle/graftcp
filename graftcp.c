@@ -1070,9 +1070,9 @@ int trace_syscall_exiting(struct proc_info *pinfp)
 	case SYS_socket:
 		child_ret = get_retval(pinfp->pid);
 		if (errno) {
-			/* No such process, child exited */
+			/* Let the wait loop collect the tracee exit status. */
 			if (errno == ESRCH)
-				exit(0);
+				goto end;
 			perror("ptrace");
 			exit(errno);
 		}
@@ -1095,7 +1095,7 @@ int trace_syscall_exiting(struct proc_info *pinfp)
 		child_ret = get_retval(pinfp->pid);
 		if (errno) {
 			if (errno == ESRCH)
-				exit(0);
+				goto end;
 			perror("ptrace");
 			exit(errno);
 		}

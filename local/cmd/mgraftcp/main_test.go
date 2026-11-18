@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"syscall"
@@ -201,21 +202,9 @@ func startupProbeCommand(t *testing.T, probeName string, args ...string) *exec.C
 	if !slices.ContainsFunc(binary.Progs, func(p *elf.Prog) bool { return p.Type == elf.PT_INTERP }) {
 		t.Skip("LD_PRELOAD requires a test binary with an ELF interpreter")
 	}
-	compilerArgs, err := splitProbeCompiler(probeCompiler(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	cc, err := exec.LookPath(compilerArgs[0])
-	if err != nil {
-		t.Skipf("%s is required to build the startup probe", compilerArgs[0])
-	}
 	probeDir := t.TempDir()
 	probe := filepath.Join(probeDir, probeName+".so")
-	buildArgs := append(compilerArgs[1:], "-shared", "-fPIC", "-pthread", "-o", probe, filepath.Join("testdata", probeName+".c"))
-	build := exec.Command(cc, buildArgs...)
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build %s: %v\n%s", probeName, err, output)
-	}
+	buildTracerProbe(t, probe, "-shared", "-fPIC", "-pthread", filepath.Join("testdata", probeName+".c"))
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	t.Cleanup(cancel)
 	cmd := exec.CommandContext(ctx, exe, append([]string{startupHelperTest}, args...)...)
@@ -224,6 +213,23 @@ func startupProbeCommand(t *testing.T, probeName string, args ...string) *exec.C
 	cmd.Env = append(os.Environ(), startupHelperEnv, "LD_PRELOAD=./"+probeName+".so")
 	cmd.WaitDelay = time.Second
 	return cmd
+}
+
+func buildTracerProbe(t *testing.T, output string, args ...string) {
+	t.Helper()
+	compilerArgs, err := splitProbeCompiler(probeCompiler(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cc, err := exec.LookPath(compilerArgs[0])
+	if err != nil {
+		t.Skipf("%s is required to build the startup probe", compilerArgs[0])
+	}
+	buildArgs := append(compilerArgs[1:], "-o", output)
+	build := exec.CommandContext(t.Context(), cc, append(buildArgs, args...)...)
+	if log, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build %s: %v\n%s", output, err, log)
+	}
 }
 
 func TestTraceeKilledAtStartupStop(t *testing.T) {
@@ -341,6 +347,26 @@ func TestConcurrentTracerStartup(t *testing.T) {
 				if !errors.As(err, &exitErr) || exitErr.ExitCode() != 37 {
 					t.Fatalf("graftcp returned %v, want exit status 37\n%s", err, output)
 				}
+			}
+		})
+	}
+}
+
+func TestTracerKeepsRootStatusAfterWorkerESRCH(t *testing.T) {
+	if runtime.GOARCH != "amd64" {
+		t.Skip("the probe targets x86-64 PTRACE_PEEKUSER register reads")
+	}
+
+	for _, operation := range []string{"socket", "dup", "fcntl"} {
+		t.Run(operation, func(t *testing.T) {
+			cmd := startupProbeCommand(t, "esrch-on-worker-return", "--", "./worker", operation)
+			buildTracerProbe(t, filepath.Join(cmd.Dir, "worker"), "-pthread", filepath.Join("testdata", "worker-syscall.c"))
+			cmd.Env = append(cmd.Env, "GRAFTCP_TEST_WORKER_SYSCALL="+operation)
+			output, err := cmd.CombinedOutput()
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) || exitErr.ExitCode() != 37 ||
+				string(output) != "injected ESRCH\nroot joined worker\n" {
+				t.Fatalf("graftcp returned %v, want injected ESRCH, joined worker and exit status 37\n%s", err, output)
 			}
 		})
 	}
