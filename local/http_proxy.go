@@ -24,6 +24,10 @@ type bufferedConn struct {
 	r *bufio.Reader
 }
 
+func (c *bufferedConn) CloseWrite() error {
+	return closeWrite(c.Conn)
+}
+
 func (c *bufferedConn) Read(b []byte) (int, error) {
 	if c.r.Buffered() > 0 {
 		return c.r.Read(b)

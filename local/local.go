@@ -404,28 +404,29 @@ func (l *Local) HandleConn(conn *net.TCPConn) error {
 	return nil
 }
 
-// relay copies bytes in both directions between a and b until both sides are
-// done. The first side to finish triggers a deadline on both connections so
-// the still-blocked Read returns promptly; the second receive then unblocks.
+// A clean EOF ends one direction. Keep the reverse stream open for replies.
 func relay(a, b net.Conn) {
 	errc := make(chan error, 2)
 	go func() { errc <- copyAndCloseWrite(a, b) }()
 	go func() { errc <- copyAndCloseWrite(b, a) }()
 
-	<-errc
-	now := time.Now()
-	_ = a.SetDeadline(now)
-	_ = b.SetDeadline(now)
+	if err := <-errc; err != nil {
+		_ = a.Close()
+		_ = b.Close()
+	}
 	<-errc
 }
 
 func copyAndCloseWrite(dst, src net.Conn) error {
-	_, err := io.Copy(dst, src)
-	type closeWriter interface {
-		CloseWrite() error
+	if _, err := io.Copy(dst, src); err != nil {
+		return err
 	}
-	if cw, ok := dst.(closeWriter); ok {
-		_ = cw.CloseWrite()
+	return closeWrite(dst)
+}
+
+func closeWrite(conn net.Conn) error {
+	if cw, ok := conn.(interface{ CloseWrite() error }); ok {
+		return cw.CloseWrite()
 	}
-	return err
+	return errors.ErrUnsupported
 }
