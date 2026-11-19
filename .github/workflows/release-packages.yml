@@ -43,7 +43,7 @@ jobs:
             apt_packages: gcc-aarch64-linux-gnu
             cross_compile: aarch64-linux-gnu-
           - target: linux-armv7
-            package_arch: armv7
+            package_arch: arm7
             apt_packages: gcc-arm-linux-gnueabihf
             cross_compile: arm-linux-gnueabihf-
           - target: linux-386
