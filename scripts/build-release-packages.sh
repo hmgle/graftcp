@@ -21,18 +21,24 @@ else
 fi
 
 binary="local/graftcp"
-elf_description="$(file -b "$binary")"
+elf_header="$(LC_ALL=C readelf -h "$binary")"
+elf_class="$(sed -n 's/^[[:space:]]*Class:[[:space:]]*//p' <<< "$elf_header")"
+elf_machine="$(sed -n 's/^[[:space:]]*Machine:[[:space:]]*//p' <<< "$elf_header")"
 case "$target" in
 	linux-amd64)
-		expected_machine='x86-64'
+		expected_class='ELF64'
+		expected_machine='Advanced Micro Devices X86-64'
 		;;
 	linux-arm64)
-		expected_machine='ARM aarch64'
+		expected_class='ELF64'
+		expected_machine='AArch64'
 		;;
 	linux-armv7)
+		expected_class='ELF32'
 		expected_machine='ARM'
 		;;
 	linux-386)
+		expected_class='ELF32'
 		expected_machine='Intel 80386'
 		;;
 	*)
@@ -40,8 +46,8 @@ case "$target" in
 		exit 1
 		;;
 esac
-if [[ "$elf_description" != *"$expected_machine"* ]]; then
-	echo "built $target package contains an unexpected binary: $elf_description" >&2
+if [[ "$elf_class" != "$expected_class" || "$elf_machine" != "$expected_machine" ]]; then
+	echo "built $target package contains an unexpected binary: $elf_class $elf_machine" >&2
 	exit 1
 fi
 

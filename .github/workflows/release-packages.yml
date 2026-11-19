@@ -66,7 +66,7 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y make file "${{ matrix.apt_packages }}"
+          sudo apt-get install -y make binutils "${{ matrix.apt_packages }}"
           go install "github.com/goreleaser/nfpm/v2/cmd/nfpm@${NFPM_VERSION}"
 
       - name: Build packages

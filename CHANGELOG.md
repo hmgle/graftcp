@@ -32,6 +32,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   linked C inputs change. Use the Go version from `local/go.mod` for release
   builds.
 - Label ARMv7 release packages `armhf` for Debian and `armv7hl` for RPM.
+- Validate release binaries using their ELF headers so valid 386 builds pass
+  on hosts that describe them as `Intel i386`.
 
 ## [v0.8.3] - 2026-07-15
 
