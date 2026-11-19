@@ -59,7 +59,7 @@ func clientTrace() int {
 	return int(C.client_trace())
 }
 
-var version = "v0.7"
+var version = "v0.9.0"
 
 var cfg = defaultConfig()
 

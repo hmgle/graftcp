@@ -18,7 +18,12 @@ Compared with `tsocks`, `proxychains`, or `proxychains-ng`, this still does not 
 
 ## Installation
 
-`graftcp` runs on Linux. Building it requires Go and a C toolchain.
+Download `.deb`, `.rpm`, or `.tar.gz` packages for Linux `amd64`, `arm64`,
+`armv7`, and `386`, along with `SHA256SUMS`, from the
+[latest GitHub release](https://github.com/hmgle/graftcp/releases/latest).
+
+Building from source requires Linux, the Go version specified in
+[`local/go.mod`](./local/go.mod), and a C toolchain.
 
 ```sh
 git clone https://github.com/hmgle/graftcp.git

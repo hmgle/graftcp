@@ -36,7 +36,7 @@
 #include "cidr-trie.h"
 
 #ifndef VERSION
-#define VERSION "v0.7"
+#define VERSION "v0.9.0"
 #endif
 
 #ifdef SYS_close_range

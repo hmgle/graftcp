@@ -6,14 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [v0.9.0] - 2026-11-19
+
 ### Fixed
 
-- Install the implicit SOCKS5 fallback `127.0.0.1:1080` only when no proxy at
-  all is configured. Previously configuring only `--http_proxy` still created
-  a SOCKS5 dialer pointing at the default address, which `auto` and `random`
-  mode could pick, and `only_socks5` validation silently passed. With only an
-  HTTP proxy configured, `only_socks5` now fails startup validation instead of
-  using the unintended endpoint. Supersedes the SOCKS5-fallback half of #93.
+- Use the default SOCKS5 endpoint `127.0.0.1:1080` only when neither SOCKS5 nor
+  HTTP is configured. With only an HTTP proxy configured, `auto` and `random`
+  skip SOCKS5, and `only_socks5` reports a configuration error at startup.
+  Supersedes the SOCKS5-fallback half of #93.
+- Preserve responses after a TCP half-close so servers can reply to requests
+  delimited by EOF.
+- Handle informational HTTP CONNECT responses and preserve tunnel bytes that
+  arrive with the final response. Bound the TCP proxy dial and handshake with
+  a single deadline so a stalled proxy can trigger fallback in `auto` mode.
+- Retain routes for connected and corked UDP sockets across idle cleanup.
+  Failed UDP connects leave existing routes usable. Keep stale cleanup from
+  closing replacement sessions and block new sessions during shutdown.
+- Follow Linux file descriptor sharing and close-on-exec behavior across clone,
+  unshare, exec, and `FIOCLEX` / `FIONCLEX` calls so UDP routes remain available
+  through live descriptors.
+- Require ptrace setup before running the target, reconcile child stops that
+  arrive before their creation events, and preserve the root command's exit
+  status when another traced task disappears.
+- Rebuild C objects and invalidate the cgo cache when compilation settings or
+  linked C inputs change. Use the Go version from `local/go.mod` for release
+  builds.
 
 ## [v0.8.3] - 2026-07-15
 
@@ -90,3 +107,6 @@ graftcp --socks5 127.0.0.1:1080 curl https://example.com
 ```sh
 graftcp --enable-debug-log ... 2>>/var/log/graftcp.log
 ```
+
+[Unreleased]: https://github.com/hmgle/graftcp/compare/v0.9.0...HEAD
+[v0.9.0]: https://github.com/hmgle/graftcp/compare/v0.8.3...v0.9.0

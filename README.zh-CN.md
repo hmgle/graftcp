@@ -18,7 +18,11 @@
 
 ## 安装
 
-`graftcp` 仅支持 Linux。构建需要 Go 和 C 工具链。
+Linux `amd64`、`arm64`、`armv7` 和 `386` 的 `.deb`、`.rpm` 和 `.tar.gz`
+安装包及 `SHA256SUMS` 校验文件可在
+[GitHub 最新版本页面](https://github.com/hmgle/graftcp/releases/latest)下载。
+
+从源码构建需要 Linux、[`local/go.mod`](./local/go.mod) 中指定版本的 Go 和 C 工具链。
 
 ```sh
 git clone https://github.com/hmgle/graftcp.git
