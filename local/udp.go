@@ -408,9 +408,7 @@ func (f *directUDPForwarder) readLoop() {
 			}
 			return
 		}
-		payload := make([]byte, n)
-		copy(payload, buf[:n])
-		if err := f.proxy.sendToClient(payload, f.tokenIP, f.clientAddr); err != nil {
+		if err := f.proxy.sendToClient(buf[:n], f.tokenIP, f.clientAddr); err != nil {
 			log.Errorf("UDP proxy response write to %s err: %s", f.clientAddr.String(), err.Error())
 			return
 		}

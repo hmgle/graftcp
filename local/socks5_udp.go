@@ -359,6 +359,7 @@ func encodeSocks5UDPDatagram(dest *net.UDPAddr, payload []byte) ([]byte, error) 
 	return buf.Bytes(), nil
 }
 
+// The returned payload shares the packet's backing array.
 func parseSocks5UDPDatagram(packet []byte) ([]byte, error) {
 	if len(packet) < 4 {
 		return nil, fmt.Errorf("short SOCKS5 UDP datagram")
@@ -387,9 +388,7 @@ func parseSocks5UDPDatagram(packet []byte) ([]byte, error) {
 	if len(packet) < offset {
 		return nil, fmt.Errorf("short SOCKS5 UDP address header")
 	}
-	payload := make([]byte, len(packet)-offset)
-	copy(payload, packet[offset:])
-	return payload, nil
+	return packet[offset:], nil
 }
 
 func isClosedNetworkError(err error) bool {
