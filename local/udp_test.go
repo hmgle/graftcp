@@ -222,7 +222,7 @@ func TestUDPProxyOldWriteFailureKeepsReplacement(t *testing.T) {
 	tokenIP := tokenToIP(token)
 	clientAddr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 12345}
 	destAddr := "127.0.0.1:9999"
-	key := udpSessionKey(clientAddr, tokenIP, destAddr)
+	key := makeUDPSessionKey(clientAddr, tokenIP, destAddr)
 	oldForwarder := &failingUDPWrite{started: make(chan struct{}), release: make(chan struct{})}
 	releaseWrite := sync.OnceFunc(func() { close(oldForwarder.release) })
 	defer releaseWrite()
@@ -322,5 +322,16 @@ func TestUDPProxyUsesNewSessionWhenTokenIsReassigned(t *testing.T) {
 	}
 	if second == first {
 		t.Fatal("reassigned token reused a forwarder for the old destination")
+	}
+}
+
+func TestUDPSessionKeyNormalizesIPv4(t *testing.T) {
+	client := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 12345}
+	token := tokenToIP(loopbackStartToken)
+	const dest = "127.0.0.1:9999"
+	mapped := makeUDPSessionKey(client, token, dest)
+	client.IP = client.IP.To4()
+	if makeUDPSessionKey(client, token, dest) != mapped {
+		t.Fatal("IPv4 representations produced different session keys")
 	}
 }

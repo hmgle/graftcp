@@ -119,10 +119,10 @@ func (p *DNSProxy) serve(conn *net.UDPConn) {
 		if n == 0 {
 			continue
 		}
-		query := make([]byte, n)
-		copy(query, buf[:n])
 		select {
 		case p.packetSem <- struct{}{}:
+			query := make([]byte, n)
+			copy(query, buf[:n])
 			go func() {
 				defer func() { <-p.packetSem }()
 				p.handle(conn, addr, query)

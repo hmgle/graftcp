@@ -150,17 +150,18 @@ bool socket_may_cork(struct proc_info *pinfp, int fd)
 	       pinfp->files->sockets[idx].udp->may_cork;
 }
 
+static void untrack_socket_at(struct socket_table *files, unsigned int idx)
+{
+	release_udp_socket_state(files->sockets[idx].udp);
+	files->sockets[idx] = files->sockets[--files->count];
+}
+
 void untrack_socket_fd(struct proc_info *pinfp, int fd)
 {
-	int idx;
+	int idx = find_tracked_socket_fd(pinfp, fd);
 
-	idx = find_tracked_socket_fd(pinfp, fd);
-	if (idx < 0)
-		return;
-
-	release_udp_socket_state(pinfp->files->sockets[idx].udp);
-	pinfp->files->sockets[idx] =
-		pinfp->files->sockets[--pinfp->files->count];
+	if (idx >= 0)
+		untrack_socket_at(pinfp->files, idx);
 }
 
 static void release_socket_table(struct socket_table *files)
@@ -251,7 +252,7 @@ void close_tracked_range(struct proc_info *p, unsigned int first,
 			sock->type |= SOCK_CLOEXEC;
 			++i;
 		} else {
-			untrack_socket_fd(p, sock->fd);
+			untrack_socket_at(p->files, i);
 		}
 	}
 }
@@ -262,7 +263,7 @@ void close_exec_sockets(struct proc_info *p)
 
 	while (i < p->files->count) {
 		if (p->files->sockets[i].type & SOCK_CLOEXEC)
-			untrack_socket_fd(p, p->files->sockets[i].fd);
+			untrack_socket_at(p->files, i);
 		else
 			++i;
 	}
