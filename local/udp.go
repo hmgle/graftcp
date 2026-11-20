@@ -160,12 +160,12 @@ func (p *UDPProxy) serve() {
 				tokenIP.String(), clientAddr.String())
 			continue
 		}
-		payload := make([]byte, n)
-		copy(payload, buf[:n])
-		clientAddr = cloneUDPAddr(clientAddr)
-		tokenIP = cloneIP(tokenIP)
 		select {
 		case p.packetSem <- struct{}{}:
+			payload := make([]byte, n)
+			copy(payload, buf[:n])
+			clientAddr = cloneUDPAddr(clientAddr)
+			tokenIP = cloneIP(tokenIP)
 			go func() {
 				defer func() { <-p.packetSem }()
 				p.handlePacket(clientAddr, tokenIP, payload)
