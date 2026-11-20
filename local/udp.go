@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -23,8 +24,15 @@ type udpForwarder interface {
 	Close() error
 }
 
+type udpSessionKey struct {
+	client netip.AddrPort
+	token  uint32
+	// The registry can reuse an expired token for another destination.
+	destAddr string
+}
+
 type udpSession struct {
-	key        string
+	key        udpSessionKey
 	clientAddr *net.UDPAddr
 	tokenIP    net.IP
 	destAddr   string
@@ -44,7 +52,7 @@ type UDPProxy struct {
 	startOnce sync.Once
 	closeOnce sync.Once
 	mu        sync.Mutex
-	sessions  map[string]*udpSession
+	sessions  map[udpSessionKey]*udpSession
 	closed    chan struct{}
 	packetSem chan struct{}
 }
@@ -64,7 +72,7 @@ func (l *Local) ListenUDPProxy() (*UDPProxy, int, error) {
 		local:      l,
 		conn:       udp4,
 		packetConn: packetConn,
-		sessions:   make(map[string]*udpSession),
+		sessions:   make(map[udpSessionKey]*udpSession),
 		closed:     make(chan struct{}),
 		packetSem:  make(chan struct{}, udpPacketConcurrency),
 	}
@@ -203,7 +211,7 @@ func (p *UDPProxy) handlePacket(clientAddr *net.UDPAddr, tokenIP net.IP, payload
 }
 
 func (p *UDPProxy) getSession(clientAddr *net.UDPAddr, tokenIP net.IP, destAddr string) (*udpSession, error) {
-	key := udpSessionKey(clientAddr, tokenIP, destAddr)
+	key := makeUDPSessionKey(clientAddr, tokenIP, destAddr)
 	now := time.Now()
 
 	p.mu.Lock()
@@ -409,9 +417,14 @@ func (f *directUDPForwarder) readLoop() {
 	}
 }
 
-// The destination can change when the registry reuses an expired token.
-func udpSessionKey(clientAddr *net.UDPAddr, tokenIP net.IP, destAddr string) string {
-	return clientAddr.String() + "|" + tokenIP.String() + "|" + destAddr
+func makeUDPSessionKey(clientAddr *net.UDPAddr, tokenIP net.IP, destAddr string) udpSessionKey {
+	client := clientAddr.AddrPort()
+	token, _ := ipToToken(tokenIP)
+	return udpSessionKey{
+		client:   netip.AddrPortFrom(client.Addr().Unmap(), client.Port()),
+		token:    token,
+		destAddr: destAddr,
+	}
 }
 
 func isManagedLoopbackToken(ip net.IP) bool {
